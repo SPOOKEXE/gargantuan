@@ -40,10 +40,12 @@ namespace gargantuan {
 
 	SDL_GPUShader *
 	FileShader::CompileFile(SDL_GPUDevice *gpu, std::filesystem::path filepath, SDL_GPUShaderCreateInfo info) {
+		std::string path = filepath.string();
+
 		size_t codeSize;
-		void *code = SDL_LoadFile(filepath.c_str(), &codeSize);
+		void *code = SDL_LoadFile(path.c_str(), &codeSize);
 		if (code == nullptr) {
-			SDL_Log("Failed to open shader file %s", filepath.c_str());
+			SDL_Log("Failed to open shader file %s", path.c_str());
 			return nullptr;
 		}
 
@@ -54,7 +56,7 @@ namespace gargantuan {
 		SDL_free(code);
 
 		if (shader == nullptr) {
-			SDL_Log("Failed to create shader file %s: %s", filepath.c_str(), SDL_GetError());
+			SDL_Log("Failed to create shader file %s: %s", path.c_str(), SDL_GetError());
 			return nullptr;
 		};
 
@@ -67,7 +69,7 @@ namespace gargantuan {
 		GetShaderFormat(gpu, format, extension, entrypoint);
 
 		if (!VertexShader) {
-			std::string filepath = std::string(VertexFilepath) + extension;
+			std::string filepath = VertexFilepath.string() + extension;
 			VertexShader = CompileFile(
 				gpu,
 				filepath.c_str(),
@@ -84,7 +86,7 @@ namespace gargantuan {
 		}
 
 		if (!FragmentShader) {
-			std::string filepath = std::string(FragmentFilepath) + extension;
+			std::string filepath = FragmentFilepath.string() + extension;
 			FragmentShader = CompileFile(
 				gpu,
 				filepath,

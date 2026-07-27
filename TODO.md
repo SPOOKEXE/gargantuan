@@ -24,7 +24,7 @@
 - [ ] InstanceHandle
 - [ ] UDim
 - [ ] UDim2
-- [ ] Random
+- [x] Random
 - [ ] PhysicalProperties
 - [x] Signal
 - [x] SignalConnection
@@ -41,7 +41,7 @@
 - [ ] InstanceHandle
 - [ ] UDim
 - [ ] UDim2
-- [ ] Random
+- [x] Random
 - [ ] PhysicalProperties
 - [x] Signal
 - [x] SignalConnection

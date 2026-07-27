@@ -1,5 +1,6 @@
 #include "gargantuan/ClassRegistry.hpp"
 #include "gargantuan/classes/BasePart.hpp"
+#include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/classes/DataModel.hpp"
 #include "gargantuan/classes/Part.hpp"
 #include "gargantuan/classes/ServiceProvider.hpp"
@@ -21,6 +22,7 @@ namespace gargantuan::ClassRegistry {
 	std::unordered_map<std::type_index, Instance::ClassDefinition> &GetDefinitionsMap() {
 		static auto *CLASS_DEFINITIONS = new std::unordered_map<std::type_index, Instance::ClassDefinition>{
 			USE_INSTANCE_DEFINITION(BasePart),
+			USE_INSTANCE_DEFINITION(Camera),
 			USE_INSTANCE_DEFINITION(DataModel),
 			USE_INSTANCE_DEFINITION(Instance),
 			USE_INSTANCE_DEFINITION(Part),

@@ -9,6 +9,7 @@ namespace gargantuan {
 		Enum,
 		Enums,
 		EnumItem,
+		Random,
 		Signal,
 		SignalConnection,
 		Vector2,

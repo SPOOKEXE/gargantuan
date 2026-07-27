@@ -3,6 +3,7 @@
 #include "gargantuan/datatypes/Color3.hpp"
 #include "gargantuan/datatypes/Enum.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
+#include "gargantuan/datatypes/Random.hpp"
 #include "gargantuan/datatypes/Signal.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
 #include "gargantuan/scripting/ThreadEngine.hpp"
@@ -73,6 +74,7 @@ namespace gargantuan {
 		{"Color3", OpenLibColor3},
 		{"Enum", OpenLibEnum},
 		{"Instance", OpenLibInstance},
+		{"Random", OpenLibRandom},
 		{"Vector2", OpenLibVector2},
 		{"Vector3", OpenLibVector3},
 
@@ -82,6 +84,7 @@ namespace gargantuan {
 	static int LuauAssertHandler(const char *expression, const char *file, int line, const char *function) {
 		SDL_Log("Luau assertion failed:\n\tExpression: %s\n\tIn: %s:%d in %s", expression, file, line, function);
 		assert(false);
+		return 1;
 	}
 
 	ScriptEngine::ScriptEngine() : L(luaL_newstate()), ThreadEngine(L) {
@@ -100,6 +103,7 @@ namespace gargantuan {
 		Enum::CreateUserdataMetatable(L);
 		EnumItem::CreateUserdataMetatable(L);
 		Instance::CreateUserdataMetatable(L);
+		Random::CreateUserdataMetatable(L);
 		SignalConnection::CreateUserdataMetatable(L);
 		Vector2::CreateUserdataMetatable(L);
 

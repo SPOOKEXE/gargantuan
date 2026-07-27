@@ -7,14 +7,14 @@ layout(location = 3) in vec4 ShadowPosition;
 
 layout(location = 0) out vec4 OutputColor;
 
-layout(set = 0, binding = 0) uniform WorldUniforms {
+layout(set = 3, binding = 0) uniform WorldUniforms {
     mat4 ViewMatrix;
     mat4 ProjectionMatrix;
     mat4 ShadowBiasMatrix;
     vec3 LightDirection;
 } world;
 
-layout(set = 0, binding = 0) uniform sampler2DShadow ShadowMap;
+layout(set = 2, binding = 0) uniform sampler2DShadow ShadowMap;
 
 float SHADOW_SPREAD = 2.0;
 vec2 SHADOW_TEXEL_SIZE = vec2(1.0 / 2048.0);

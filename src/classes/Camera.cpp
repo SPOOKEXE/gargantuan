@@ -100,7 +100,8 @@ namespace gargantuan {
 			AccumulatedDeltaX = 0.0f;
 			AccumulatedDeltaY = 0.0f;
 
-			auto rotation = CFrame::Angles(glm::radians(Pitch), glm::radians(Yaw), 0.0f);
+			auto rotation = CFrame::Angles(0.0f, glm::radians(-Yaw), 0.0f) *
+							CFrame::Angles(glm::radians(-Pitch), 0.0f, 0.0f);
 			CFrame = gargantuan::CFrame(CFrame.Position, rotation.Rotation);
 		}
 

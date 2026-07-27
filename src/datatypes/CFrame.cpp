@@ -140,13 +140,13 @@ namespace gargantuan {
 		: Position(x, y, z), Rotation(r00, r01, r02, r10, r11, r12, r20, r21, r22) {};
 
 	glm::vec3 CFrame::GetRightVector() {
-		return {Rotation[0][0], Rotation[1][0], Rotation[2][0]};
+		return Rotation[0];
 	}
 	glm::vec3 CFrame::GetUpVector() {
-		return {Rotation[0][1], Rotation[1][1], Rotation[2][1]};
+		return Rotation[1];
 	}
 	glm::vec3 CFrame::GetLookVector() {
-		return {-Rotation[0][2], -Rotation[1][2], -Rotation[2][2]};
+		return -Rotation[2];
 	}
 
 	CFrame CFrame::Angles(float x, float y, float z) {
@@ -205,8 +205,11 @@ namespace gargantuan {
 			Position.z + (goal.Position.z - Position.z) * alpha,
 		};
 
-		auto [x0, y0, z0, w0] = ToQuaternion();
-		auto [x1, y1, z1, w1] = goal.ToQuaternion();
+		auto q0 = ToQuaternion();
+		auto q1 = goal.ToQuaternion();
+
+		auto x0 = q0.x, y0 = q0.y, z0 = q0.z, w0 = q0.w;
+		auto x1 = q1.x, y1 = q1.y, z1 = q1.z, w1 = q1.w;
 
 		auto dot = x0 * x1 + y0 * y1 + z0 * z1 + w0 * w1;
 

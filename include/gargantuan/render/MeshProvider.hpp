@@ -2,6 +2,7 @@
 
 #include "gargantuan/render/GpuMesh.hpp"
 
+#include <memory>
 #include <string>
 
 namespace gargantuan::MeshProvider {

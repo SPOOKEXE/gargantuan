@@ -112,7 +112,10 @@ namespace gargantuan {
 
 		if (!frameContext.Commands || !frameContext.SwapchainTexture || !frameContext.DepthTexture ||
 			!frameContext.ShadowMapTexture) {
-			SDL_Log("i got nothing bruh");
+			SDL_Log("i got nothing bruh </3");
+			if (frameContext.Commands) {
+				SDL_CancelGPUCommandBuffer(frameContext.Commands);
+			};
 			return;
 		}
 

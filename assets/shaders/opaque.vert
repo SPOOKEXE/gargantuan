@@ -4,14 +4,14 @@ layout(location = 0) in vec3 VertexPosition;
 layout(location = 1) in vec3 VertexNormal;
 layout(location = 2) in vec2 VertexUV;
 
-layout(set = 0, binding = 0) uniform WorldUniforms {
+layout(set = 1, binding = 0) uniform WorldUniforms {
     mat4 ViewMatrix;
     mat4 ProjectionMatrix;
     mat4 ShadowBiasMatrix;
     vec4 LightDirection;
 } world;
 
-layout(set = 0, binding = 1) uniform PartUniforms {
+layout(set = 1, binding = 1) uniform PartUniforms {
     mat4 ModelMatrix;
     vec4 Color;
 } part;
