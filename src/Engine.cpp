@@ -69,6 +69,9 @@ namespace gargantuan {
 		auto tweenService = this->DataModel->GetService("TweenService");
 		this->TweenService = std::dynamic_pointer_cast<gargantuan::TweenService>(tweenService);
 
+		auto renderSettings = this->DataModel->GetService("RenderSettings");
+		this->RenderSettings = std::dynamic_pointer_cast<gargantuan::RenderSettings>(renderSettings);
+
 		StackValue<Instance::Pointer>::Push(ScriptEngine->L, this->DataModel);
 		lua_pushvalue(ScriptEngine->L, -1);
 		lua_setglobal(ScriptEngine->L, "game");
@@ -104,7 +107,7 @@ namespace gargantuan {
 			return;
 		}
 
-		CurrentTick = SDL_GetTicks();
+		CurrentTick = SDL_GetTicksNS();
 		if (LastTick == 0) {
 			LastTick = CurrentTick;
 		}
@@ -131,10 +134,10 @@ namespace gargantuan {
 		TweenService->Step(deltaTime);
 		MeshProvider::UploadToGpu(Gpu);
 
-		// Paces this frame against the GPU before any of it is submitted. A
-		// scene with offscreen cameras submits several command buffers a frame
-		// and none of them is waited on anywhere else.
-		RenderProvider->BeginFrame();
+		// Paces this frame against the GPU before any of it is submitted.
+		// Nothing else in a frame waits, so without this the backlog of
+		// submitted-but-unfinished work grows without bound.
+		RenderProvider->BeginFrame(RenderSettings->GetFramesInFlight());
 
 		auto worldRoot = std::static_pointer_cast<WorldRoot>(Workspace);
 		auto lightDirection = Lighting->GetSunDirection();
@@ -197,18 +200,44 @@ namespace gargantuan {
 		// Sorted so a camera reading another's target sees this frame's picture.
 		// Enabled decides whether a camera renders on its own; one that another
 		// camera samples is drawn regardless, or that camera would be wrong.
+		// A camera feeding a texture rarely needs to be as current as the view
+		// the player is looking at, so it redraws at its own rate. Skipping
+		// leaves the last picture in its target, which is what a reader samples
+		// and what a slow security feed should look like anyway.
+		double now = Workspace->DistributedGameTime;
+		float maximumCameraFps = RenderSettings->GetMaxCameraFPS();
+
+		std::vector<DrawContext> offscreenCameras;
 		for (Camera *camera : RenderProvider->GetRenderOrder(offscreenRoots)) {
 			auto owned = camera->weak_from_this().lock();
 			if (!owned) {
 				continue;
 			}
 
-			RenderProvider->DrawOffscreen({
+			double interval = camera->GetRenderInterval(maximumCameraFps);
+
+			// On demand: nothing here draws it. Camera:Render() still draws it
+			// and everything it samples, which is the point of the mode.
+			if (interval < 0.0) {
+				continue;
+			}
+
+			// A camera that has never drawn always draws, or its target would
+			// be blank until the first interval elapsed
+			if (interval > 0.0 && camera->LastOffscreenDraw >= 0.0 &&
+				now - camera->LastOffscreenDraw < interval) {
+				continue;
+			}
+			camera->LastOffscreenDraw = now;
+
+			offscreenCameras.push_back({
 				.WorldRoot = worldRoot,
 				.Camera = std::static_pointer_cast<Camera>(owned),
 				.LightDirection = lightDirection,
 			});
 		}
+		// One command buffer for the lot, still in dependency order
+		RenderProvider->DrawOffscreen(offscreenCameras);
 
 		if (windowCameras.size() == 1) {
 			// One camera filling the window is the common case and can draw

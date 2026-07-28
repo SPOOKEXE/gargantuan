@@ -74,11 +74,8 @@ eyes. What is missing is the runtime that drives them.
 
 ## Render
 
-- [ ] Batch the offscreen cameras into one command buffer a frame. Each one
-      takes and submits its own today, which is a submission per camera per
-      frame; the frame is paced by a fence either way, so this is speed, not
-      correctness
-- [ ] Cap the frames in flight from a setting rather than the constant 2
+- [ ] Skip a camera's redraw when nothing it can see has moved, so a still
+      scene costs nothing even at a high Camera.FPS
 - [ ] Textures
 - [ ] Lighting service
 - [ ] PBR

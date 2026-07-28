@@ -25,6 +25,22 @@ namespace gargantuan {
 			G_UD_READWRITE_PROP(Camera, CFrame, gargantuan::CFrame),
 			G_UD_READWRITE_PROP(Camera, Enabled, bool),
 			G_UD_READWRITE_PROP(Camera, Antialiasing, bool),
+			{
+				// Hand-written so a negative rate is normalised to exactly -1;
+				// they all mean on demand and should read back the same
+				"FPS",
+				{
+					[](lua_State *L, Instance *instance) -> int {
+						StackValue<float>::Push(L, instance->Cast<Camera>()->GetFPS());
+						return 1;
+					},
+					[](lua_State *L, Instance *instance) -> int {
+						instance->Cast<Camera>()->SetFPS(CheckStackValue<float>(L, -1));
+						return 0;
+					},
+					G_UD_REFLECT_TYPE(float),
+				},
+			},
 			G_UD_READWRITE_PROP(Camera, DrawToWindow, bool),
 			G_UD_READWRITE_PROP(Camera, WindowPosition, UDim2),
 			G_UD_READWRITE_PROP(Camera, WindowSize, UDim2),
@@ -232,6 +248,39 @@ namespace gargantuan {
 
 		// The thread resumes with the EditableImage once the download lands
 		return lua_yield(L, 0);
+	}
+
+	float Camera::GetFPS() const {
+		return FPS;
+	}
+
+	void Camera::SetFPS(float framesPerSecond) {
+		// NaN fails every comparison, so it would slip through untouched and
+		// make the interval NaN, which no comparison would ever satisfy
+		if (!(framesPerSecond == framesPerSecond)) {
+			framesPerSecond = DEFAULT_FPS;
+		}
+
+		// Every negative rate means on demand, so they all read back as -1
+		FPS = framesPerSecond < 0.0f ? ON_DEMAND_FPS : framesPerSecond;
+	}
+
+	bool Camera::IsOnDemand() const {
+		return FPS < 0.0f;
+	}
+
+	double Camera::GetRenderInterval(float maximumFps) const {
+		if (IsOnDemand()) {
+			return -1.0;
+		}
+		if (FPS <= 0.0f) {
+			return 0.0;
+		}
+
+		// The ceiling only ever lowers a rate; a camera asking for less than
+		// the limit keeps what it asked for
+		float effective = maximumFps > 0.0f ? glm::min(FPS, maximumFps) : FPS;
+		return 1.0 / (double)effective;
 	}
 
 	float Camera::GetAspectRatio() {

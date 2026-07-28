@@ -88,6 +88,40 @@ namespace gargantuan {
 		// It leaves flat areas exactly as they were and only softens edges.
 		bool Antialiasing = true;
 
+		// How often this camera redraws its own offscreen target. A camera
+		// drawing to the window ignores it and draws every frame; this is for
+		// the ones feeding textures -- security monitors, mirrors, the picture
+		// on a part's surface -- which rarely need to be as current as the view
+		// the player is looking at.
+		//
+		//   -1  on demand: the engine never draws it, only Camera:Render()
+		//    0  no limit, every frame, as it behaved before this existed
+		//   >0  that many times a second
+		//
+		// RenderSettings.MaxCameraFPS caps whatever is asked for here, so one
+		// camera cannot opt the whole scene into more work than the engine
+		// allows. On demand is not free of consequence: until the first
+		// Render() the target is blank, so anything sampling it live sees
+		// black. A Render() still draws whatever the camera samples.
+		static constexpr float ON_DEMAND_FPS = -1.0f;
+		static constexpr float DEFAULT_FPS = 24.0f;
+
+		float FPS = DEFAULT_FPS;
+
+		float GetFPS() const;
+		void SetFPS(float framesPerSecond);
+		// True when nothing but an explicit Camera:Render() draws this camera
+		bool IsOnDemand() const;
+		// Seconds this camera must wait between redraws, under the engine-wide
+		// ceiling. Negative when on demand, zero when uncapped.
+		double GetRenderInterval(float maximumFps) const;
+
+		// DistributedGameTime when this camera last redrew its offscreen
+		// target, for FPS to throttle against. Negative until it has drawn
+		// once, so the first frame is never skipped. Not scriptable; it is
+		// bookkeeping, not a property.
+		double LastOffscreenDraw = -1.0;
+
 		void AddShader(std::shared_ptr<ShaderScript> shader);
 		void RemoveShader(std::shared_ptr<ShaderScript> shader);
 		// RemoveShader() drops the last one, RemoveShader(n) the nth counting

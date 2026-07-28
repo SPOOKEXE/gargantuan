@@ -4,6 +4,7 @@
 #include "gargantuan/render/RenderProvider.hpp"
 #include "gargantuan/scripting/ScriptEngine.hpp"
 #include "gargantuan/services/Lighting.hpp"
+#include "gargantuan/services/RenderSettings.hpp"
 #include "gargantuan/services/RunService.hpp"
 #include "gargantuan/services/TweenService.hpp"
 #include "gargantuan/services/UserInputService.hpp"
@@ -28,6 +29,7 @@ namespace gargantuan {
 		std::shared_ptr<RunService> RunService = nullptr;
 		std::shared_ptr<TweenService> TweenService = nullptr;
 		std::shared_ptr<UserInputService> UserInputService = nullptr;
+		std::shared_ptr<RenderSettings> RenderSettings = nullptr;
 
 		SDL_Window *Window;
 		SDL_GPUDevice *Gpu;
@@ -37,8 +39,13 @@ namespace gargantuan {
 		Engine();
 		~Engine();
 
+		// Nanoseconds, so the step is not quantised to a whole millisecond.
+		// It used to be: at a high frame rate most frames measured zero and
+		// DistributedGameTime advanced in 1 ms jumps, which rounded every
+		// camera interval up to the next millisecond -- asking for 240 fps got
+		// 200, because 4.17 ms became 5.
 		float GetDeltaTime() {
-			return (CurrentTick - LastTick) / 1000.0f;
+			return (float)((double)(CurrentTick - LastTick) / 1000000000.0);
 		};
 		void ProcessEvent(SDL_Event event);
 		void Step();

@@ -89,8 +89,11 @@ namespace gargantuan {
 		fences.clear();
 	}
 
-	void RenderProvider::BeginFrame() {
-		while (FramesInFlight.size() >= MAXIMUM_FRAMES_IN_FLIGHT) {
+	void RenderProvider::BeginFrame(int maximumFramesInFlight) {
+		// Zero would mean nothing is ever waited on, which is the unbounded
+		// backlog this whole mechanism exists to stop
+		size_t maximum = (size_t)glm::max(maximumFramesInFlight, 1);
+		while (FramesInFlight.size() >= maximum) {
 			RetireFrame(FramesInFlight.front());
 			FramesInFlight.pop_front();
 		}
@@ -1260,10 +1263,24 @@ namespace gargantuan {
 		SubmitTracked(commands);
 	}
 
-	void RenderProvider::DrawOffscreen(DrawContext drawContext) {
+	bool RenderProvider::RecordOffscreenCamera(SDL_GPUCommandBuffer *commands, DrawContext &drawContext) {
 		auto *camera = drawContext.Camera.get();
 		CameraTarget *target = AcquireCameraTarget(camera, camera && (!camera->Shaders.empty() || camera->Antialiasing));
 		if (!target) {
+			return false;
+		}
+
+		if (!RecordCameraPasses(commands, drawContext, *target)) {
+			return false;
+		}
+
+		RecordShaderChain(commands, camera, *target);
+		RecordHistoryCopy(commands, camera, *target);
+		return true;
+	}
+
+	void RenderProvider::DrawOffscreen(const std::vector<DrawContext> &cameras) {
+		if (cameras.empty()) {
 			return;
 		}
 
@@ -1273,13 +1290,19 @@ namespace gargantuan {
 			return;
 		}
 
-		if (!RecordCameraPasses(commands, drawContext, *target)) {
+		// A camera that cannot be recorded is skipped rather than sinking the
+		// whole batch; the others have nothing to do with its failure
+		bool recorded = false;
+		for (const auto &drawContext : cameras) {
+			DrawContext copy = drawContext;
+			recorded |= RecordOffscreenCamera(commands, copy);
+		}
+
+		if (!recorded) {
 			SDL_CancelGPUCommandBuffer(commands);
 			return;
 		}
 
-		RecordShaderChain(commands, camera, *target);
-		RecordHistoryCopy(commands, camera, *target);
 		SubmitTracked(commands);
 	}
 
@@ -1287,8 +1310,9 @@ namespace gargantuan {
 		auto *camera = drawContext.Camera.get();
 
 		// Anything this camera samples has to be drawn first, or it would read
-		// whatever was in that target from a previous frame. Submissions run in
-		// order, so drawing them now is enough.
+		// whatever was in that target from a previous frame. They go into the
+		// same command buffer as the readback, ahead of it, so recording order
+		// is what puts them first.
 		std::vector<Camera *> roots{camera};
 
 		// A part showing another camera on its surface is a dependency too,
@@ -1301,6 +1325,7 @@ namespace gargantuan {
 			}
 		}
 
+		std::vector<DrawContext> dependencies;
 		for (Camera *dependency : GetRenderOrder(roots)) {
 			if (dependency == camera) {
 				continue;
@@ -1311,12 +1336,13 @@ namespace gargantuan {
 				continue;
 			}
 
-			DrawOffscreen({
+			dependencies.push_back({
 				.WorldRoot = drawContext.WorldRoot,
 				.Camera = std::static_pointer_cast<Camera>(owned),
 				.LightDirection = drawContext.LightDirection,
 			});
 		}
+
 		CameraTarget *target = AcquireCameraTarget(camera, camera && (!camera->Shaders.empty() || camera->Antialiasing));
 		if (!target || !threadEngine) {
 			return false;
@@ -1340,6 +1366,12 @@ namespace gargantuan {
 		if (!commands) {
 			SDL_ReleaseGPUTransferBuffer(Gpu, transferBuffer);
 			return false;
+		}
+
+		// Ahead of this camera in the same command buffer, so their targets
+		// hold this frame's picture by the time the shader chain samples them
+		for (auto &dependency : dependencies) {
+			RecordOffscreenCamera(commands, dependency);
 		}
 
 		if (!RecordCameraPasses(commands, drawContext, *target)) {

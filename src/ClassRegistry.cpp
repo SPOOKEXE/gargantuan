@@ -14,6 +14,7 @@
 #include "gargantuan/classes/WorldRoot.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/services/Lighting.hpp"
+#include "gargantuan/services/RenderSettings.hpp"
 #include "gargantuan/services/RunService.hpp"
 #include "gargantuan/services/TweenService.hpp"
 #include "gargantuan/services/UserInputService.hpp"
@@ -41,6 +42,7 @@ namespace gargantuan::ClassRegistry {
 			USE_INSTANCE_DEFINITION(Lighting),
 			USE_INSTANCE_DEFINITION(Part),
 			USE_INSTANCE_DEFINITION(PostProcessShader),
+			USE_INSTANCE_DEFINITION(RenderSettings),
 			USE_INSTANCE_DEFINITION(RunService),
 			USE_INSTANCE_DEFINITION(ServiceProvider),
 			USE_INSTANCE_DEFINITION(ShaderScript),

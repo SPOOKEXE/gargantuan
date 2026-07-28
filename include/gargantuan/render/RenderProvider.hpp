@@ -63,20 +63,26 @@ namespace gargantuan {
 		// backlog grows without bound: measured at 3.3 MB a frame, which is
 		// gigabytes within seconds.
 		//
-		// BeginFrame blocks until the frame from a couple back has finished,
-		// which paces the CPU to the GPU. Waiting on the frame just submitted
-		// would serialise the two and halve the frame rate, so a small backlog
-		// is deliberate.
-		void BeginFrame();
+		// BeginFrame blocks until only `maximumFramesInFlight - 1` frames are
+		// still outstanding, which paces the CPU to the GPU. Waiting on the
+		// frame just submitted would serialise the two and halve the frame
+		// rate, so a small backlog is deliberate; RenderSettings.FramesInFlight
+		// is where the number comes from.
+		void BeginFrame(int maximumFramesInFlight);
 		// Closes the frame, so the fences submitted since BeginFrame are what
 		// a later BeginFrame waits on
 		void EndFrame();
 
 		// Draws a camera to the window
 		void Draw(DrawContext drawContext);
-		// Draws a camera into its own offscreen target, creating or resizing
-		// that target to match the camera's ViewportSize first
-		void DrawOffscreen(DrawContext drawContext);
+		// Draws cameras into their own offscreen targets, creating or resizing
+		// each target to match its camera's ViewportSize first.
+		//
+		// Takes the whole list rather than one camera at a time because all of
+		// it goes into a single command buffer: a submission carries real
+		// driver cost, and one camera reading another's target needs the two
+		// ordered anyway, which recording order already guarantees.
+		void DrawOffscreen(const std::vector<DrawContext> &cameras);
 
 		// Draws several cameras into one window, each into its own rectangle.
 		// Split-screen: every camera renders offscreen, then its target is
@@ -200,10 +206,10 @@ namespace gargantuan {
 		// or its work would never be waited on.
 		void SubmitTracked(SDL_GPUCommandBuffer *commands);
 
-		// Two is the usual choice: enough that the CPU is not idling on the
-		// GPU, few enough that the backlog stays small and input latency does
-		// not build up
-		static constexpr size_t MAXIMUM_FRAMES_IN_FLIGHT = 2;
+		// Records one camera into an already-acquired command buffer. False if
+		// the camera has no usable target, in which case nothing was recorded.
+		bool RecordOffscreenCamera(SDL_GPUCommandBuffer *commands, DrawContext &drawContext);
+
 		std::vector<SDL_GPUFence *> FrameFences;
 		std::deque<std::vector<SDL_GPUFence *>> FramesInFlight;
 		// Waits on a frame's fences and releases them
