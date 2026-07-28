@@ -74,8 +74,11 @@ eyes. What is missing is the runtime that drives them.
 
 ## Render
 
-- [ ] Skip a camera's redraw when nothing it can see has moved, so a still
-      scene costs nothing even at a high Camera.FPS
+- [ ] Narrow the redraw check to what a camera can actually see. It compares one
+      signature for the whole world today, so a part moving behind a camera
+      still costs it a redraw
+- [ ] Work out RedrawEveryFrame from the SPIR-V rather than trusting the script
+      to set it; a shader reading builtin.Time without it freezes
 - [ ] Textures
 - [ ] Lighting service
 - [ ] PBR

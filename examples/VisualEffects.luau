@@ -84,6 +84,7 @@ local effects = {
 		build = function()
 			local shader = Instance.new("PostProcessShader")
 			shader.Source = Enum.PresetShaders.AnalogueHorror
+			shader.RedrawEveryFrame = true
 			shader:SetNumber(Enum.ShaderProperty.Intensity, 1)
 			shader:SetNumber(Enum.ShaderProperty.Noise, 0.32)
 			shader:SetNumber(Enum.ShaderProperty.Tracking, 1)
@@ -95,6 +96,7 @@ local effects = {
 		build = function()
 			local shader = Instance.new("PostProcessShader")
 			shader.Source = Enum.PresetShaders.BodyCamera
+			shader.RedrawEveryFrame = true
 			shader:SetNumber(Enum.ShaderProperty.Distortion, 0.55)
 			shader:SetNumber(Enum.ShaderProperty.Vignette, 1.1)
 			shader:SetNumber(Enum.ShaderProperty.Grain, 0.14)
@@ -139,6 +141,7 @@ local effects = {
 
 			local tape = Instance.new("PostProcessShader")
 			tape.Source = Enum.PresetShaders.AnalogueHorror
+			tape.RedrawEveryFrame = true
 			tape:SetNumber(Enum.ShaderProperty.Intensity, 0.9)
 			tape:SetNumber(Enum.ShaderProperty.Noise, 0.4)
 			tape:SetNumber(Enum.ShaderProperty.Tracking, 1.4)
@@ -156,6 +159,7 @@ local effects = {
 
 			local lens = Instance.new("PostProcessShader")
 			lens.Source = Enum.PresetShaders.BodyCamera
+			lens.RedrawEveryFrame = true
 			lens:SetNumber(Enum.ShaderProperty.Distortion, 0.45)
 			lens:SetNumber(Enum.ShaderProperty.Vignette, 1.2)
 			lens:SetNumber(Enum.ShaderProperty.Grain, 0.1)

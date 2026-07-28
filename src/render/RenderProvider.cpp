@@ -90,6 +90,9 @@ namespace gargantuan {
 	}
 
 	void RenderProvider::BeginFrame(int maximumFramesInFlight) {
+		// Who followed whom is a fact about one frame only
+		RedrawnThisFrame.clear();
+
 		// Zero would mean nothing is ever waited on, which is the unbounded
 		// backlog this whole mechanism exists to stop
 		size_t maximum = (size_t)glm::max(maximumFramesInFlight, 1);
@@ -140,6 +143,7 @@ namespace gargantuan {
 			if (target.ColorTexture) SDL_ReleaseGPUTexture(Gpu, target.ColorTexture);
 			if (target.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, target.ScratchTexture);
 			if (target.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.HistoryTexture);
+			if (target.CacheTexture) SDL_ReleaseGPUTexture(Gpu, target.CacheTexture);
 			if (target.DepthTexture) SDL_ReleaseGPUTexture(Gpu, target.DepthTexture);
 		}
 		CameraTargets.clear();
@@ -208,6 +212,7 @@ namespace gargantuan {
 		if (it->second.ColorTexture) SDL_ReleaseGPUTexture(Gpu, it->second.ColorTexture);
 		if (it->second.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, it->second.ScratchTexture);
 		if (it->second.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, it->second.HistoryTexture);
+		if (it->second.CacheTexture) SDL_ReleaseGPUTexture(Gpu, it->second.CacheTexture);
 		if (it->second.DepthTexture) SDL_ReleaseGPUTexture(Gpu, it->second.DepthTexture);
 		NeedsHistory.erase(it->first);
 		CameraTargets.erase(it);
@@ -261,8 +266,11 @@ namespace gargantuan {
 		if (target.ColorTexture) SDL_ReleaseGPUTexture(Gpu, target.ColorTexture);
 		if (target.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, target.ScratchTexture);
 		if (target.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.HistoryTexture);
+		// A resize invalidates the cached image along with everything else
+		if (target.CacheTexture) SDL_ReleaseGPUTexture(Gpu, target.CacheTexture);
 		target.ScratchTexture = nullptr;
 		target.HistoryTexture = nullptr;
+		target.CacheTexture = nullptr;
 		if (target.DepthTexture) SDL_ReleaseGPUTexture(Gpu, target.DepthTexture);
 
 		target.ColorTexture = SDL_CreateGPUTexture(Gpu, &colorInfo);
@@ -811,11 +819,9 @@ namespace gargantuan {
 		return &compiled;
 	}
 
-	void RenderProvider::RecordShaderChain(
-		SDL_GPUCommandBuffer *commands, Camera *camera, CameraTarget &target
-	) {
-		if (!camera || !target.ScratchTexture) {
-			return;
+	std::vector<std::shared_ptr<ShaderScript>> RenderProvider::BuildShaderChain(Camera *camera) {
+		if (!camera) {
+			return {};
 		}
 
 		// The built-in antialias pass runs last, after whatever the camera's
@@ -824,10 +830,32 @@ namespace gargantuan {
 		if (camera->Antialiasing) {
 			chain.push_back(GetAntialiasShader());
 		}
+		return chain;
+	}
 
-		if (chain.empty()) {
+	size_t RenderProvider::FindCacheCut(const std::vector<std::shared_ptr<ShaderScript>> &chain) {
+		for (size_t index = 0; index < chain.size(); index++) {
+			if (chain[index] && chain[index]->RedrawEveryFrame) {
+				return index;
+			}
+		}
+		// Nothing animates, so the whole chain is cacheable
+		return chain.size();
+	}
+
+	void RenderProvider::RecordShaderChain(
+		SDL_GPUCommandBuffer *commands, Camera *camera, CameraTarget &target, size_t firstShader, bool writeCache
+	) {
+		if (!camera || !target.ScratchTexture) {
 			return;
 		}
+
+		std::vector<std::shared_ptr<ShaderScript>> chain = BuildShaderChain(camera);
+		if (chain.empty() || firstShader >= chain.size()) {
+			return;
+		}
+
+		size_t cut = FindCacheCut(chain);
 
 		if (!ShaderSampler) {
 			SDL_GPUSamplerCreateInfo samplerInfo{
@@ -854,7 +882,20 @@ namespace gargantuan {
 		SDL_GPUTexture *source = target.ColorTexture;
 		SDL_GPUTexture *destination = target.ScratchTexture;
 
-		for (auto &shader : camera->Shaders) {
+		for (size_t index = firstShader; index < chain.size(); index++) {
+			// Snapshot what the cacheable half produced, just before the first
+			// pass that has to run again every frame
+			if (index == cut && writeCache && target.CacheTexture) {
+				SDL_GPUBlitInfo snapshot{
+					.source = {.texture = source, .w = target.Width, .h = target.Height},
+					.destination = {.texture = target.CacheTexture, .w = target.Width, .h = target.Height},
+					.load_op = SDL_GPU_LOADOP_DONT_CARE,
+					.filter = SDL_GPU_FILTER_NEAREST,
+				};
+				SDL_BlitGPUTexture(commands, &snapshot);
+			}
+
+			auto &shader = chain[index];
 			// A script with neither compiled code nor an asset name has nothing to run
 			if (!shader || (shader->Source.empty() && !shader->HasBytecode())) {
 				continue;
@@ -884,8 +925,8 @@ namespace gargantuan {
 				bindings[0] = {.texture = source, .sampler = ShaderSampler};
 				uint32_t bindingCount = 1;
 
-				for (auto &source : post->GetTextureSources()) {
-					SDL_GPUTexture *texture = ResolveTextureSource(camera, source);
+				for (auto &bound : post->GetTextureSources()) {
+					SDL_GPUTexture *texture = ResolveTextureSource(camera, bound);
 					if (!texture || bindingCount > ShaderScript::MAXIMUM_IMAGES) {
 						continue;
 					}
@@ -1220,7 +1261,7 @@ namespace gargantuan {
 			if (!RecordCameraPasses(commands, copy, *target)) {
 				continue;
 			}
-			RecordShaderChain(commands, camera, *target);
+			RecordShaderChain(commands, camera, *target, 0, false);
 			RecordHistoryCopy(commands, camera, *target);
 			ready.emplace_back(target, camera);
 		}
@@ -1263,6 +1304,190 @@ namespace gargantuan {
 		SubmitTracked(commands);
 	}
 
+	namespace {
+		// FNV-1a, mixed a word at a time. Only ever compared against itself, so
+		// a collision costs a skipped redraw for one frame, not correctness
+		// across the board -- and 64 bits makes that vanishingly unlikely.
+		inline void MixBits(uint64_t &hash, uint64_t value) {
+			hash ^= value + 0x9E3779B97F4A7C15ull + (hash << 6) + (hash >> 2);
+		}
+
+		inline void MixFloat(uint64_t &hash, float value) {
+			// Through the bit pattern, so -0.0 and 0.0 are the same and a NaN
+			// is at least stable rather than never equal to itself
+			uint32_t bits;
+			std::memcpy(&bits, &value, sizeof(bits));
+			MixBits(hash, bits);
+		}
+
+		inline void MixVec3(uint64_t &hash, const glm::vec3 &value) {
+			MixFloat(hash, value.x);
+			MixFloat(hash, value.y);
+			MixFloat(hash, value.z);
+		}
+
+		inline void MixPointer(uint64_t &hash, const void *pointer) {
+			MixBits(hash, (uint64_t)(uintptr_t)pointer);
+		}
+	} // namespace
+
+	uint64_t RenderProvider::ComputeSceneSignature(
+		const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection
+	) const {
+		uint64_t hash = 0xCBF29CE484222325ull;
+		MixVec3(hash, lightDirection);
+
+		if (!world) {
+			return hash;
+		}
+
+		// The count matters on its own: a part appearing and another vanishing
+		// in the same frame would otherwise leave the rest hashing identically
+		MixBits(hash, world->Parts.size());
+
+		for (const auto &part : world->Parts) {
+			if (!part) {
+				MixBits(hash, 0);
+				continue;
+			}
+
+			// Two words per part, and neither of them touches a property. The
+			// QuickHash says whether anything about the part was written since
+			// last frame; the pointer catches one part being swapped for
+			// another. Reading every transform and colour instead would make
+			// this cost scale with how much a part has rather than with how
+			// many there are.
+			MixPointer(hash, part.get());
+			MixBits(hash, part->QuickHash);
+			// A part showing a camera changes when that camera does
+			MixPointer(hash, part->SurfaceCamera.get());
+		}
+
+		return hash;
+	}
+
+	uint64_t RenderProvider::ComputeCameraSignature(Camera *camera) {
+		uint64_t hash = 0x100000001B3ull;
+		if (!camera) {
+			return hash;
+		}
+
+		MixVec3(hash, camera->CFrame.Position);
+		MixVec3(hash, camera->CFrame.GetRightVector());
+		MixVec3(hash, camera->CFrame.GetUpVector());
+		MixVec3(hash, camera->CFrame.GetLookVector());
+
+		MixFloat(hash, camera->FieldOfView);
+		MixFloat(hash, camera->ViewportSize.GetX());
+		MixFloat(hash, camera->ViewportSize.GetY());
+		MixBits(hash, camera->Antialiasing ? 1 : 0);
+
+		auto mixShader = [&](const std::shared_ptr<ShaderScript> &shader) {
+			if (!shader) {
+				MixBits(hash, 0);
+				return;
+			}
+
+			MixPointer(hash, shader.get());
+			MixBits(hash, shader->GetRevision());
+			MixBits(hash, shader->RedrawEveryFrame ? 1 : 0);
+			for (const auto &[name, value] : shader->GetParameters()) {
+				MixBits(hash, std::hash<std::string>{}(name));
+				MixFloat(hash, value.x);
+				MixFloat(hash, value.y);
+				MixFloat(hash, value.z);
+				MixFloat(hash, value.w);
+			}
+
+			// A bound image changes the picture when it is drawn into, and a
+			// bound camera when it redraws
+			for (const auto &bound : shader->GetTextureSources()) {
+				MixPointer(hash, bound.Image.get());
+				MixBits(hash, bound.Image ? bound.Image->GetRevision() : 0);
+				MixPointer(hash, bound.Camera.get());
+			}
+		};
+
+		mixShader(camera->SurfaceShader);
+		for (const auto &shader : BuildShaderChain(camera)) {
+			mixShader(shader);
+		}
+
+		return hash;
+	}
+
+	RenderProvider::RedrawPlan RenderProvider::PlanRedraw(Camera *camera, CameraTarget &target) {
+		RedrawPlan plan;
+		if (!camera) {
+			return plan;
+		}
+
+		auto chain = BuildShaderChain(camera);
+		size_t cut = FindCacheCut(chain);
+		// Only worth keeping a cache when something after it has to rerun
+		bool hasDynamicTail = cut < chain.size();
+		plan.WriteCache = hasDynamicTail;
+
+		uint64_t cameraSignature = ComputeCameraSignature(camera);
+		bool sceneMatches = camera->HasDrawn && camera->LastSceneSignature == SceneSignature &&
+							camera->LastCameraSignature == cameraSignature;
+
+		// A camera reading its own previous frame is animated by construction,
+		// and one whose input redrew has to follow it
+		if (NeedsHistory.count(camera)) {
+			sceneMatches = false;
+		}
+		for (Camera *sampled : GetSampledCameras(camera)) {
+			if (RedrawnThisFrame.count(sampled)) {
+				sceneMatches = false;
+				break;
+			}
+		}
+
+		camera->LastSceneSignature = SceneSignature;
+		camera->LastCameraSignature = cameraSignature;
+
+		if (!sceneMatches) {
+			// Moving again, so the settle count starts over and the cache that
+			// was taken of the old picture is worthless
+			camera->StillFrames = 0;
+			camera->HasDrawn = true;
+			plan.WriteCache = false;
+			RedrawnThisFrame.insert(camera);
+			return plan;
+		}
+
+		camera->StillFrames++;
+
+		// Still settling: draw it properly and do not pay for a copy yet
+		if (camera->StillFrames < CACHE_AFTER_STILL_FRAMES) {
+			plan.WriteCache = false;
+			RedrawnThisFrame.insert(camera);
+			return plan;
+		}
+
+		if (!hasDynamicTail) {
+			// Nothing animates and nothing moved, so the target already holds
+			// the finished picture and there is nothing to copy or rerun
+			plan.Skip = true;
+			return plan;
+		}
+
+		// The frame it settles on is the one that takes the copy; from the next
+		// frame on only the animated tail runs
+		if (camera->StillFrames == CACHE_AFTER_STILL_FRAMES || !target.CacheTexture) {
+			plan.WriteCache = true;
+			RedrawnThisFrame.insert(camera);
+			return plan;
+		}
+
+		plan.RenderScene = false;
+		plan.FirstShader = cut;
+		plan.WriteCache = false;
+		RedrawnThisFrame.insert(camera);
+		return plan;
+	}
+
 	bool RenderProvider::RecordOffscreenCamera(SDL_GPUCommandBuffer *commands, DrawContext &drawContext) {
 		auto *camera = drawContext.Camera.get();
 		CameraTarget *target = AcquireCameraTarget(camera, camera && (!camera->Shaders.empty() || camera->Antialiasing));
@@ -1270,13 +1495,58 @@ namespace gargantuan {
 			return false;
 		}
 
-		if (!RecordCameraPasses(commands, drawContext, *target)) {
+		RedrawPlan plan = PlanRedraw(camera, *target);
+		if (plan.Skip) {
 			return false;
 		}
 
-		RecordShaderChain(commands, camera, *target);
+		if (plan.WriteCache || !plan.RenderScene) {
+			EnsureCacheTexture(*target);
+		}
+
+		if (plan.RenderScene) {
+			if (!RecordCameraPasses(commands, drawContext, *target)) {
+				return false;
+			}
+		} else if (target->CacheTexture) {
+			// Put the cached half back where the chain expects to find it, then
+			// pick up at the first pass that has to run again
+			SDL_GPUBlitInfo restore{
+				.source = {.texture = target->CacheTexture, .w = target->Width, .h = target->Height},
+				.destination = {.texture = target->ColorTexture, .w = target->Width, .h = target->Height},
+				.load_op = SDL_GPU_LOADOP_DONT_CARE,
+				.filter = SDL_GPU_FILTER_NEAREST,
+			};
+			SDL_BlitGPUTexture(commands, &restore);
+		} else {
+			// No cache to restore from, so fall back to drawing it properly
+			if (!RecordCameraPasses(commands, drawContext, *target)) {
+				return false;
+			}
+			plan.FirstShader = 0;
+			plan.WriteCache = true;
+		}
+
+		RecordShaderChain(commands, camera, *target, plan.FirstShader, plan.WriteCache);
 		RecordHistoryCopy(commands, camera, *target);
 		return true;
+	}
+
+	void RenderProvider::EnsureCacheTexture(CameraTarget &target) {
+		if (target.CacheTexture || target.Width == 0 || target.Height == 0) {
+			return;
+		}
+
+		SDL_GPUTextureCreateInfo info{
+			.type = SDL_GPU_TEXTURETYPE_2D,
+			.format = OFFSCREEN_FORMAT,
+			.usage = CAMERA_TARGET_USAGE,
+			.width = target.Width,
+			.height = target.Height,
+			.layer_count_or_depth = 1,
+			.num_levels = 1,
+		};
+		target.CacheTexture = SDL_CreateGPUTexture(Gpu, &info);
 	}
 
 	void RenderProvider::DrawOffscreen(const std::vector<DrawContext> &cameras) {
@@ -1381,7 +1651,7 @@ namespace gargantuan {
 		}
 
 		// The readback has to see what the shaders produced, not the raw render
-		RecordShaderChain(commands, camera, *target);
+		RecordShaderChain(commands, camera, *target, 0, false);
 		RecordHistoryCopy(commands, camera, *target);
 
 		SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commands);
@@ -1485,7 +1755,7 @@ namespace gargantuan {
 				SDL_CancelGPUCommandBuffer(commands);
 				return;
 			}
-			RecordShaderChain(commands, camera, *target);
+			RecordShaderChain(commands, camera, *target, 0, false);
 
 			SDL_GPUTexture *swapchainTexture = nullptr;
 			uint32_t swapchainWidth = 0, swapchainHeight = 0;

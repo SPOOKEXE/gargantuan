@@ -40,6 +40,7 @@ namespace gargantuan {
 						[]() -> std::string { return "string | Enum.PresetShaders"; },
 					},
 				},
+				G_UD_READWRITE_PROP(ShaderScript, RedrawEveryFrame, bool),
 				{
 					"Preset",
 					{

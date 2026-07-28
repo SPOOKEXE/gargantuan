@@ -38,6 +38,20 @@ namespace gargantuan {
 		// has been set and compiled.
 		std::string Source;
 
+		// Marks this pass as producing a different picture every frame even
+		// when nothing in the scene changed -- anything reading builtin.Time,
+		// so noise, scanlines, tape wobble, a sweeping scan line.
+		//
+		// It is the guard on the camera's cascading cache. Everything ahead of
+		// the first pass carrying this flag is deterministic in its input, so
+		// on a still scene the engine reuses the image it kept from last time
+		// and starts work here instead of redrawing the world. A chain with
+		// none of these is cached whole, and a still scene costs nothing.
+		//
+		// The failure mode if it is missing on a pass that needs it is a frozen
+		// effect rather than a wrong one: the picture stops animating.
+		bool RedrawEveryFrame = false;
+
 		// GLSL source compiled at runtime. Setting it marks the script dirty;
 		// Compile() then turns it into bytecode, or fills CompileError.
 		std::string GetCode() const;

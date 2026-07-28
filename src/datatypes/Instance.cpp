@@ -37,6 +37,19 @@ namespace gargantuan {
 			{
 				G_UD_READWRITE_PROP(Instance, Name, std::string_view),
 				G_UD_READWRITE_PROP(Instance, Archivable, bool),
+				{
+					// Read-only: a script writing it could only lie to whoever
+					// is watching for a change
+					"QuickHash",
+					{
+						+[](lua_State *L, Instance *instance) -> int {
+							StackValue<int>::Push(L, (int)instance->QuickHash);
+							return 1;
+						},
+						nullptr,
+						G_UD_REFLECT_TYPE(int),
+					},
+				},
 				G_UD_READONLY_PROP(Instance, ChildAdded, Signal<Instance::Pointer>::Pointer),
 				G_UD_READONLY_PROP(Instance, ChildRemoved, Signal<Instance::Pointer>::Pointer),
 				G_UD_READONLY_PROP(Instance, DescendantAdded, Signal<Instance::Pointer>::Pointer),
@@ -250,6 +263,9 @@ namespace gargantuan {
 			auto property = instance->FindProperty(key);
 			if (property.has_value()) {
 				if (property->Write) {
+					// Every scripted property write funnels through here, so
+					// this one bump covers the lot
+					instance->MarkChanged();
 					return property->Write(L, instance.get());
 				} else {
 					luaL_error(L, "Property %s is read-only", key);

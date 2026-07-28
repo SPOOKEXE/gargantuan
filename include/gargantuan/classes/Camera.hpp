@@ -122,6 +122,19 @@ namespace gargantuan {
 		// bookkeeping, not a property.
 		double LastOffscreenDraw = -1.0;
 
+		// The scene and the camera as they were when this camera last drew.
+		// Redrawing is skipped while both still match and the cached image is
+		// good. Bookkeeping, not properties.
+		uint64_t LastSceneSignature = 0;
+		uint64_t LastCameraSignature = 0;
+		// False until a full draw has filled the target, so the first frame is
+		// never answered out of an empty cache
+		bool HasDrawn = false;
+		// Consecutive frames the scene and the camera have both been identical.
+		// Caching costs a copy, so it is not worth paying while the picture is
+		// still changing; the engine waits for this to settle first.
+		uint32_t StillFrames = 0;
+
 		void AddShader(std::shared_ptr<ShaderScript> shader);
 		void RemoveShader(std::shared_ptr<ShaderScript> shader);
 		// RemoveShader() drops the last one, RemoveShader(n) the nth counting

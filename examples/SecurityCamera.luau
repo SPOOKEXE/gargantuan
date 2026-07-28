@@ -62,6 +62,9 @@ for index, entry in layout do
 	local shader = Instance.new("PostProcessShader")
 	shader.Name = "SecurityLook"
 	shader.Source = Enum.PresetShaders.SecurityCamera
+	-- Interlacing and sensor noise are driven by builtin.Time, so this pass
+	-- has to keep running once the room stops moving
+	shader.RedrawEveryFrame = true
 	shader:SetNumber(Enum.ShaderProperty.Distortion, entry.night and 0.5 or 0.32)
 	shader:SetNumber(Enum.ShaderProperty.Scanlines, 1)
 	shader:SetNumber(Enum.ShaderProperty.Noise, entry.night and 0.10 or 0.05)

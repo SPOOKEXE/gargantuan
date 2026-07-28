@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <lua.h>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -47,6 +48,28 @@ namespace gargantuan {
 
 		std::string_view Name = DEFINITION.Name;
 		bool Archivable = true;
+
+		// Stands in for the whole instance when all you need to know is "has
+		// this changed since I last looked". Keep the value you saw and compare
+		// it later; a difference means something was written.
+		//
+		// It is a counter rather than a hash of the properties, which is what
+		// makes it cheap: no reading the properties, no comparing them, and no
+		// per-property dirty flags to forget to set. The cost is that it means
+		// "was written" rather than "is different", so assigning a value
+		// identical to the current one still moves it.
+		//
+		// Deliberately small and deliberately allowed to wrap. A false match
+		// needs exactly 65536 writes to land between two looks, and costs one
+		// stale frame if it ever does -- cheaper than the wider counter and the
+		// state comparison that would avoid it.
+		uint16_t QuickHash = 0;
+
+		// Call after changing this instance from C++, where the write did not
+		// go through the property path that bumps it automatically
+		void MarkChanged() {
+			QuickHash++;
+		}
 		std::vector<std::shared_ptr<Instance>> Children;
 		Instance *Parent = nullptr;
 		void SetParent(std::shared_ptr<Instance> newParent);

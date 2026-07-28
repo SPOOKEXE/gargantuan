@@ -47,6 +47,13 @@ namespace gargantuan {
 			// give every reader this frame's copy.
 			SDL_GPUTexture *HistoryTexture = nullptr;
 			SDL_GPUTexture *DepthTexture = nullptr;
+			// The cascading cache: the chain's output at the last pass before
+			// the first one marked RedrawEveryFrame. On a still scene the
+			// engine reuses this instead of redrawing the world, and runs only
+			// the passes from that point on. Only allocated for a camera whose
+			// chain actually has such a pass; without one the whole camera is
+			// skipped and ColorTexture already holds the answer.
+			SDL_GPUTexture *CacheTexture = nullptr;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
 		};
@@ -75,6 +82,17 @@ namespace gargantuan {
 
 		// Draws a camera to the window
 		void Draw(DrawContext drawContext);
+		// A cheap hash of everything in the world that changes a picture --
+		// every part's transform, size and appearance, plus the light. Cameras
+		// compare it against the one they last drew at, so a scene that has not
+		// moved is not redrawn.
+		//
+		// Hashing the state each frame rather than dirtying a flag from every
+		// setter means nothing can be forgotten: a property added later is
+		// covered the moment it joins the hash, not whenever someone remembers
+		// to mark it.
+		uint64_t ComputeSceneSignature(const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection) const;
+
 		// Draws cameras into their own offscreen targets, creating or resizing
 		// each target to match its camera's ViewportSize first.
 		//
@@ -137,6 +155,10 @@ namespace gargantuan {
 			double Time = 0.0;
 		};
 		SceneContext Scene;
+
+		// Hash of everything in the world that changes a picture, refreshed by
+		// the engine once a frame and compared per camera
+		uint64_t SceneSignature = 0;
 
 		SDL_Window *Window = nullptr;
 		SDL_GPUDevice *Gpu = nullptr;
@@ -210,6 +232,37 @@ namespace gargantuan {
 		// the camera has no usable target, in which case nothing was recorded.
 		bool RecordOffscreenCamera(SDL_GPUCommandBuffer *commands, DrawContext &drawContext);
 
+		// Everything about a camera that changes its picture without the world
+		// moving: where it points, what it shows, and the shaders over it down
+		// to their parameter values
+		uint64_t ComputeCameraSignature(Camera *camera);
+
+		// What a camera has left to do this frame
+		struct RedrawPlan {
+			// Nothing at all: its target already holds the right picture
+			bool Skip = false;
+			// Redraw the world, rather than reusing the cached image
+			bool RenderScene = true;
+			// Where in the chain to start
+			size_t FirstShader = 0;
+			// Keep a copy at the cut for next frame
+			bool WriteCache = false;
+		};
+		// Frames a camera has to sit perfectly still before the engine commits
+		// to caching it. Keeping the cache costs a full-size copy every frame
+		// it is taken, so paying that on a picture that is about to change
+		// again is worse than simply redrawing; waiting for the scene to settle
+		// means the cost is only paid where it earns something back.
+		static constexpr uint32_t CACHE_AFTER_STILL_FRAMES = 5;
+
+		RedrawPlan PlanRedraw(Camera *camera, CameraTarget &target);
+		// Allocated lazily: only a camera with an animated tail ever needs one
+		void EnsureCacheTexture(CameraTarget &target);
+
+		// Cameras redrawn this frame. One sampling another has to follow it,
+		// or it would composite this frame's picture over last frame's.
+		std::unordered_set<Camera *> RedrawnThisFrame;
+
 		std::vector<SDL_GPUFence *> FrameFences;
 		std::deque<std::vector<SDL_GPUFence *>> FramesInFlight;
 		// Waits on a frame's fences and releases them
@@ -239,7 +292,18 @@ namespace gargantuan {
 			SDL_GPUCommandBuffer *commands, DrawContext &drawContext, const CameraTarget &target
 		);
 		// Runs the camera's shader chain, leaving the result in ColorTexture
-		void RecordShaderChain(SDL_GPUCommandBuffer *commands, Camera *camera, CameraTarget &target);
+		// Runs the chain from `firstShader` on. Passes before it are assumed to
+		// have already produced what sits in the camera's colour texture, which
+		// is either this frame's render or the cached image.
+		void RecordShaderChain(
+			SDL_GPUCommandBuffer *commands, Camera *camera, CameraTarget &target, size_t firstShader, bool writeCache
+		);
+
+		// The camera's passes, its own plus the built-in antialias one
+		std::vector<std::shared_ptr<ShaderScript>> BuildShaderChain(Camera *camera);
+		// Index of the first pass marked RedrawEveryFrame, or the chain length
+		// when none is. Everything before it is cacheable.
+		static size_t FindCacheCut(const std::vector<std::shared_ptr<ShaderScript>> &chain);
 		// Works out which texture each part shows this frame
 		void ResolvePartTextures(const std::shared_ptr<WorldRoot> &worldRoot);
 		void EnsureWhiteTexture();

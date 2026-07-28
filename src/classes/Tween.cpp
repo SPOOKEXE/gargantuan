@@ -132,6 +132,9 @@ namespace gargantuan {
 
 					ValueType value = LerpValue<ValueType>::Lerp(std::get<ValueType>(initial->second), goal, alpha);
 					StackValue<ValueType>::Push(L, value);
+					// A tween writes properties without going through the
+					// script path, so it has to say so itself
+					Target->MarkChanged();
 					property->Write(L, Target.get());
 					lua_pop(L, 1);
 				},

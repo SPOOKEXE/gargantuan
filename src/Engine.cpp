@@ -146,8 +146,44 @@ namespace gargantuan {
 		RenderProvider->Scene.WorldRoot = worldRoot;
 		RenderProvider->Scene.LightDirection = lightDirection;
 		RenderProvider->Scene.Time = Workspace->DistributedGameTime;
+		// Cameras compare this against the one they last drew at, so a scene
+		// that has not moved is not redrawn
+		RenderProvider->SceneSignature = RenderProvider->ComputeSceneSignature(worldRoot, lightDirection);
 
 		auto currentCamera = Workspace->CurrentCamera;
+
+		// A camera drawn to the window renders into an offscreen target first,
+		// and that target is sized from ViewportSize. Nothing filled it in:
+		// Camera::OnEvent only sets it for a freecam, and only when a resize
+		// event arrives, so a window that was never resized left it at zero,
+		// AcquireCameraTarget refused a zero-sized target, and the whole draw
+		// bailed out having rendered nothing at all.
+		int windowWidth = 0, windowHeight = 0;
+		SDL_GetWindowSizeInPixels(Window, &windowWidth, &windowHeight);
+		if (windowWidth > 0 && windowHeight > 0) {
+			auto fitToWindow = [&](const std::shared_ptr<Camera> &camera) {
+				if (!camera) {
+					return;
+				}
+
+				// Its own share of the window, so a split-screen pane renders at
+				// the size it is about to occupy rather than the whole width
+				auto region = RenderProvider::ComputeWindowRegion(*camera, windowWidth, windowHeight);
+				if (region.Width > 0 && region.Height > 0) {
+					camera->ViewportSize = Vector2((float)region.Width, (float)region.Height);
+				}
+			};
+
+			fitToWindow(currentCamera);
+			for (auto *camera : Camera::GetAllCameras()) {
+				if (!camera->DrawToWindow) {
+					continue;
+				}
+				if (auto owned = camera->weak_from_this().lock()) {
+					fitToWindow(std::static_pointer_cast<Camera>(owned));
+				}
+			}
+		}
 
 		// Anything that draws into the window, CurrentCamera first so it takes
 		// the whole thing when nothing else asks for a share
