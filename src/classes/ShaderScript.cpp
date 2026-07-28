@@ -44,6 +44,8 @@ namespace gargantuan {
 			{"SetBool", Method::Wrap<&ShaderScript::SetBool>()},
 			{"SetImage", Method::Wrap<&ShaderScript::SetImage>()},
 			{"GetImage", Method::Wrap<&ShaderScript::GetImage>()},
+			{"ListImages", Method::Wrap<&ShaderScript::ListImages>()},
+			{"ClearImages", Method::Wrap<&ShaderScript::ClearImages>()},
 			{"ListParameters", Method::Wrap<&ShaderScript::ListParameters>()},
 			{"ClearParameters", Method::Wrap<&ShaderScript::ClearParameters>()},
 			{"Compile", Method::Wrap<&ShaderScript::Compile>()},
@@ -143,12 +145,45 @@ namespace gargantuan {
 		SetParameter(name, glm::vec4(value ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f));
 	}
 
-	void ShaderScript::SetImage(std::shared_ptr<EditableImage> image) {
-		Image = std::move(image);
+	void ShaderScript::SetImage(std::string name, std::shared_ptr<EditableImage> image) {
+		auto existing = Images.find(name);
+		if (existing != Images.end()) {
+			// Clearing a slot keeps its position, so the bindings after it do
+			// not silently shift
+			existing->second = std::move(image);
+			return;
+		}
+
+		if (ImageOrder.size() >= MAXIMUM_IMAGES) {
+			return;
+		}
+
+		ImageOrder.push_back(name);
+		Images.emplace(std::move(name), std::move(image));
 	}
 
-	std::shared_ptr<EditableImage> ShaderScript::GetImage() const {
-		return Image;
+	std::shared_ptr<EditableImage> ShaderScript::GetImage(std::string name) const {
+		auto it = Images.find(name);
+		return it == Images.end() ? nullptr : it->second;
+	}
+
+	std::vector<std::string> ShaderScript::ListImages() {
+		return ImageOrder;
+	}
+
+	void ShaderScript::ClearImages() {
+		ImageOrder.clear();
+		Images.clear();
+	}
+
+	std::vector<std::shared_ptr<EditableImage>> ShaderScript::GetImages() const {
+		std::vector<std::shared_ptr<EditableImage>> result;
+		result.reserve(ImageOrder.size());
+		for (const auto &name : ImageOrder) {
+			auto it = Images.find(name);
+			result.push_back(it == Images.end() ? nullptr : it->second);
+		}
+		return result;
 	}
 
 	std::vector<std::string> ShaderScript::ListParameters() {
@@ -159,6 +194,15 @@ namespace gargantuan {
 		ParameterOrder.clear();
 		ParameterIndices.clear();
 		ParameterValues.clear();
+	}
+
+	std::vector<std::pair<std::string, glm::vec4>> ShaderScript::GetParameters() const {
+		std::vector<std::pair<std::string, glm::vec4>> result;
+		result.reserve(ParameterOrder.size());
+		for (size_t index = 0; index < ParameterOrder.size(); index++) {
+			result.emplace_back(ParameterOrder[index], ParameterValues[index]);
+		}
+		return result;
 	}
 
 	const std::vector<glm::vec4> &ShaderScript::GetPackedParameters() const {

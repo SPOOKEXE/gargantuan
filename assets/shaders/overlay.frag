@@ -9,7 +9,7 @@
 //
 //   local overlay = Instance.new("PostProcessShader")
 //   overlay.Source = "overlay"
-//   overlay:SetImage(logo)
+//   overlay:SetImage("Overlay", logo)
 //   overlay:SetNumber("Opacity", 1)                   -- slot 0
 //   overlay:SetVector2("Position", Vector2.new(8, 8)) -- slot 1, top-left in pixels
 //   camera:AddShader(overlay)

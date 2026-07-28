@@ -71,6 +71,22 @@ set(SDL_RENDER ON CACHE BOOL "" FORCE)
 set(SDL_DISABLE_PCH ON CACHE BOOL "" FORCE)
 set(GLM_ENABLE_CXX_20 ON CACHE BOOL "" FORCE)
 
+# Optional: compile GLSL inside the process rather than shelling out to glslc.
+# Without it, runtime shader code needs glslc on PATH; build-time shaders are
+# unaffected either way.
+find_path(SHADERC_INCLUDE_DIR shaderc/shaderc.h)
+find_library(SHADERC_LIBRARY NAMES shaderc_shared shaderc)
+if(WIN32)
+	find_file(SHADERC_DLL NAMES shaderc_shared.dll)
+endif()
+if(SHADERC_INCLUDE_DIR AND SHADERC_LIBRARY)
+	message(STATUS "Found shaderc, runtime shaders will compile in-process")
+	set(GARGANTUAN_SHADERC TRUE)
+else()
+	message(STATUS "No shaderc, runtime shaders will shell out to glslc")
+	set(GARGANTUAN_SHADERC FALSE)
+endif()
+
 add_subdirectory(vendor/box3d)
 add_subdirectory(vendor/glm)
 add_subdirectory(vendor/luau)
@@ -125,6 +141,12 @@ target_link_libraries(gargantuan
 		Luau.Config
 )
 
+if(GARGANTUAN_SHADERC)
+	target_compile_definitions(gargantuan PRIVATE GARGANTUAN_HAVE_SHADERC)
+	target_include_directories(gargantuan SYSTEM PRIVATE ${SHADERC_INCLUDE_DIR})
+	target_link_libraries(gargantuan PRIVATE ${SHADERC_LIBRARY})
+endif()
+
 if(WIN32)
 	add_custom_command(TARGET gargantuan POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -132,4 +154,15 @@ if(WIN32)
 			"$<TARGET_FILE_DIR:gargantuan>"
 		COMMENT "Copying SDL3.dll next to gargantuan.exe"
 	)
+
+	# shaderc is linked as a shared library, so Windows needs its DLL beside the
+	# executable the same way SDL3 does
+	if(GARGANTUAN_SHADERC AND SHADERC_DLL)
+		add_custom_command(TARGET gargantuan POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				"${SHADERC_DLL}"
+				"$<TARGET_FILE_DIR:gargantuan>"
+			COMMENT "Copying shaderc_shared.dll next to gargantuan.exe"
+		)
+	endif()
 endif()

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <glm/glm.hpp>
 #include <memory>
+#include <utility>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -65,17 +66,28 @@ namespace gargantuan {
 		void SetVector3(std::string name, glm::vec3 value);
 		void SetColor3(std::string name, Color3 value);
 		void SetBool(std::string name, bool value);
-		// One image the shader can sample alongside the camera's own output.
-		// Bound as sampler slot 1, after SourceTexture.
-		void SetImage(std::shared_ptr<EditableImage> image);
-		std::shared_ptr<EditableImage> GetImage() const;
+		// Images the shader can sample alongside the camera's own output. They
+		// are bound in the order they were first set, starting at sampler slot
+		// 1 because slot 0 is always SourceTexture.
+		static constexpr size_t MAXIMUM_IMAGES = 8;
+
+		void SetImage(std::string name, std::shared_ptr<EditableImage> image);
+		std::shared_ptr<EditableImage> GetImage(std::string name) const;
+		std::vector<std::string> ListImages();
+		void ClearImages();
+		// In binding order, for the renderer
+		std::vector<std::shared_ptr<EditableImage>> GetImages() const;
 
 		std::vector<std::string> ListParameters();
 		void ClearParameters();
 
-		// Packed slots, ready to push as uniform data
+		// Packed slots, ready to push as uniform data. Only used when a shader's
+		// layout could not be reflected.
 		const std::vector<glm::vec4> &GetPackedParameters() const;
 		size_t GetPackedParameterBytes() const;
+
+		// Name and value of every parameter, in the order they were first set
+		std::vector<std::pair<std::string, glm::vec4>> GetParameters() const;
 
 	  protected:
 		void SetParameter(const std::string &name, glm::vec4 value);
@@ -85,7 +97,8 @@ namespace gargantuan {
 		std::unordered_map<std::string, size_t> ParameterIndices;
 		std::vector<glm::vec4> ParameterValues;
 
-		std::shared_ptr<EditableImage> Image;
+		std::vector<std::string> ImageOrder;
+		std::unordered_map<std::string, std::shared_ptr<EditableImage>> Images;
 		std::string Code;
 		std::string CompileError;
 		std::vector<unsigned char> Bytecode;

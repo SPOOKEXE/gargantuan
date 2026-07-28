@@ -31,6 +31,13 @@ namespace gargantuan {
 
 		uint32_t Width;
 		uint32_t Height;
+
+		// When a camera has a SurfaceShader, the opaque pass draws with this
+		// pipeline instead of its own, and pushes the script's parameters as
+		// the second fragment uniform buffer
+		SDL_GPUGraphicsPipeline *SurfacePipeline = nullptr;
+		const void *SurfaceParameters = nullptr;
+		uint32_t SurfaceParameterBytes = 0;
 	};
 
 	class RenderPass {

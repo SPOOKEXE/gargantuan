@@ -24,6 +24,34 @@ namespace gargantuan {
 			G_UD_READWRITE_PROP(Camera, CFrame, gargantuan::CFrame),
 			G_UD_READWRITE_PROP(Camera, Enabled, bool),
 			G_UD_READWRITE_PROP(Camera, FieldOfView, float),
+			{
+				"SurfaceShader",
+				{
+					[](lua_State *L, Instance *instance) -> int {
+						StackValue<Instance::Pointer>::Push(L, instance->Cast<Camera>()->SurfaceShader);
+						return 1;
+					},
+					[](lua_State *L, Instance *instance) -> int {
+						auto camera = instance->Cast<Camera>();
+						if (lua_isnoneornil(L, -1)) {
+							camera->SurfaceShader = nullptr;
+							return 0;
+						}
+
+						auto shader = std::dynamic_pointer_cast<gargantuan::SurfaceShader>(
+							StackValue<Instance::Pointer>::From(L, -1)
+						);
+						if (!shader) {
+							luaL_error(L, "SurfaceShader must be a SurfaceShader");
+							return 0;
+						}
+
+						camera->SurfaceShader = shader;
+						return 0;
+					},
+					G_UD_REFLECT_TYPE(Instance::Pointer),
+				},
+			},
 			G_UD_READWRITE_PROP(Camera, ViewportSize, gargantuan::Vector2),
 			{
 				"HorizontalFieldOfView",

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gargantuan/render/RenderPass.hpp"
+#include "gargantuan/render/ShaderReflection.hpp"
 
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
@@ -17,6 +18,7 @@ namespace gargantuan {
 	class ComputeShader;
 	class EditableImage;
 	class PostProcessShader;
+	class SurfaceShader;
 	class ShaderScript;
 	class ThreadEngine;
 
@@ -112,6 +114,9 @@ namespace gargantuan {
 		struct CompiledShader {
 			SDL_GPUGraphicsPipeline *GraphicsPipeline = nullptr;
 			SDL_GPUComputePipeline *ComputePipeline = nullptr;
+			// Where each named parameter goes, read out of the SPIR-V. Without
+			// it the engine falls back to packing in Set order.
+			ShaderReflection::BlockLayout ParameterLayout;
 			// Set once a compile has been attempted and failed, so the engine
 			// complains once rather than every frame
 			bool Failed = false;
@@ -137,6 +142,7 @@ namespace gargantuan {
 		std::vector<PendingRender> PendingRenders;
 		std::unordered_map<std::string, CompiledShader> ShaderCache;
 		SDL_GPUShader *FullscreenVertexShader = nullptr;
+		SDL_GPUShader *OpaqueVertexShader = nullptr;
 		SDL_GPUSampler *ShaderSampler = nullptr;
 
 		// Returns the camera's target, sized to its ViewportSize, or nullptr
@@ -155,6 +161,10 @@ namespace gargantuan {
 		// Uploads or refreshes the GPU copy of an image, returning null when it
 		// is empty or the upload failed
 		SDL_GPUTexture *AcquireImageTexture(EditableImage *image);
+		// Builds opaque.vert paired with a surface shader's fragment stage.
+		// Cached per shader and colour format, since the window and an
+		// offscreen target do not share one.
+		CompiledShader *GetSurfaceShader(SurfaceShader *shader, SDL_GPUTextureFormat colorFormat);
 		CompiledShader *GetPostProcessShader(PostProcessShader *shader);
 		CompiledShader *GetComputeShader(ComputeShader *shader);
 		// Cache key: runtime code is keyed by identity and revision, a named
@@ -162,5 +172,8 @@ namespace gargantuan {
 		static std::string GetShaderCacheKey(ShaderScript *shader, const char *stageExtension);
 		// Loads bytecode for `<source><extension>` from the shaders directory
 		void *LoadShaderBytes(const std::string &source, const char *stageExtension, size_t &outSize);
+		// Lays a script's parameters out for its shader, by name where the
+		// layout is known and by slot order where it is not
+		static std::vector<uint8_t> PackParameters(ShaderScript *shader, const CompiledShader &compiled);
 	};
 } // namespace gargantuan

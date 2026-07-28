@@ -18,6 +18,10 @@ namespace gargantuan::ShaderCompiler {
 		std::string Error;
 	};
 
+	// True when shaderc was linked in, so compilation happens inside the
+	// process and needs nothing installed next to the game
+	bool IsInProcess();
+
 	// True when a GLSL compiler can be found, ie. whether Compile can work at
 	// all on this machine
 	bool IsAvailable();

@@ -5,9 +5,12 @@
 #include "gargantuan/classes/ComputeShader.hpp"
 #include "gargantuan/classes/EditableImage.hpp"
 #include "gargantuan/classes/PostProcessShader.hpp"
+#include "gargantuan/classes/ShaderScript.hpp"
+#include "gargantuan/classes/SurfaceShader.hpp"
 #include "gargantuan/render/PipelineBuilder.hpp"
 #include "gargantuan/render/RenderPass.hpp"
 #include "gargantuan/render/Shader.hpp"
+#include "gargantuan/render/ShaderReflection.hpp"
 #include "gargantuan/scripting/ThreadEngine.hpp"
 
 #include <SDL3/SDL.h>
@@ -105,6 +108,11 @@ namespace gargantuan {
 		if (FullscreenVertexShader) {
 			SDL_ReleaseGPUShader(Gpu, FullscreenVertexShader);
 			FullscreenVertexShader = nullptr;
+		}
+
+		if (OpaqueVertexShader) {
+			SDL_ReleaseGPUShader(Gpu, OpaqueVertexShader);
+			OpaqueVertexShader = nullptr;
 		}
 
 		if (ShaderSampler) {
@@ -310,6 +318,37 @@ namespace gargantuan {
 
 	// Runtime code is keyed by identity and revision so editing it rebuilds the
 	// pipeline; a named asset is keyed by its name so cameras share one
+	std::vector<uint8_t> RenderProvider::PackParameters(ShaderScript *shader, const CompiledShader &compiled) {
+		const auto &layout = compiled.ParameterLayout;
+
+		if (!layout.Found) {
+			// No reflection, so fall back to one slot per parameter in the
+			// order they were set
+			const auto &slots = shader->GetPackedParameters();
+			std::vector<uint8_t> packed(slots.size() * sizeof(glm::vec4));
+			if (!slots.empty()) {
+				std::memcpy(packed.data(), slots.data(), packed.size());
+			}
+			return packed;
+		}
+
+		std::vector<uint8_t> packed(layout.Size, 0);
+		for (const auto &[name, value] : shader->GetParameters()) {
+			const auto *member = layout.Find(name);
+			// A parameter the shader never declared is simply ignored
+			if (!member || member->Offset >= packed.size()) {
+				continue;
+			}
+
+			// Clamp to the member's own size so setting a float cannot spill
+			// into whatever was declared after it
+			uint32_t writable = std::min<uint32_t>(member->Size, (uint32_t)sizeof(glm::vec4));
+			writable = std::min<uint32_t>(writable, (uint32_t)(packed.size() - member->Offset));
+			std::memcpy(packed.data() + member->Offset, &value, writable);
+		}
+		return packed;
+	}
+
 	std::string RenderProvider::GetShaderCacheKey(ShaderScript *shader, const char *stageExtension) {
 		if (shader->HasBytecode()) {
 			return "code:" + std::to_string((uintptr_t)shader) + ":" + std::to_string(shader->GetRevision());
@@ -317,10 +356,109 @@ namespace gargantuan {
 		return shader->Source + stageExtension;
 	}
 
+	RenderProvider::CompiledShader *RenderProvider::GetSurfaceShader(
+		SurfaceShader *shader, SDL_GPUTextureFormat colorFormat
+	) {
+		std::string key = GetShaderCacheKey(shader, ".frag") + "#surface" + std::to_string((int)colorFormat);
+
+		auto it = ShaderCache.find(key);
+		if (it != ShaderCache.end()) {
+			return it->second.Failed ? nullptr : &it->second;
+		}
+
+		CompiledShader &compiled = ShaderCache[key];
+		compiled.Failed = true;
+
+		SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
+		std::string extension, entrypoint;
+		GetShaderFormat(Gpu, format, extension, entrypoint);
+
+		// A surface shader replaces only the fragment stage, so it reuses the
+		// engine's own vertex stage and must match what that stage emits
+		if (!OpaqueVertexShader) {
+			size_t size = 0;
+			void *code = LoadShaderBytes("opaque", ".vert", size);
+			if (!code) {
+				return nullptr;
+			}
+
+			SDL_GPUShaderCreateInfo info{
+				.code_size = size,
+				.code = static_cast<const Uint8 *>(code),
+				.entrypoint = entrypoint.c_str(),
+				.format = format,
+				.stage = SDL_GPU_SHADERSTAGE_VERTEX,
+				.num_samplers = 0,
+				.num_storage_textures = 0,
+				.num_storage_buffers = 0,
+				.num_uniform_buffers = 2,
+			};
+			OpaqueVertexShader = SDL_CreateGPUShader(Gpu, &info);
+			SDL_free(code);
+
+			if (!OpaqueVertexShader) {
+				SDL_Log("Failed to create the opaque vertex shader: %s", SDL_GetError());
+				return nullptr;
+			}
+		}
+
+		size_t size = shader->HasBytecode() ? shader->GetBytecode().size() : 0;
+		void *code = nullptr;
+		if (shader->HasBytecode()) {
+			code = SDL_malloc(size);
+			std::memcpy(code, shader->GetBytecode().data(), size);
+		} else {
+			code = LoadShaderBytes(shader->Source, ".frag", size);
+		}
+		if (!code) {
+			return nullptr;
+		}
+
+		SDL_GPUShaderCreateInfo fragmentInfo{
+			.code_size = size,
+			.code = static_cast<const Uint8 *>(code),
+			.entrypoint = entrypoint.c_str(),
+			.format = format,
+			.stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
+			// the shadow map, plus the world block and the script's parameters
+			.num_samplers = 1,
+			.num_storage_textures = 0,
+			.num_storage_buffers = 0,
+			.num_uniform_buffers = 2,
+		};
+		SDL_GPUShader *fragment = SDL_CreateGPUShader(Gpu, &fragmentInfo);
+		compiled.ParameterLayout = ShaderReflection::ReflectUniformBlock(code, size, 1);
+		SDL_free(code);
+
+		if (!fragment) {
+			SDL_Log("Failed to create surface shader '%s': %s", key.c_str(), SDL_GetError());
+			return nullptr;
+		}
+
+		compiled.GraphicsPipeline = PipelineBuilder()
+										.SetVertexShader(OpaqueVertexShader)
+										.SetFragmentShader(fragment)
+										.SetColorEnabled(true)
+										.SetColorFormat(colorFormat)
+										.SetBlendingEnabled(true)
+										.SetDepthEnabled(true)
+										.SetDepthFormat(SDL_GPU_TEXTUREFORMAT_D16_UNORM)
+										.Build(Gpu);
+		SDL_ReleaseGPUShader(Gpu, fragment);
+
+		if (!compiled.GraphicsPipeline) {
+			SDL_Log("Failed to build a surface pipeline for '%s': %s", key.c_str(), SDL_GetError());
+			return nullptr;
+		}
+
+		compiled.Failed = false;
+		return &compiled;
+	}
+
 	RenderProvider::CompiledShader *RenderProvider::GetPostProcessShader(PostProcessShader *shader) {
 		// A shader that samples an extra image declares two samplers, so the
 		// pipeline for it is a different one and needs its own cache entry
-		uint32_t samplerCount = shader->GetImage() ? 2 : 1;
+		uint32_t samplerCount = 1 + (uint32_t)shader->GetImages().size();
 		std::string key = GetShaderCacheKey(shader, ".frag") + "#s" + std::to_string(samplerCount);
 
 		auto it = ShaderCache.find(key);
@@ -385,6 +523,8 @@ namespace gargantuan {
 			.num_uniform_buffers = 2,
 		};
 		SDL_GPUShader *fragment = SDL_CreateGPUShader(Gpu, &fragmentInfo);
+		// Parameters live at binding 1, with the engine builtins at binding 0
+		compiled.ParameterLayout = ShaderReflection::ReflectUniformBlock(code, size, 1);
 		SDL_free(code);
 
 		if (!fragment) {
@@ -460,6 +600,7 @@ namespace gargantuan {
 			.threadcount_z = (uint32_t)glm::max(threadGroupSize.z, 1.0f),
 		};
 		compiled.ComputePipeline = SDL_CreateGPUComputePipeline(Gpu, &info);
+		compiled.ParameterLayout = ShaderReflection::ReflectUniformBlock(code, size, 1);
 		SDL_free(code);
 
 		if (!compiled.ComputePipeline) {
@@ -509,34 +650,44 @@ namespace gargantuan {
 				continue;
 			}
 
-			auto parameters = shader->GetPackedParameters();
-			// SDL rejects a zero-length uniform push, so always send one slot
-			if (parameters.empty()) {
-				parameters.push_back(glm::vec4(0.0f));
-			}
-			uint32_t parameterBytes = (uint32_t)(parameters.size() * sizeof(glm::vec4));
-
 			if (auto *post = shader->Cast<PostProcessShader>()) {
 				CompiledShader *compiled = GetPostProcessShader(post);
 				if (!compiled) {
 					continue;
 				}
 
+				auto parameters = PackParameters(post, *compiled);
+				// SDL rejects a zero-length uniform push, so always send a slot
+				if (parameters.empty()) {
+					parameters.resize(sizeof(glm::vec4), 0);
+				}
+				uint32_t parameterBytes = (uint32_t)parameters.size();
+
 				SDL_GPUColorTargetInfo colorTarget{
 					.texture = destination,
 					.load_op = SDL_GPU_LOADOP_DONT_CARE,
 					.store_op = SDL_GPU_STOREOP_STORE,
 				};
-				SDL_GPUTextureSamplerBinding bindings[2] = {
-					{.texture = source, .sampler = ShaderSampler},
-					{.texture = nullptr, .sampler = ShaderSampler},
-				};
+				// Slot 0 is always the camera's own output; the script's images
+				// follow in the order they were set
+				SDL_GPUTextureSamplerBinding bindings[1 + ShaderScript::MAXIMUM_IMAGES];
+				bindings[0] = {.texture = source, .sampler = ShaderSampler};
 				uint32_t bindingCount = 1;
-				if (auto image = post->GetImage()) {
-					if (auto *texture = AcquireImageTexture(image.get())) {
-						bindings[1].texture = texture;
-						bindingCount = 2;
+
+				bool imagesReady = true;
+				for (auto &image : post->GetImages()) {
+					SDL_GPUTexture *texture = image ? AcquireImageTexture(image.get()) : nullptr;
+					if (!texture) {
+						// The pipeline declares a sampler per image, so a
+						// missing one would leave a binding empty
+						imagesReady = false;
+						break;
 					}
+					bindings[bindingCount++] = {.texture = texture, .sampler = ShaderSampler};
+				}
+
+				if (!imagesReady) {
+					continue;
 				}
 
 				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(commands, &colorTarget, 1, nullptr);
@@ -552,6 +703,12 @@ namespace gargantuan {
 				if (!compiled) {
 					continue;
 				}
+
+				auto parameters = PackParameters(compute, *compiled);
+				if (parameters.empty()) {
+					parameters.resize(sizeof(glm::vec4), 0);
+				}
+				uint32_t parameterBytes = (uint32_t)parameters.size();
 
 				SDL_GPUStorageTextureReadWriteBinding writeBinding{.texture = destination, .cycle = false};
 				SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(commands, &writeBinding, 1, nullptr, 0);
@@ -607,6 +764,20 @@ namespace gargantuan {
 		frameContext.DepthTexture = target.DepthTexture;
 		frameContext.Width = target.Width;
 		frameContext.Height = target.Height;
+
+		// A camera's SurfaceShader replaces the opaque pass's fragment stage
+		std::vector<uint8_t> surfaceParameters;
+		if (auto *camera = drawContext.Camera.get(); camera && camera->SurfaceShader) {
+			if (auto *surface = GetSurfaceShader(camera->SurfaceShader.get(), OFFSCREEN_FORMAT)) {
+				surfaceParameters = PackParameters(camera->SurfaceShader.get(), *surface);
+				if (surfaceParameters.empty()) {
+					surfaceParameters.resize(sizeof(glm::vec4), 0);
+				}
+				frameContext.SurfacePipeline = surface->GraphicsPipeline;
+				frameContext.SurfaceParameters = surfaceParameters.data();
+				frameContext.SurfaceParameterBytes = (uint32_t)surfaceParameters.size();
+			}
+		}
 
 		// The shadow map only depends on the light, but it has to be recorded
 		// into this command buffer for the opaque pass to sample it
@@ -828,6 +999,19 @@ namespace gargantuan {
 			!frameContext.ShadowMapTexture) {
 			SDL_CancelGPUCommandBuffer(frameContext.Commands);
 			return;
+		}
+
+		std::vector<uint8_t> surfaceParameters;
+		if (camera && camera->SurfaceShader) {
+			if (auto *surface = GetSurfaceShader(camera->SurfaceShader.get(), SwapchainFormat)) {
+				surfaceParameters = PackParameters(camera->SurfaceShader.get(), *surface);
+				if (surfaceParameters.empty()) {
+					surfaceParameters.resize(sizeof(glm::vec4), 0);
+				}
+				frameContext.SurfacePipeline = surface->GraphicsPipeline;
+				frameContext.SurfaceParameters = surfaceParameters.data();
+				frameContext.SurfaceParameterBytes = (uint32_t)surfaceParameters.size();
+			}
 		}
 
 		SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));

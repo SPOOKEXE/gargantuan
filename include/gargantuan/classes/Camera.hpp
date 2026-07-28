@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gargantuan/classes/ShaderScript.hpp"
+#include "gargantuan/classes/SurfaceShader.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
@@ -66,6 +67,10 @@ namespace gargantuan {
 		// Shaders run over this camera's output in order, each one reading what
 		// the previous one produced
 		std::vector<std::shared_ptr<ShaderScript>> Shaders;
+
+		// Replaces how objects this camera draws are shaded. Null keeps the
+		// engine's own lit-and-shadowed shading.
+		std::shared_ptr<SurfaceShader> SurfaceShader = nullptr;
 
 		void AddShader(std::shared_ptr<ShaderScript> shader);
 		void RemoveShader(std::shared_ptr<ShaderScript> shader);

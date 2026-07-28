@@ -90,7 +90,8 @@ namespace gargantuan {
 			};
 
 			auto pass = SDL_BeginGPURenderPass(context.Commands, &colorTarget, 1, &depthTarget);
-			SDL_BindGPUGraphicsPipeline(pass, Pipeline);
+			// A camera's SurfaceShader swaps the fragment stage for its own
+			SDL_BindGPUGraphicsPipeline(pass, context.SurfacePipeline ? context.SurfacePipeline : Pipeline);
 			SDL_BindGPUFragmentSamplers(pass, 0, &shadowBinding, 1);
 
 			WorldUniforms worldUniforms{
@@ -101,6 +102,12 @@ namespace gargantuan {
 			};
 			SDL_PushGPUVertexUniformData(context.Commands, 0, &worldUniforms, sizeof(WorldUniforms));
 			SDL_PushGPUFragmentUniformData(context.Commands, 0, &worldUniforms, sizeof(WorldUniforms));
+
+			if (context.SurfacePipeline && context.SurfaceParameters && context.SurfaceParameterBytes > 0) {
+				SDL_PushGPUFragmentUniformData(
+					context.Commands, 1, context.SurfaceParameters, context.SurfaceParameterBytes
+				);
+			}
 
 			for (auto part : context.WorldRoot->Parts) {
 				auto &mesh = part->GetMesh();

@@ -1,5 +1,9 @@
 #include "gargantuan/render/ShaderCompiler.hpp"
 
+#ifdef GARGANTUAN_HAVE_SHADERC
+#include <shaderc/shaderc.h>
+#endif
+
 #include <SDL3/SDL.h>
 #include <array>
 #include <cstdio>
@@ -25,8 +29,22 @@ namespace gargantuan::ShaderCompiler {
 		}
 
 		// Shell metacharacters in a path would let a filename run commands, so
-		// every path handed to the shell is quoted and any quote is escaped
+		// every path handed to the shell is quoted and any quote escaped.
+		// cmd.exe has no single-quoting and its own escaping rules, hence the
+		// split.
 		std::string QuoteForShell(const std::string &value) {
+#ifdef _WIN32
+			std::string quoted = "\"";
+			for (char character : value) {
+				// cmd.exe cannot quote these at all; a path containing one is
+				// refused rather than passed through
+				if (character == '"' || character == '%' || character == '\n') {
+					continue;
+				}
+				quoted += character;
+			}
+			return quoted + "\"";
+#else
 			std::string quoted = "'";
 			for (char character : value) {
 				if (character == '\'') {
@@ -36,6 +54,15 @@ namespace gargantuan::ShaderCompiler {
 				}
 			}
 			return quoted + "'";
+#endif
+		}
+
+		const char *NullDevice() {
+#ifdef _WIN32
+			return "NUL";
+#else
+			return "/dev/null";
+#endif
 		}
 
 		std::filesystem::path MakeScratchPath(const std::string &name, const char *extension) {
@@ -46,6 +73,67 @@ namespace gargantuan::ShaderCompiler {
 		}
 	} // namespace
 
+#ifdef GARGANTUAN_HAVE_SHADERC
+	namespace {
+		shaderc_shader_kind ShaderKind(Stage stage) {
+			switch (stage) {
+			case Stage::Vertex:
+				return shaderc_glsl_vertex_shader;
+			case Stage::Compute:
+				return shaderc_glsl_compute_shader;
+			case Stage::Fragment:
+			default:
+				return shaderc_glsl_fragment_shader;
+			}
+		}
+
+		// Compiles in-process, so nothing has to be installed alongside the game
+		Result CompileInProcess(const std::string &source, Stage stage, const std::string &name) {
+			Result result;
+
+			shaderc_compiler_t compiler = shaderc_compiler_initialize();
+			if (!compiler) {
+				result.Error = "Could not start the shader compiler";
+				return result;
+			}
+
+			shaderc_compile_options_t options = shaderc_compile_options_initialize();
+			shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
+
+			shaderc_compilation_result_t compiled = shaderc_compile_into_spv(
+				compiler, source.c_str(), source.size(), ShaderKind(stage), name.c_str(), "main", options
+			);
+
+			if (const char *message = shaderc_result_get_error_message(compiled)) {
+				result.Error = message;
+			}
+
+			if (shaderc_result_get_compilation_status(compiled) == shaderc_compilation_status_success) {
+				const char *bytes = shaderc_result_get_bytes(compiled);
+				size_t length = shaderc_result_get_length(compiled);
+				result.Bytecode.assign(bytes, bytes + length);
+				result.Success = !result.Bytecode.empty();
+				if (!result.Success) {
+					result.Error = "The compiler produced no output";
+				}
+			}
+
+			shaderc_result_release(compiled);
+			shaderc_compile_options_release(options);
+			shaderc_compiler_release(compiler);
+			return result;
+		}
+	} // namespace
+#endif
+
+	bool IsInProcess() {
+#ifdef GARGANTUAN_HAVE_SHADERC
+		return true;
+#else
+		return false;
+#endif
+	}
+
 	std::string GetCompilerCommand() {
 		return COMPILER_COMMAND;
 	}
@@ -55,6 +143,10 @@ namespace gargantuan::ShaderCompiler {
 	}
 
 	bool IsAvailable() {
+#ifdef GARGANTUAN_HAVE_SHADERC
+		// Compiled in, so nothing external is needed
+		return true;
+#else
 		// Probing spawns a process, so remember the answer per command rather
 		// than paying for it on every compile
 		static std::string probedCommand;
@@ -64,10 +156,11 @@ namespace gargantuan::ShaderCompiler {
 			return probedResult;
 		}
 
-		std::string probe = COMPILER_COMMAND + " --version > /dev/null 2>&1";
+		std::string probe = COMPILER_COMMAND + " --version > " + NullDevice() + " 2>&1";
 		probedResult = std::system(probe.c_str()) == 0;
 		probedCommand = COMPILER_COMMAND;
 		return probedResult;
+#endif
 	}
 
 	Result Compile(const std::string &source, Stage stage, const std::string &name) {
@@ -77,6 +170,10 @@ namespace gargantuan::ShaderCompiler {
 			result.Error = "Shader source is empty";
 			return result;
 		}
+
+#ifdef GARGANTUAN_HAVE_SHADERC
+		return CompileInProcess(source, stage, name);
+#else
 
 		if (!IsAvailable()) {
 			result.Error = "No GLSL compiler found. Install '" + COMPILER_COMMAND +
@@ -147,6 +244,7 @@ namespace gargantuan::ShaderCompiler {
 		std::filesystem::remove(errorPath, ignored);
 
 		return result;
+#endif
 	}
 
 	Result Validate(const std::string &source, Stage stage, const std::string &name) {
