@@ -39,8 +39,8 @@ right.WindowSize = UDim2.new(0.5, 0, 1, 0)
 right.Parent = Workspace
 
 local grayscale = Instance.new("ComputeShader")
-grayscale.Source = "grayscale"
-grayscale:SetNumber("Strength", 1)
+grayscale.Source = Enum.PresetShaders.BlackWhite
+grayscale:SetNumber(Enum.ShaderProperty.Strength, 1)
 right:AddShader(grayscale)
 
 print(`split screen: left {tostring(left.WindowSize)}, right {tostring(right.WindowSize)}`)

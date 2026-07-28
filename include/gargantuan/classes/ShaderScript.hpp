@@ -114,6 +114,11 @@ namespace gargantuan {
 		static int LSetVector3(lua_State *L, Instance *instance);
 		static int LSetColor3(lua_State *L, Instance *instance);
 		static int LSetBool(lua_State *L, Instance *instance);
+		// Bound by hand too, so a binding's name can be an Enum.ShaderProperty
+		static int LSetImage(lua_State *L, Instance *instance);
+		static int LGetImage(lua_State *L, Instance *instance);
+		static int LSetCameraTexture(lua_State *L, Instance *instance);
+		static int LGetCameraTexture(lua_State *L, Instance *instance);
 
 		// Packed slots, ready to push as uniform data. Only used when a shader's
 		// layout could not be reflected.

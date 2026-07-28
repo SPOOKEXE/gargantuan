@@ -64,8 +64,8 @@ local effects = {
 		name = "pixelated",
 		build = function()
 			local shader = Instance.new("ComputeShader")
-			shader.Source = "pixelate"
-			shader:SetNumber("BlockSize", 8)
+			shader.Source = Enum.PresetShaders.Pixelate
+			shader:SetNumber(Enum.ShaderProperty.BlockSize, 8)
 			return { shader }
 		end,
 	},
@@ -73,9 +73,9 @@ local effects = {
 		name = "swirl",
 		build = function()
 			local shader = Instance.new("PostProcessShader")
-			shader.Source = "swirl"
-			shader:SetNumber("Strength", 3.2)
-			shader:SetNumber("Radius", 0.48)
+			shader.Source = Enum.PresetShaders.Swirl
+			shader:SetNumber(Enum.ShaderProperty.Strength, 3.2)
+			shader:SetNumber(Enum.ShaderProperty.Radius, 0.48)
 			return { shader }
 		end,
 	},
@@ -83,10 +83,10 @@ local effects = {
 		name = "analogue_horror",
 		build = function()
 			local shader = Instance.new("PostProcessShader")
-			shader.Source = "analogue_horror"
-			shader:SetNumber("Intensity", 1)
-			shader:SetNumber("Noise", 0.32)
-			shader:SetNumber("Tracking", 1)
+			shader.Source = Enum.PresetShaders.AnalogueHorror
+			shader:SetNumber(Enum.ShaderProperty.Intensity, 1)
+			shader:SetNumber(Enum.ShaderProperty.Noise, 0.32)
+			shader:SetNumber(Enum.ShaderProperty.Tracking, 1)
 			return { shader }
 		end,
 	},
@@ -94,10 +94,10 @@ local effects = {
 		name = "bodycam",
 		build = function()
 			local shader = Instance.new("PostProcessShader")
-			shader.Source = "bodycam"
-			shader:SetNumber("Distortion", 0.55)
-			shader:SetNumber("Vignette", 1.1)
-			shader:SetNumber("Grain", 0.14)
+			shader.Source = Enum.PresetShaders.BodyCamera
+			shader:SetNumber(Enum.ShaderProperty.Distortion, 0.55)
+			shader:SetNumber(Enum.ShaderProperty.Vignette, 1.1)
+			shader:SetNumber(Enum.ShaderProperty.Grain, 0.14)
 			return { shader }
 		end,
 	},
@@ -105,8 +105,8 @@ local effects = {
 		name = "thermal",
 		build = function()
 			local shader = Instance.new("ComputeShader")
-			shader.Source = "thermal"
-			shader:SetNumber("Contrast", 1.5)
+			shader.Source = Enum.PresetShaders.ThermalRed
+			shader:SetNumber(Enum.ShaderProperty.Contrast, 1.5)
 			return { shader }
 		end,
 	},
@@ -114,9 +114,9 @@ local effects = {
 		name = "edges",
 		build = function()
 			local shader = Instance.new("ComputeShader")
-			shader.Source = "edge_detect"
-			shader:SetNumber("Strength", 2.2)
-			shader:SetNumber("Background", 0.18)
+			shader.Source = Enum.PresetShaders.EdgeDetect
+			shader:SetNumber(Enum.ShaderProperty.Strength, 2.2)
+			shader:SetNumber(Enum.ShaderProperty.Background, 0.18)
 			return { shader }
 		end,
 	},
@@ -124,8 +124,8 @@ local effects = {
 		name = "dithered",
 		build = function()
 			local shader = Instance.new("ComputeShader")
-			shader.Source = "dither"
-			shader:SetNumber("Levels", 3)
+			shader.Source = Enum.PresetShaders.Dither
+			shader:SetNumber(Enum.ShaderProperty.Levels, 3)
 			return { shader }
 		end,
 	},
@@ -134,14 +134,14 @@ local effects = {
 		name = "haunted_lowres",
 		build = function()
 			local pixelate = Instance.new("ComputeShader")
-			pixelate.Source = "pixelate"
-			pixelate:SetNumber("BlockSize", 5)
+			pixelate.Source = Enum.PresetShaders.Pixelate
+			pixelate:SetNumber(Enum.ShaderProperty.BlockSize, 5)
 
 			local tape = Instance.new("PostProcessShader")
-			tape.Source = "analogue_horror"
-			tape:SetNumber("Intensity", 0.9)
-			tape:SetNumber("Noise", 0.4)
-			tape:SetNumber("Tracking", 1.4)
+			tape.Source = Enum.PresetShaders.AnalogueHorror
+			tape:SetNumber(Enum.ShaderProperty.Intensity, 0.9)
+			tape:SetNumber(Enum.ShaderProperty.Noise, 0.4)
+			tape:SetNumber(Enum.ShaderProperty.Tracking, 1.4)
 			return { pixelate, tape }
 		end,
 	},
@@ -150,15 +150,15 @@ local effects = {
 		name = "patrol_scan",
 		build = function()
 			local edges = Instance.new("ComputeShader")
-			edges.Source = "edge_detect"
-			edges:SetNumber("Strength", 1.8)
-			edges:SetNumber("Background", 0.25)
+			edges.Source = Enum.PresetShaders.EdgeDetect
+			edges:SetNumber(Enum.ShaderProperty.Strength, 1.8)
+			edges:SetNumber(Enum.ShaderProperty.Background, 0.25)
 
 			local lens = Instance.new("PostProcessShader")
-			lens.Source = "bodycam"
-			lens:SetNumber("Distortion", 0.45)
-			lens:SetNumber("Vignette", 1.2)
-			lens:SetNumber("Grain", 0.1)
+			lens.Source = Enum.PresetShaders.BodyCamera
+			lens:SetNumber(Enum.ShaderProperty.Distortion, 0.45)
+			lens:SetNumber(Enum.ShaderProperty.Vignette, 1.2)
+			lens:SetNumber(Enum.ShaderProperty.Grain, 0.1)
 			return { edges, lens }
 		end,
 	},

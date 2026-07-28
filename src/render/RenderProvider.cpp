@@ -79,8 +79,52 @@ namespace gargantuan {
 		OffscreenOpaquePass = CreateOpaquePass(Gpu, OFFSCREEN_FORMAT);
 	}
 
+	void RenderProvider::RetireFrame(std::vector<SDL_GPUFence *> &fences) {
+		if (!fences.empty()) {
+			SDL_WaitForGPUFences(Gpu, true, fences.data(), (Uint32)fences.size());
+			for (auto *fence : fences) {
+				SDL_ReleaseGPUFence(Gpu, fence);
+			}
+		}
+		fences.clear();
+	}
+
+	void RenderProvider::BeginFrame() {
+		while (FramesInFlight.size() >= MAXIMUM_FRAMES_IN_FLIGHT) {
+			RetireFrame(FramesInFlight.front());
+			FramesInFlight.pop_front();
+		}
+	}
+
+	void RenderProvider::EndFrame() {
+		if (!FrameFences.empty()) {
+			FramesInFlight.push_back(std::move(FrameFences));
+			FrameFences.clear();
+		}
+	}
+
+	void RenderProvider::SubmitTracked(SDL_GPUCommandBuffer *commands) {
+		// Falling back to a plain submit keeps the picture correct if a fence
+		// cannot be had; only the pacing is lost
+		if (SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands)) {
+			FrameFences.push_back(fence);
+		}
+	}
+
 	void RenderProvider::Destroy() {
 		SDL_WaitForGPUIdle(Gpu);
+
+		// The GPU is idle, so every fence has signalled and only needs releasing
+		for (auto &fences : FramesInFlight) {
+			for (auto *fence : fences) {
+				SDL_ReleaseGPUFence(Gpu, fence);
+			}
+		}
+		FramesInFlight.clear();
+		for (auto *fence : FrameFences) {
+			SDL_ReleaseGPUFence(Gpu, fence);
+		}
+		FrameFences.clear();
 
 		// Anything still waiting on a fence will never be resumed now
 		for (auto &pending : PendingRenders) {
@@ -1213,7 +1257,7 @@ namespace gargantuan {
 			first = false;
 		}
 
-		SDL_SubmitGPUCommandBuffer(commands);
+		SubmitTracked(commands);
 	}
 
 	void RenderProvider::DrawOffscreen(DrawContext drawContext) {
@@ -1236,7 +1280,7 @@ namespace gargantuan {
 
 		RecordShaderChain(commands, camera, *target);
 		RecordHistoryCopy(commands, camera, *target);
-		SDL_SubmitGPUCommandBuffer(commands);
+		SubmitTracked(commands);
 	}
 
 	bool RenderProvider::RequestRender(DrawContext drawContext, lua_State *thread, ThreadEngine *threadEngine) {
@@ -1428,7 +1472,7 @@ namespace gargantuan {
 				.filter = SDL_GPU_FILTER_LINEAR,
 			};
 			SDL_BlitGPUTexture(commands, &blit);
-			SDL_SubmitGPUCommandBuffer(commands);
+			SubmitTracked(commands);
 			return;
 		}
 
@@ -1477,7 +1521,7 @@ namespace gargantuan {
 		SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
 		SDL_EndGPURenderPass(OpaquePass->Draw(Gpu, frameContext));
 
-		SDL_SubmitGPUCommandBuffer(frameContext.Commands);
+		SubmitTracked(frameContext.Commands);
 	}
 
 	void RenderProvider::Resize(int width, int height) {

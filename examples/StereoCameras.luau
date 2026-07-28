@@ -90,9 +90,9 @@ end
 
 -- Post-process shaders apply per eye, which is where lens distortion would go
 local tint = Instance.new("PostProcessShader")
-tint.Source = "vignette"
-tint:SetNumber("Intensity", 0.6)
-tint:SetColor3("Tint", Color3.new(1, 1, 1))
+tint.Source = Enum.PresetShaders.Vignette
+tint:SetNumber(Enum.ShaderProperty.Intensity, 0.6)
+tint:SetColor3(Enum.ShaderProperty.Tint, Color3.new(1, 1, 1))
 leftEye:AddShader(tint)
 
 -- Keep the eyes looking at the marker as it is moved around

@@ -162,6 +162,27 @@ namespace gargantuan {
 		Pixels = std::move(cropped);
 	}
 
+	namespace {
+		// Integer division truncates, and every blend below divides by 255, so
+		// plain `/ 255` loses up to a whole level and always downwards. One
+		// draw is invisible; drawing repeatedly onto the same pixel walks it
+		// darker every time. Rounding to nearest makes the error unbiased, so
+		// it stops accumulating in one direction.
+		//
+		// Channels are kept as bytes rather than floats: rounding to nearest
+		// already bounds the error at half a level per operation with no
+		// drift, and floats would cost four times the memory for an image that
+		// has to be quantised on save anyway.
+		inline int DivideBy255(int value) {
+			return (value + 127) / 255;
+		}
+
+		// The same, for a denominator that is not 255
+		inline int DivideRounded(int value, int divisor) {
+			return divisor <= 0 ? 0 : (value + divisor / 2) / divisor;
+		}
+	} // namespace
+
 	void EditableImage::CombinePixel(
 		int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a, Enums::ImageCombineType combine, float coverage
 	) {
@@ -185,10 +206,10 @@ namespace gargantuan {
 			}
 
 			int inverse = 255 - cover;
-			pixel[0] = (uint8_t)((red * cover + pixel[0] * inverse) / 255);
-			pixel[1] = (uint8_t)((green * cover + pixel[1] * inverse) / 255);
-			pixel[2] = (uint8_t)((blue * cover + pixel[2] * inverse) / 255);
-			pixel[3] = (uint8_t)((alpha * cover + pixel[3] * inverse) / 255);
+			pixel[0] = (uint8_t)DivideBy255(red * cover + pixel[0] * inverse);
+			pixel[1] = (uint8_t)DivideBy255(green * cover + pixel[1] * inverse);
+			pixel[2] = (uint8_t)DivideBy255(blue * cover + pixel[2] * inverse);
+			pixel[3] = (uint8_t)DivideBy255(alpha * cover + pixel[3] * inverse);
 		};
 
 		switch (combine) {
@@ -198,22 +219,22 @@ namespace gargantuan {
 			return;
 
 		case Enums::ImageCombineType::Add: {
-			int alpha = a * cover / 255;
+			int alpha = DivideBy255(a * cover);
 			easeIn(
-				glm::min(255, pixel[0] + r * alpha / 255),
-				glm::min(255, pixel[1] + g * alpha / 255),
-				glm::min(255, pixel[2] + b * alpha / 255),
+				glm::min(255, pixel[0] + DivideBy255(r * alpha)),
+				glm::min(255, pixel[1] + DivideBy255(g * alpha)),
+				glm::min(255, pixel[2] + DivideBy255(b * alpha)),
 				glm::min(255, pixel[3] + alpha)
 			);
 			return;
 		}
 
 		case Enums::ImageCombineType::Multiply: {
-			int alpha = a * cover / 255;
+			int alpha = DivideBy255(a * cover);
 			int inverse = 255 - alpha;
-			pixel[0] = (uint8_t)((pixel[0] * r / 255 * alpha + pixel[0] * inverse) / 255);
-			pixel[1] = (uint8_t)((pixel[1] * g / 255 * alpha + pixel[1] * inverse) / 255);
-			pixel[2] = (uint8_t)((pixel[2] * b / 255 * alpha + pixel[2] * inverse) / 255);
+			pixel[0] = (uint8_t)DivideBy255(DivideBy255(pixel[0] * r) * alpha + pixel[0] * inverse);
+			pixel[1] = (uint8_t)DivideBy255(DivideBy255(pixel[1] * g) * alpha + pixel[1] * inverse);
+			pixel[2] = (uint8_t)DivideBy255(DivideBy255(pixel[2] * b) * alpha + pixel[2] * inverse);
 			return;
 		}
 
@@ -223,7 +244,7 @@ namespace gargantuan {
 		}
 
 		// Source-over, where coverage simply weakens the source
-		int alpha = a * cover / 255;
+		int alpha = DivideBy255(a * cover);
 		if (alpha <= 0) {
 			return;
 		}
@@ -241,7 +262,7 @@ namespace gargantuan {
 		// draws over transparent pixels a dark halo.
 		int inverse = 255 - alpha;
 		int destinationAlpha = pixel[3];
-		int outputAlpha = alpha + destinationAlpha * inverse / 255;
+		int outputAlpha = alpha + DivideBy255(destinationAlpha * inverse);
 
 		if (outputAlpha <= 0) {
 			pixel[0] = pixel[1] = pixel[2] = pixel[3] = 0;
@@ -250,7 +271,7 @@ namespace gargantuan {
 
 		auto composite = [&](int source, int destination) {
 			int numerator = source * alpha * 255 + destination * destinationAlpha * inverse;
-			return (uint8_t)glm::clamp(numerator / (outputAlpha * 255), 0, 255);
+			return (uint8_t)glm::clamp(DivideRounded(numerator, outputAlpha * 255), 0, 255);
 		};
 
 		pixel[0] = composite(r, pixel[0]);

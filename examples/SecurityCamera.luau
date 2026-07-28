@@ -61,13 +61,13 @@ for index, entry in layout do
 
 	local shader = Instance.new("PostProcessShader")
 	shader.Name = "SecurityLook"
-	shader.Source = "security_camera"
-	shader:SetNumber("Distortion", entry.night and 0.5 or 0.32)
-	shader:SetNumber("Scanlines", 1)
-	shader:SetNumber("Noise", entry.night and 0.10 or 0.05)
-	shader:SetNumber("NightVision", entry.night and 1 or 0)
-	shader:SetNumber("Contrast", entry.night and 1.05 or 1.12)
-	shader:SetNumber("Gain", entry.night and 1 or 1.55)
+	shader.Source = Enum.PresetShaders.SecurityCamera
+	shader:SetNumber(Enum.ShaderProperty.Distortion, entry.night and 0.5 or 0.32)
+	shader:SetNumber(Enum.ShaderProperty.Scanlines, 1)
+	shader:SetNumber(Enum.ShaderProperty.Noise, entry.night and 0.10 or 0.05)
+	shader:SetNumber(Enum.ShaderProperty.NightVision, entry.night and 1 or 0)
+	shader:SetNumber(Enum.ShaderProperty.Contrast, entry.night and 1.05 or 1.12)
+	shader:SetNumber(Enum.ShaderProperty.Gain, entry.night and 1 or 1.55)
 	camera:AddShader(shader)
 
 	feeds[index] = { camera = camera, entry = entry }

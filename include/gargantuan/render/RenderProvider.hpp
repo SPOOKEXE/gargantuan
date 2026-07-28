@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <deque>
 #include <lua.h>
 #include <memory>
 #include <string>
@@ -54,6 +55,22 @@ namespace gargantuan {
 
 		RenderProvider(const RenderProvider &) = delete;
 		RenderProvider &operator=(const RenderProvider &) = delete;
+
+		// SDL keeps everything a submitted command buffer touched alive until
+		// the GPU has finished with it -- the buffer itself, its descriptor
+		// pools, its uniform buffers. Nothing in a frame waits, so without a
+		// gate the engine submits far faster than the GPU drains and that
+		// backlog grows without bound: measured at 3.3 MB a frame, which is
+		// gigabytes within seconds.
+		//
+		// BeginFrame blocks until the frame from a couple back has finished,
+		// which paces the CPU to the GPU. Waiting on the frame just submitted
+		// would serialise the two and halve the frame rate, so a small backlog
+		// is deliberate.
+		void BeginFrame();
+		// Closes the frame, so the fences submitted since BeginFrame are what
+		// a later BeginFrame waits on
+		void EndFrame();
 
 		// Draws a camera to the window
 		void Draw(DrawContext drawContext);
@@ -177,6 +194,20 @@ namespace gargantuan {
 		std::unordered_map<Camera *, CameraTarget> CameraTargets;
 		std::unordered_map<EditableImage *, UploadedImage> UploadedImages;
 		std::vector<PendingRender> PendingRenders;
+
+		// Submits a command buffer and counts it against the frame's budget.
+		// Every draw goes through here rather than SDL_SubmitGPUCommandBuffer,
+		// or its work would never be waited on.
+		void SubmitTracked(SDL_GPUCommandBuffer *commands);
+
+		// Two is the usual choice: enough that the CPU is not idling on the
+		// GPU, few enough that the backlog stays small and input latency does
+		// not build up
+		static constexpr size_t MAXIMUM_FRAMES_IN_FLIGHT = 2;
+		std::vector<SDL_GPUFence *> FrameFences;
+		std::deque<std::vector<SDL_GPUFence *>> FramesInFlight;
+		// Waits on a frame's fences and releases them
+		void RetireFrame(std::vector<SDL_GPUFence *> &fences);
 		std::unordered_map<std::string, CompiledShader> ShaderCache;
 		// Cycles are reported once rather than every frame
 		std::unordered_set<Camera *> ReportedCycles;

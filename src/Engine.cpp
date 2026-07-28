@@ -131,6 +131,11 @@ namespace gargantuan {
 		TweenService->Step(deltaTime);
 		MeshProvider::UploadToGpu(Gpu);
 
+		// Paces this frame against the GPU before any of it is submitted. A
+		// scene with offscreen cameras submits several command buffers a frame
+		// and none of them is waited on anywhere else.
+		RenderProvider->BeginFrame();
+
 		auto worldRoot = std::static_pointer_cast<WorldRoot>(Workspace);
 		auto lightDirection = Lighting->GetSunDirection();
 
@@ -212,6 +217,8 @@ namespace gargantuan {
 		} else if (!windowCameras.empty()) {
 			RenderProvider->DrawComposite(windowCameras);
 		}
+
+		RenderProvider->EndFrame();
 
 		// Resume any script waiting on a Camera:Render() readback
 		RenderProvider->PollRenders(&ScriptEngine->ThreadEngine);

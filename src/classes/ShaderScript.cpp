@@ -3,6 +3,7 @@
 // there; SetCameraTexture needs the complete type to marshal it
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/render/Shader.hpp"
+#include "gargantuan/render/ShaderPresets.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 
 #include <SDL3/SDL.h>
@@ -10,13 +11,52 @@
 #include <algorithm>
 #include <lualib.h>
 
+// A shader's parameters and texture bindings are named the same way whatever
+// their type, so the two signatures are written once here
+#define G_SHADER_NAME_TYPE "string | Enum.ShaderProperty"
+#define SET_SIGNATURE(valueType) "(self, name: " G_SHADER_NAME_TYPE ", value: " valueType "): ()"
+#define GET_SIGNATURE(returnType) "(self, name: " G_SHADER_NAME_TYPE "): " returnType
+
 namespace gargantuan {
 	const ShaderScript::ClassDefinition ShaderScript::DEFINITION = {
 		.Name = "ShaderScript",
 		.Superclass = "Instance",
 		.Properties =
 			{
-				G_UD_READWRITE_PROP(ShaderScript, Source, std::string),
+				{
+					// Takes either the asset name or an Enum.PresetShaders item,
+					// and always reads back as the string, since a shader outside
+					// the preset list has no item to report
+					"Source",
+					{
+						[](lua_State *L, Instance *instance) -> int {
+							StackValue<std::string>::Push(L, instance->Cast<ShaderScript>()->Source);
+							return 1;
+						},
+						[](lua_State *L, Instance *instance) -> int {
+							instance->Cast<ShaderScript>()->Source = CheckPresetShaderArgument(L, -1);
+							return 0;
+						},
+						[]() -> std::string { return "string | Enum.PresetShaders"; },
+					},
+				},
+				{
+					"Preset",
+					{
+						[](lua_State *L, Instance *instance) -> int {
+							StackValue<Enums::PresetShaders>::Push(
+								L, GetPresetShaderFromSource(instance->Cast<ShaderScript>()->Source)
+							);
+							return 1;
+						},
+						[](lua_State *L, Instance *instance) -> int {
+							instance->Cast<ShaderScript>()->Source =
+								GetPresetShaderSource(CheckStackValue<Enums::PresetShaders>(L, -1));
+							return 0;
+						},
+						G_UD_REFLECT_TYPE(Enums::PresetShaders),
+					},
+				},
 				{
 					"Code",
 					{
@@ -44,20 +84,20 @@ namespace gargantuan {
 				},
 			},
 		.Methods = {
-			{"SetNumber",
-			 {&ShaderScript::LSetNumber, []() -> std::string { return "(self, name: string, value: number): ()"; }}},
-			{"SetVector2",
-			 {&ShaderScript::LSetVector2, []() -> std::string { return "(self, name: string, value: Vector2): ()"; }}},
-			{"SetVector3",
-			 {&ShaderScript::LSetVector3, []() -> std::string { return "(self, name: string, value: Vector3): ()"; }}},
-			{"SetColor3",
-			 {&ShaderScript::LSetColor3, []() -> std::string { return "(self, name: string, value: Color3): ()"; }}},
-			{"SetBool",
-			 {&ShaderScript::LSetBool, []() -> std::string { return "(self, name: string, value: boolean): ()"; }}},
-			{"SetImage", Method::Wrap<&ShaderScript::SetImage>()},
-			{"GetImage", Method::Wrap<&ShaderScript::GetImage>()},
-			{"SetCameraTexture", Method::Wrap<&ShaderScript::SetCameraTexture>()},
-			{"GetCameraTexture", Method::Wrap<&ShaderScript::GetCameraTexture>()},
+			// Every name here reads through CheckShaderPropertyArgument, so it
+			// takes a plain string as well as an Enum.ShaderProperty item; a
+			// shader compiled from Code declares names no enum could know
+			{"SetNumber", {&ShaderScript::LSetNumber, []() -> std::string { return SET_SIGNATURE("number"); }}},
+			{"SetVector2", {&ShaderScript::LSetVector2, []() -> std::string { return SET_SIGNATURE("Vector2"); }}},
+			{"SetVector3", {&ShaderScript::LSetVector3, []() -> std::string { return SET_SIGNATURE("Vector3"); }}},
+			{"SetColor3", {&ShaderScript::LSetColor3, []() -> std::string { return SET_SIGNATURE("Color3"); }}},
+			{"SetBool", {&ShaderScript::LSetBool, []() -> std::string { return SET_SIGNATURE("boolean"); }}},
+			{"SetImage", {&ShaderScript::LSetImage, []() -> std::string { return SET_SIGNATURE("EditableImage"); }}},
+			{"GetImage", {&ShaderScript::LGetImage, []() -> std::string { return GET_SIGNATURE("EditableImage?"); }}},
+			{"SetCameraTexture",
+			 {&ShaderScript::LSetCameraTexture, []() -> std::string { return SET_SIGNATURE("Camera"); }}},
+			{"GetCameraTexture",
+			 {&ShaderScript::LGetCameraTexture, []() -> std::string { return GET_SIGNATURE("Camera?"); }}},
 			{"ListImages", Method::Wrap<&ShaderScript::ListImages>()},
 			{"ClearImages", Method::Wrap<&ShaderScript::ClearImages>()},
 			{"GetExpectedParameters", Method::Wrap<&ShaderScript::GetExpectedParameters>()},
@@ -161,7 +201,7 @@ namespace gargantuan {
 	} // namespace
 
 	int ShaderScript::LSetNumber(lua_State *L, Instance *instance) {
-		std::string name = CheckStackValue<std::string>(L, 2);
+		std::string name = CheckShaderPropertyArgument(L, 2);
 		float value = CheckStackValue<float>(L, 3);
 		if (auto *shader = CheckParameterName(L, instance, name)) {
 			shader->SetNumber(name, value);
@@ -170,7 +210,7 @@ namespace gargantuan {
 	}
 
 	int ShaderScript::LSetVector2(lua_State *L, Instance *instance) {
-		std::string name = CheckStackValue<std::string>(L, 2);
+		std::string name = CheckShaderPropertyArgument(L, 2);
 		Vector2 value = CheckStackValue<Vector2>(L, 3);
 		if (auto *shader = CheckParameterName(L, instance, name)) {
 			shader->SetVector2(name, value);
@@ -179,7 +219,7 @@ namespace gargantuan {
 	}
 
 	int ShaderScript::LSetVector3(lua_State *L, Instance *instance) {
-		std::string name = CheckStackValue<std::string>(L, 2);
+		std::string name = CheckShaderPropertyArgument(L, 2);
 		glm::vec3 value = CheckStackValue<glm::vec3>(L, 3);
 		if (auto *shader = CheckParameterName(L, instance, name)) {
 			shader->SetVector3(name, value);
@@ -188,7 +228,7 @@ namespace gargantuan {
 	}
 
 	int ShaderScript::LSetColor3(lua_State *L, Instance *instance) {
-		std::string name = CheckStackValue<std::string>(L, 2);
+		std::string name = CheckShaderPropertyArgument(L, 2);
 		Color3 value = CheckStackValue<Color3>(L, 3);
 		if (auto *shader = CheckParameterName(L, instance, name)) {
 			shader->SetColor3(name, value);
@@ -197,10 +237,56 @@ namespace gargantuan {
 	}
 
 	int ShaderScript::LSetBool(lua_State *L, Instance *instance) {
-		std::string name = CheckStackValue<std::string>(L, 2);
+		std::string name = CheckShaderPropertyArgument(L, 2);
 		bool value = CheckStackValue<bool>(L, 3);
 		if (auto *shader = CheckParameterName(L, instance, name)) {
 			shader->SetBool(name, value);
+		}
+		return 0;
+	}
+
+	namespace {
+		// Texture bindings are keyed by name for ordering only, so unlike a
+		// parameter there is nothing reflected to check the name against
+		ShaderScript *CheckShader(lua_State *L, Instance *instance) {
+			auto *shader = instance->Cast<ShaderScript>();
+			if (!shader) {
+				luaL_error(L, "expected a ShaderScript");
+			}
+			return shader;
+		}
+	} // namespace
+
+	int ShaderScript::LSetImage(lua_State *L, Instance *instance) {
+		std::string name = CheckShaderPropertyArgument(L, 2);
+		auto image = CheckStackValue<std::shared_ptr<EditableImage>>(L, 3);
+		if (auto *shader = CheckShader(L, instance)) {
+			shader->SetImage(std::move(name), std::move(image));
+		}
+		return 0;
+	}
+
+	int ShaderScript::LGetImage(lua_State *L, Instance *instance) {
+		std::string name = CheckShaderPropertyArgument(L, 2);
+		if (auto *shader = CheckShader(L, instance)) {
+			return StackValue<std::shared_ptr<EditableImage>>::Push(L, shader->GetImage(std::move(name)));
+		}
+		return 0;
+	}
+
+	int ShaderScript::LSetCameraTexture(lua_State *L, Instance *instance) {
+		std::string name = CheckShaderPropertyArgument(L, 2);
+		auto camera = CheckStackValue<std::shared_ptr<Camera>>(L, 3);
+		if (auto *shader = CheckShader(L, instance)) {
+			shader->SetCameraTexture(std::move(name), std::move(camera));
+		}
+		return 0;
+	}
+
+	int ShaderScript::LGetCameraTexture(lua_State *L, Instance *instance) {
+		std::string name = CheckShaderPropertyArgument(L, 2);
+		if (auto *shader = CheckShader(L, instance)) {
+			return StackValue<std::shared_ptr<Camera>>::Push(L, shader->GetCameraTexture(std::move(name)));
 		}
 		return 0;
 	}

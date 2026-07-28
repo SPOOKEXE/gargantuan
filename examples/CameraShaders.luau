@@ -46,14 +46,14 @@ securityCamera.Parent = Workspace
 -- Preset shaders, applied in the order they are added
 local grayscale = Instance.new("ComputeShader")
 grayscale.Name = "Grayscale"
-grayscale.Source = "grayscale"
-grayscale:SetNumber("Strength", 1)
+grayscale.Source = Enum.PresetShaders.BlackWhite
+grayscale:SetNumber(Enum.ShaderProperty.Strength, 1)
 
 local vignette = Instance.new("PostProcessShader")
 vignette.Name = "Vignette"
-vignette.Source = "vignette"
-vignette:SetNumber("Intensity", 0.9)
-vignette:SetColor3("Tint", Color3.new(0.8, 1, 0.8))
+vignette.Source = Enum.PresetShaders.Vignette
+vignette:SetNumber(Enum.ShaderProperty.Intensity, 0.9)
+vignette:SetColor3(Enum.ShaderProperty.Tint, Color3.new(0.8, 1, 0.8))
 
 securityCamera:AddShader(grayscale)
 securityCamera:AddShader(vignette)
@@ -110,10 +110,10 @@ end
 -- Paste the capture back over the camera as a picture-in-picture
 local overlay = Instance.new("PostProcessShader")
 overlay.Name = "PictureInPicture"
-overlay.Source = "overlay"
-overlay:SetImage("Capture", capture)
-overlay:SetNumber("Opacity", 0.75)
-overlay:SetVector2("Position", Vector2.new(4, 4))
+overlay.Source = Enum.PresetShaders.Overlay
+overlay:SetImage(Enum.ShaderProperty.OverlayTexture, capture)
+overlay:SetNumber(Enum.ShaderProperty.Opacity, 0.75)
+overlay:SetVector2(Enum.ShaderProperty.Position, Vector2.new(4, 4))
 
 local windowCamera = Workspace.CurrentCamera
 windowCamera:AddShader(overlay)
