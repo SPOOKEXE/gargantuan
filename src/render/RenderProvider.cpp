@@ -1252,17 +1252,15 @@ namespace gargantuan {
 		std::vector<std::pair<const CameraTarget *, const Camera *>> ready;
 		for (const auto &drawContext : ordered) {
 			auto *camera = drawContext.Camera.get();
-			CameraTarget *target = AcquireCameraTarget(camera, camera && (!camera->Shaders.empty() || camera->Antialiasing));
+
+			// Same as the single-camera window path: a pane whose corner of the
+			// world has not moved is blitted from what it drew last time
+			DrawContext copy = drawContext;
+			bool recorded = false;
+			CameraTarget *target = RecordCamera(commands, copy, recorded);
 			if (!target) {
 				continue;
 			}
-
-			DrawContext copy = drawContext;
-			if (!RecordCameraPasses(commands, copy, *target)) {
-				continue;
-			}
-			RecordShaderChain(commands, camera, *target, 0, false);
-			RecordHistoryCopy(commands, camera, *target);
 			ready.emplace_back(target, camera);
 		}
 
@@ -1329,6 +1327,73 @@ namespace gargantuan {
 		inline void MixPointer(uint64_t &hash, const void *pointer) {
 			MixBits(hash, (uint64_t)(uintptr_t)pointer);
 		}
+
+		// The four side planes of a camera's frustum in world space, each held
+		// as (normal, distance) with the inside on the positive side
+		struct SidePlanes {
+			glm::vec4 Planes[4];
+		};
+
+		// Near and far are deliberately left out. Near is 0.1 and far is
+		// 100000, so neither culls anything worth culling, and leaving them
+		// out means only rows 0, 1 and 3 of the matrix are read. Those are the
+		// same whether the projection maps depth to 0..1 or to -1..1, so this
+		// does not care which convention glm was built with -- one less thing
+		// to get quietly wrong.
+		//
+		// The four alone still reject everything behind the camera: they meet
+		// at the eye, and the pyramid running backwards from it fails all four.
+		SidePlanes ExtractSidePlanes(const glm::mat4 &viewProjection) {
+			// glm is column major, so a row is the nth component of each column
+			auto row = [&](int index) {
+				return glm::vec4(
+					viewProjection[0][index],
+					viewProjection[1][index],
+					viewProjection[2][index],
+					viewProjection[3][index]
+				);
+			};
+
+			glm::vec4 x = row(0), y = row(1), w = row(3);
+			SidePlanes planes{{w + x, w - x, w + y, w - y}};
+
+			// Normalised, so a plane distance comes out in world units and can
+			// be compared against a radius
+			for (auto &plane : planes.Planes) {
+				float length = glm::length(glm::vec3(plane));
+				if (length > 0.0f) {
+					plane /= length;
+				}
+			}
+			return planes;
+		}
+
+		// Whether the segment from `from` to `to`, fattened by `radius`, is
+		// anywhere on the inside. A capsule rather than a sphere because a
+		// part throws its shadow along a line, and that line has to be tested
+		// too; passing the same point twice makes it a plain sphere test.
+		bool CapsuleInside(const SidePlanes &planes, glm::vec3 from, glm::vec3 to, float radius) {
+			for (const auto &plane : planes.Planes) {
+				glm::vec3 normal(plane);
+				// Out only when both ends are out, or a capsule lying across
+				// the frustum would be thrown away by the plane each end
+				// happens to be behind
+				if (glm::dot(normal, from) + plane.w < -radius && glm::dot(normal, to) + plane.w < -radius) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		// How far a shadow can reach past the part throwing it. ShadowPass
+		// renders into an orthographic box 200 units deep, so nothing can be
+		// projected further than that; a part further from the frustum than
+		// this cannot darken anything inside it.
+		//
+		// Without this a part stepping out of view would stop counting as
+		// changed, and the shadow it was casting into the view would freeze
+		// where it stood.
+		constexpr float SHADOW_CAST_REACH = 200.0f;
 	} // namespace
 
 	uint64_t RenderProvider::ComputeSceneSignature(
@@ -1363,6 +1428,49 @@ namespace gargantuan {
 			MixPointer(hash, part->SurfaceCamera.get());
 		}
 
+		return hash;
+	}
+
+	uint64_t RenderProvider::ComputeVisibleSceneSignature(
+		Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection
+	) {
+		uint64_t hash = 0xCBF29CE484222325ull;
+		MixVec3(hash, lightDirection);
+
+		if (!camera || !world) {
+			return hash;
+		}
+
+		SidePlanes planes = ExtractSidePlanes(camera->GetProjectionMatrix() * camera->GetViewMatrix());
+		// LightDirection points towards the light, so a shadow falls the other
+		// way: from the part, away from the light
+		glm::vec3 shadowStep = -glm::normalize(lightDirection) * SHADOW_CAST_REACH;
+
+		uint64_t visible = 0;
+		for (const auto &part : world->Parts) {
+			if (!part) {
+				continue;
+			}
+
+			// Half the box diagonal, so the sphere holds the part whichever way
+			// it is turned. Loose, which is the safe way round: too big only
+			// costs a redraw, too small drops something that was on screen.
+			float radius = glm::length(part->Size) * 0.5f;
+			glm::vec3 centre = part->CFrame.Position;
+			glm::vec3 reach = part->CastShadow ? centre + shadowStep : centre;
+			if (!CapsuleInside(planes, centre, reach, radius)) {
+				continue;
+			}
+
+			visible++;
+			MixPointer(hash, part.get());
+			MixBits(hash, part->QuickHash);
+			MixPointer(hash, part->SurfaceCamera.get());
+		}
+
+		// Cheap insurance on how many were in view, since the loop above
+		// contributes nothing at all for a frame where none of them are
+		MixBits(hash, visible);
 		return hash;
 	}
 
@@ -1416,8 +1524,9 @@ namespace gargantuan {
 		return hash;
 	}
 
-	RenderProvider::RedrawPlan RenderProvider::PlanRedraw(Camera *camera, CameraTarget &target) {
+	RenderProvider::RedrawPlan RenderProvider::PlanRedraw(DrawContext &drawContext, CameraTarget &target) {
 		RedrawPlan plan;
+		Camera *camera = drawContext.Camera.get();
 		if (!camera) {
 			return plan;
 		}
@@ -1429,8 +1538,24 @@ namespace gargantuan {
 		plan.WriteCache = hasDynamicTail;
 
 		uint64_t cameraSignature = ComputeCameraSignature(camera);
-		bool sceneMatches = camera->HasDrawn && camera->LastSceneSignature == SceneSignature &&
-							camera->LastCameraSignature == cameraSignature;
+		bool cameraMatches = camera->HasDrawn && camera->LastCameraSignature == cameraSignature;
+
+		// Two checks, wide then narrow. The wide one is already computed and
+		// costs a comparison: when nothing anywhere moved and the camera did
+		// not either, the subset this camera can see cannot have changed and
+		// there is no reason to work out what that subset is. Only when
+		// something did move is the frustum walked, and then the answer is
+		// about this camera alone -- a part shuffling about behind it, or off
+		// the side of the screen, leaves its picture exactly as it was.
+		bool sceneMatches;
+		if (cameraMatches && camera->LastSceneSignature == SceneSignature) {
+			sceneMatches = true;
+		} else {
+			uint64_t visibleSignature =
+				ComputeVisibleSceneSignature(camera, drawContext.WorldRoot, drawContext.LightDirection);
+			sceneMatches = cameraMatches && camera->LastVisibleSignature == visibleSignature;
+			camera->LastVisibleSignature = visibleSignature;
+		}
 
 		// A camera reading its own previous frame is animated by construction,
 		// and one whose input redrew has to follow it
@@ -1488,16 +1613,24 @@ namespace gargantuan {
 		return plan;
 	}
 
-	bool RenderProvider::RecordOffscreenCamera(SDL_GPUCommandBuffer *commands, DrawContext &drawContext) {
+	RenderProvider::CameraTarget *RenderProvider::RecordCamera(
+		SDL_GPUCommandBuffer *commands, DrawContext &drawContext, bool &outRecorded
+	) {
+		outRecorded = false;
+
 		auto *camera = drawContext.Camera.get();
 		CameraTarget *target = AcquireCameraTarget(camera, camera && (!camera->Shaders.empty() || camera->Antialiasing));
 		if (!target) {
-			return false;
+			return nullptr;
 		}
 
-		RedrawPlan plan = PlanRedraw(camera, *target);
+		RedrawPlan plan = PlanRedraw(drawContext, *target);
 		if (plan.Skip) {
-			return false;
+			// Its target already holds the finished picture, so there is
+			// nothing to record. Handing it back anyway is what lets a camera
+			// drawing to the window present the same pixels again instead of
+			// rendering the world a second time to arrive at them.
+			return target;
 		}
 
 		if (plan.WriteCache || !plan.RenderScene) {
@@ -1506,7 +1639,7 @@ namespace gargantuan {
 
 		if (plan.RenderScene) {
 			if (!RecordCameraPasses(commands, drawContext, *target)) {
-				return false;
+				return nullptr;
 			}
 		} else if (target->CacheTexture) {
 			// Put the cached half back where the chain expects to find it, then
@@ -1521,7 +1654,7 @@ namespace gargantuan {
 		} else {
 			// No cache to restore from, so fall back to drawing it properly
 			if (!RecordCameraPasses(commands, drawContext, *target)) {
-				return false;
+				return nullptr;
 			}
 			plan.FirstShader = 0;
 			plan.WriteCache = true;
@@ -1529,7 +1662,14 @@ namespace gargantuan {
 
 		RecordShaderChain(commands, camera, *target, plan.FirstShader, plan.WriteCache);
 		RecordHistoryCopy(commands, camera, *target);
-		return true;
+		outRecorded = true;
+		return target;
+	}
+
+	bool RenderProvider::RecordOffscreenCamera(SDL_GPUCommandBuffer *commands, DrawContext &drawContext) {
+		bool recorded = false;
+		RecordCamera(commands, drawContext, recorded);
+		return recorded;
 	}
 
 	void RenderProvider::EnsureCacheTexture(CameraTarget &target) {
@@ -1745,17 +1885,16 @@ namespace gargantuan {
 		}
 
 		if (useShaderChain) {
-			CameraTarget *target = AcquireCameraTarget(camera, true);
+			// The window has to show something every frame, but that is a
+			// blit, not a redraw. A still scene records nothing here and the
+			// blit below sends last frame's picture again -- same pixels,
+			// none of the work.
+			bool recorded = false;
+			CameraTarget *target = RecordCamera(commands, drawContext, recorded);
 			if (!target) {
 				SDL_CancelGPUCommandBuffer(commands);
 				return;
 			}
-
-			if (!RecordCameraPasses(commands, drawContext, *target)) {
-				SDL_CancelGPUCommandBuffer(commands);
-				return;
-			}
-			RecordShaderChain(commands, camera, *target, 0, false);
 
 			SDL_GPUTexture *swapchainTexture = nullptr;
 			uint32_t swapchainWidth = 0, swapchainHeight = 0;

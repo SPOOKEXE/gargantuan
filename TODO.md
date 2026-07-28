@@ -74,12 +74,25 @@ eyes. What is missing is the runtime that drives them.
 
 ## Render
 
-- [ ] Let the window camera reuse its cached target too. It redraws every frame
-      regardless today, because it has to present something; re-blitting the
-      cached image would do
-- [ ] Narrow the redraw check to what a camera can actually see. It compares one
-      signature for the whole world today, so a part moving behind a camera
-      still costs it a redraw
+- [x] Let the window camera reuse its cached target too. It presents every frame
+      regardless, because it has to show something, but that is now a blit of
+      the picture it already has rather than a redraw
+- [x] Narrow the redraw check to what a camera can actually see, as a frustum
+      test against each part's bounding sphere, swept along the light so a
+      shadow caster just off screen still counts. No occlusion, so it is
+      conservative: a part can pass and be invisible anyway, which costs a
+      redraw, never a wrong picture
+- [ ] Occlusion, so a part hidden behind a wall stops costing a redraw. The
+      frustum test cannot see it; something depth-aware has to
+- [ ] Cull at draw time off the same test, not only at redraw time. The
+      renderer still submits every part in the world however far off screen it
+      is; the visibility answer is already computed, it is simply thrown away
+- [ ] Keep a fixed-size list of the parts worth looking at rather than walking
+      all of them. Anything written to goes to the front and pushes the
+      longest-still one off the back, so the sweep is over what moves rather
+      than over the world. Order it by a LastUpdate stamp with a threshold
+      before a swap, or a part sitting on the boundary thrashes in and out
+      every frame and costs more than it saves
 - [ ] Work out RedrawEveryFrame from the SPIR-V rather than trusting the script
       to set it; a shader reading builtin.Time without it freezes
 - [ ] Textures

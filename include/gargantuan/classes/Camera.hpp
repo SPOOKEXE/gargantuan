@@ -125,7 +125,15 @@ namespace gargantuan {
 		// The scene and the camera as they were when this camera last drew.
 		// Redrawing is skipped while both still match and the cached image is
 		// good. Bookkeeping, not properties.
+		//
+		// LastSceneSignature covers the whole world and LastVisibleSignature
+		// only the parts this camera can see. The wide one is the cheap check:
+		// when nothing anywhere moved and the camera did not either, the subset
+		// cannot have changed and there is no reason to work out what it is.
+		// The narrow one is what decides it when something did move, so a part
+		// walking about behind the camera costs it nothing.
 		uint64_t LastSceneSignature = 0;
+		uint64_t LastVisibleSignature = 0;
 		uint64_t LastCameraSignature = 0;
 		// False until a full draw has filled the target, so the first frame is
 		// never answered out of an empty cache

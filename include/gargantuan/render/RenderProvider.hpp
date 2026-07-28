@@ -91,7 +91,25 @@ namespace gargantuan {
 		// setter means nothing can be forgotten: a property added later is
 		// covered the moment it joins the hash, not whenever someone remembers
 		// to mark it.
+		//
+		// This one covers the whole world, so it answers "did anything at all
+		// move" for every camera at once. ComputeVisibleSceneSignature narrows
+		// it to one camera when the answer is yes.
 		uint64_t ComputeSceneSignature(const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection) const;
+
+		// The same hash over only the parts this camera could possibly draw:
+		// what falls inside its frustum, plus what could throw a shadow into
+		// it. A part outside both cannot change this camera's picture however
+		// much it moves, so it is left out and the camera keeps its cache.
+		//
+		// Conservative in one direction only. A part can pass the test and
+		// still be invisible -- hidden behind a wall, or its bounding sphere
+		// clipping a corner the part itself misses -- which costs a redraw
+		// that was not needed. Nothing visible is ever left out, so the
+		// picture is never wrong.
+		uint64_t ComputeVisibleSceneSignature(
+			Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection
+		);
 
 		// Draws cameras into their own offscreen targets, creating or resizing
 		// each target to match its camera's ViewportSize first.
@@ -228,8 +246,18 @@ namespace gargantuan {
 		// or its work would never be waited on.
 		void SubmitTracked(SDL_GPUCommandBuffer *commands);
 
+		// Records whatever this camera still owes for the frame into an
+		// already-acquired command buffer, honouring the cascading cache.
+		// Returns the target holding its finished picture, or null when the
+		// camera has no usable one.
+		//
+		// `outRecorded` is false when the cache answered the whole thing and
+		// nothing was written into the buffer. That is not a failure: the
+		// target is still good, which is what lets a camera drawing to the
+		// window present the same pixels again rather than redraw them.
+		CameraTarget *RecordCamera(SDL_GPUCommandBuffer *commands, DrawContext &drawContext, bool &outRecorded);
 		// Records one camera into an already-acquired command buffer. False if
-		// the camera has no usable target, in which case nothing was recorded.
+		// the camera has no usable target or had nothing left to do.
 		bool RecordOffscreenCamera(SDL_GPUCommandBuffer *commands, DrawContext &drawContext);
 
 		// Everything about a camera that changes its picture without the world
@@ -255,7 +283,7 @@ namespace gargantuan {
 		// means the cost is only paid where it earns something back.
 		static constexpr uint32_t CACHE_AFTER_STILL_FRAMES = 5;
 
-		RedrawPlan PlanRedraw(Camera *camera, CameraTarget &target);
+		RedrawPlan PlanRedraw(DrawContext &drawContext, CameraTarget &target);
 		// Allocated lazily: only a camera with an animated tail ever needs one
 		void EnsureCacheTexture(CameraTarget &target);
 
