@@ -231,7 +231,7 @@ namespace gargantuan {
 	}
 
 	int Instance::UserdataIndex(lua_State *L) {
-		Instance::Pointer instance = StackValue<Instance::Pointer>::From(L, 1);
+		Instance::Pointer instance = CheckStackValue<Instance::Pointer>(L, 1);
 		const char *key = luaL_checkstring(L, 2);
 
 		if (key && instance) {
@@ -240,8 +240,7 @@ namespace gargantuan {
 				if (property->Read) {
 					lua_remove(L, 1);
 					lua_remove(L, 1);
-					property->Read(L, instance.get());
-					return 1;
+					return property->Read(L, instance.get());
 				} else {
 					luaL_error(L, "Property %s is write-only", key);
 				}
@@ -256,7 +255,7 @@ namespace gargantuan {
 	};
 
 	int Instance::UserdataNewIndex(lua_State *L) {
-		Instance::Pointer instance = StackValue<Instance::Pointer>::From(L, 1);
+		Instance::Pointer instance = CheckStackValue<Instance::Pointer>(L, 1);
 		const char *key = luaL_checkstring(L, 2);
 
 		if (key && instance) {
@@ -279,7 +278,7 @@ namespace gargantuan {
 	};
 
 	int Instance::UserdataNamecall(lua_State *L) {
-		Instance::Pointer instance = StackValue<Instance::Pointer>::From(L, 1);
+		Instance::Pointer instance = CheckStackValue<Instance::Pointer>(L, 1);
 		const char *key = lua_namecallatom(L, nullptr);
 
 		if (key && instance) {
@@ -296,7 +295,6 @@ namespace gargantuan {
 	std::string Instance::GetFullName() {
 		std::vector<std::string_view> path;
 
-		// Start from -1 to omit a trailing period
 		size_t totalLength = 0;
 		Instance *current = this;
 

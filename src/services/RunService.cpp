@@ -1,5 +1,4 @@
 #include "gargantuan/services/RunService.hpp"
-#include "gargantuan/datatypes/Signal.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 
 namespace gargantuan {

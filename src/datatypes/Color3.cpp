@@ -11,9 +11,10 @@ namespace gargantuan {
 	G_UD_IMPL_PRELUDE(Color3);
 	G_UD_IMPL_PROPS(
 		Color3,
-		G_UD_READONLY_PROP(Color3, R, float),
-		G_UD_READONLY_PROP(Color3, G, float),
-		G_UD_READONLY_PROP(Color3, B, float)
+
+		{"R", Property::fromSimple<&Color3::R>(true, false)},
+		{"G", Property::fromSimple<&Color3::G>(true, false)},
+		{"B", Property::fromSimple<&Color3::B>(true, false)}
 	)
 	G_UD_IMPL_METHODS(
 		Color3,

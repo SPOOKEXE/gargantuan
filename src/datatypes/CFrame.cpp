@@ -6,6 +6,7 @@
 #include <ext/quaternion_common.hpp>
 #include <fwd.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 #include <glm/gtx/euler_angles.hpp>
 #include <gtc/quaternion.hpp>
 #include <lua.h>
@@ -144,6 +145,7 @@ namespace gargantuan {
 		G_UD_METHOD(CFrame, VectorToWorldSpace),
 		G_UD_METHOD(CFrame, VectorToObjectSpace),
 		G_UD_METHOD(CFrame, GetComponents),
+		G_UD_METHOD(CFrame, ToEulerAngles),
 		G_UD_METHOD(CFrame, ToEulerAnglesXYZ),
 		G_UD_METHOD(CFrame, ToEulerAnglesYXZ),
 		G_UD_METHOD(CFrame, ToOrientation),
@@ -151,8 +153,8 @@ namespace gargantuan {
 		G_UD_METHOD(CFrame, FuzzyEq),
 		G_UD_METHOD(CFrame, AngleBetween),
 		{"__add", Method{CFrame::LAdd}},
-		{"__sub", Method{CFrame::LSubtract}},
-		{"__mul", Method{CFrame::LMultiply}},
+		{"__sub", Method{CFrame::LSub}},
+		{"__mul", Method{CFrame::LMul}},
 		{"__tostring", Method{CFrame::LTostring}},
 		{"__eq", Method{CFrame::LEq}},
 	);
@@ -197,10 +199,30 @@ namespace gargantuan {
 		return CFrame(glm::vec3(0, 0, 0), glm::mat3(rot4));
 	}
 
+	CFrame CFrame::fromEulerAnglesXYZ(float x, float y, float z) {
+		return Angles(x, y, z);
+	}
+
 	// glm names the YXZ parameters yaw, pitch, roll, so they go in as (y, x, z)
 	CFrame CFrame::fromEulerAnglesYXZ(float x, float y, float z) {
 		glm::mat4 rotation = glm::eulerAngleYXZ(y, x, z);
 		return CFrame(glm::vec3(0, 0, 0), glm::mat3(rotation));
+	}
+
+	// TODO: only the two orders CFrame itself composes are implemented; the
+	// remaining four fall back to YXZ
+	CFrame CFrame::fromEulerAngles(float x, float y, float z, Enums::RotationOrder order) {
+		switch (order) {
+		case Enums::RotationOrder::XYZ:
+			return fromEulerAnglesXYZ(x, y, z);
+		case Enums::RotationOrder::YXZ:
+		default:
+			return fromEulerAnglesYXZ(x, y, z);
+		}
+	}
+
+	CFrame CFrame::fromOrientation(float x, float y, float z) {
+		return fromEulerAnglesYXZ(x, y, z);
 	}
 
 	CFrame CFrame::fromAxisAngle(glm::vec3 axis, float angle) {
@@ -209,8 +231,39 @@ namespace gargantuan {
 		return CFrame(glm::vec3(0, 0, 0), glm::mat3_cast(rotation));
 	}
 
+	CFrame CFrame::fromRotationBetweenVectors(glm::vec3 from, glm::vec3 to) {
+		glm::vec3 unitFrom = SafeUnit(from, glm::vec3(0, 0, -1));
+		glm::vec3 unitTo = SafeUnit(to, glm::vec3(0, 0, -1));
+
+		float alignment = glm::clamp(glm::dot(unitFrom, unitTo), -1.0f, 1.0f);
+		if (alignment > 1.0f - CF_EPSILON) {
+			return CFrame();
+		}
+
+		// Antiparallel vectors leave the rotation axis undetermined -- the cross
+		// product degenerates to zero, so any perpendicular axis will do
+		if (alignment < -1.0f + CF_EPSILON) {
+			glm::vec3 perpendicular = glm::cross(unitFrom, glm::vec3(1, 0, 0));
+			if (glm::dot(perpendicular, perpendicular) < CF_EPSILON) {
+				perpendicular = glm::cross(unitFrom, glm::vec3(0, 1, 0));
+			}
+			return fromAxisAngle(perpendicular, glm::pi<float>());
+		}
+
+		return fromAxisAngle(glm::cross(unitFrom, unitTo), glm::acos(alignment));
+	}
+
 	CFrame CFrame::lookAt(glm::vec3 at, glm::vec3 target, glm::vec3 up) {
 		return CFrame(at, BuildLookRotation(at, target, up));
+	}
+
+	CFrame CFrame::lookAlong(glm::vec3 at, glm::vec3 direction, glm::vec3 up) {
+		// A zero direction gives BuildLookRotation nothing to aim at, so the
+		// frame keeps the default orientation rather than degenerating
+		if (glm::dot(direction, direction) < CF_EPSILON * CF_EPSILON) {
+			return CFrame(at);
+		}
+		return lookAt(at, at + direction, up);
 	}
 
 	CFrame CFrame::fromMatrix(glm::vec3 position, glm::vec3 x, glm::vec3 y, glm::vec3 z) {
@@ -384,6 +437,18 @@ namespace gargantuan {
 		return {rx, glm::atan(R(0, 2), R(2, 2)), glm::atan(R(1, 0), R(1, 1))};
 	}
 
+	// TODO: only the two orders CFrame itself composes are implemented; the
+	// remaining four fall back to YXZ
+	std::tuple<double, double, double> CFrame::ToEulerAngles(Enums::RotationOrder order) {
+		switch (order) {
+		case Enums::RotationOrder::XYZ:
+			return ToEulerAnglesXYZ();
+		case Enums::RotationOrder::YXZ:
+		default:
+			return ToEulerAnglesYXZ();
+		}
+	}
+
 	std::tuple<double, double, double> CFrame::ToOrientation() const {
 		return ToEulerAnglesYXZ();
 	}
@@ -483,7 +548,7 @@ namespace gargantuan {
 		return 1;
 	}
 
-	int CFrame::LSubtract(lua_State *L, CFrame *self) {
+	int CFrame::LSub(lua_State *L, CFrame *self) {
 		auto offset = CheckStackValue<glm::vec3>(L, 2);
 		StackValue<CFrame>::Push(L, CFrame(self->Position - offset, self->Rotation));
 		return 1;
@@ -500,7 +565,7 @@ namespace gargantuan {
 		return 1;
 	}
 
-	int CFrame::LMultiply(lua_State *L, CFrame *self) {
+	int CFrame::LMul(lua_State *L, CFrame *self) {
 		if (lua_isvector(L, 2)) {
 			auto other = StackValue<glm::vec3>::From(L, 2);
 			StackValue<glm::vec3>::Push(L, *self * other);

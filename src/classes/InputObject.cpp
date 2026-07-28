@@ -183,11 +183,11 @@ namespace gargantuan {
 		.Superclass = "Instance",
 		.Properties =
 			{
-				G_UD_READONLY_PROP(InputObject, Delta, glm::vec3),
-				G_UD_READONLY_PROP(InputObject, Position, glm::vec3),
-				G_UD_READONLY_PROP(InputObject, KeyCode, Enums::KeyCode),
-				G_UD_READONLY_PROP(InputObject, UserInputState, Enums::UserInputState),
-				G_UD_READONLY_PROP(InputObject, UserInputType, Enums::UserInputType),
+				{"Delta", Property::fromSimple<&InputObject::Delta>(true, false)},
+				{"Position", Property::fromSimple<&InputObject::Position>(true, false)},
+				{"KeyCode", Property::fromSimple<&InputObject::KeyCode>(true, false)},
+				{"UserInputState", Property::fromSimple<&InputObject::UserInputState>(true, false)},
+				{"UserInputType", Property::fromSimple<&InputObject::UserInputType>(true, false)},
 			},
 		.Methods = {
 			G_UD_METHOD(InputObject, IsModifierKeyDown),

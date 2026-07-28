@@ -3,6 +3,7 @@
 #include "gargantuan/scripting/StackValue.hpp"
 #include "gargantuan/scripting/UserdataTag.hpp"
 
+#include <functional>
 #include <lua.h>
 #include <lualib.h>
 #include <string>
@@ -10,10 +11,8 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
-#include <functional>
 
 namespace gargantuan {
-
 	template <typename Class, typename StoredAs = Class> class Userdata {
 	  public:
 		typedef Userdata<Class, StoredAs> This;
@@ -24,9 +23,86 @@ namespace gargantuan {
 		typedef std::string (*TypeReflector)();
 
 		struct Property {
-			int (*Read)(lua_State *L, Class *instance);
-			int (*Write)(lua_State *L, Class *instance);
+			// Both callbacks work directly on the Luau stack: Read pushes the
+			// value and returns how many slots it used, Write consumes the
+			// assigned value from the top of the stack.
+			int (*Read)(lua_State *L, Class *instance) = nullptr;
+			int (*Write)(lua_State *L, Class *instance) = nullptr;
 			TypeReflector ReflectType = nullptr;
+
+			template <typename MemberType> struct MemberTraits;
+			template <typename C, typename T> struct MemberTraits<T C::*> {
+				using Target = C;
+				using Value = T;
+			};
+
+			// Reflects `ValueType` the same way the G_UD_REFLECT_TYPE macro
+			// does, so factory-built and hand-written entries report alike
+			template <typename ValueType> static TypeReflector reflectorFor() {
+				return []() -> std::string { return std::string(StackValue<ValueType>::ReflectedTypedef()); };
+			}
+
+			// Binds straight to a data member. The member may live on a
+			// subclass of `Class`, which is how Instance-backed classes expose
+			// their own fields.
+			template <auto MemberPointer>
+			static Property fromSimple(bool enableRead = false, bool enableWrite = false) {
+				using MemberClass = typename MemberTraits<decltype(MemberPointer)>::Target;
+				using Value = typename MemberTraits<decltype(MemberPointer)>::Value;
+
+				Property self{nullptr, nullptr, reflectorFor<Value>()};
+
+				if (enableRead) {
+					self.Read = [](lua_State *L, Class *instance) -> int {
+						return StackValue<Value>::Push(L, static_cast<MemberClass *>(instance)->*MemberPointer);
+					};
+				}
+
+				if (enableWrite) {
+					self.Write = [](lua_State *L, Class *instance) -> int {
+						static_cast<MemberClass *>(instance)->*MemberPointer = CheckStackValue<Value>(L, -1);
+						return 0;
+					};
+				}
+
+				return self;
+			}
+
+			// NOTE: the reader is held in a function-local static, one per
+			// instantiation. Every lambda has its own type, so each call site
+			// gets its own storage -- but a reader that captures state is
+			// shared by every property built from that same closure type.
+			template <typename Reader> static Property fromRead(Reader &&read) {
+				using ReadType = std::decay_t<std::invoke_result_t<Reader, Class *>>;
+
+				static auto storedRead = std::forward<Reader>(read);
+
+				Property self{nullptr, nullptr, reflectorFor<ReadType>()};
+				self.Read = [](lua_State *L, Class *instance) -> int {
+					return StackValue<ReadType>::Push(L, storedRead(instance));
+				};
+
+				return self;
+			}
+
+			template <typename WriteType, typename Reader, typename Writer>
+			static Property fromReadWrite(Reader &&read, Writer &&write) {
+				using ReadType = std::decay_t<std::invoke_result_t<Reader, Class *>>;
+
+				static auto storedRead = std::forward<Reader>(read);
+				static auto storedWrite = std::forward<Writer>(write);
+
+				Property self{nullptr, nullptr, reflectorFor<ReadType>()};
+				self.Read = [](lua_State *L, Class *instance) -> int {
+					return StackValue<ReadType>::Push(L, storedRead(instance));
+				};
+				self.Write = [](lua_State *L, Class *instance) -> int {
+					storedWrite(instance, CheckStackValue<WriteType>(L, -1));
+					return 0;
+				};
+
+				return self;
+			}
 		};
 
 		// `(self, a1: number, a2: Vector3): CFrame`, assembled from the member
@@ -109,12 +185,15 @@ namespace gargantuan {
 		static UserdataTag GetUserdataTag() {
 			return Class::GetUserdataTag();
 		};
+
 		static std::string_view GetUserdataType() {
 			return Class::GetUserdataType();
 		};
+
 		static const UserdataProperties &GetUserdataProperties() {
 			return Class::GetUserdataProperties();
 		};
+
 		static const UserdataMethods &GetUserdataMethods() {
 			return Class::GetUserdataMethods();
 		};
@@ -131,8 +210,7 @@ namespace gargantuan {
 			if (auto it = properties.find(key); it != properties.end()) {
 				const Property &property = it->second;
 				if (property.Read) {
-					property.Read(L, instance);
-					return 1;
+					return property.Read(L, instance);
 				}
 				return 0;
 			}
@@ -336,6 +414,9 @@ namespace gargantuan {
 				G_UD_REFLECT_TYPE(valueType)                                                                           \
 		}                                                                                                              \
 	}
+
+#define G_MEMBER_PROPERTY(classType, propertyName, enableRead, enableWrite)                                            \
+	{#propertyName, Property::fromSimple<&classType::propertyName>(enableRead, enableWrite)}
 
 #define G_UD_STACKVALUE_WITH_STORED(classType, storedType)                                                             \
 	template <> struct StackValue<storedType> {                                                                        \

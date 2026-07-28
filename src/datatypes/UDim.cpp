@@ -10,8 +10,8 @@ namespace gargantuan {
 	G_UD_IMPL_PROPS(
 		UDim,
 
-		G_UD_READONLY_PROP(UDim, Scale, float),
-		G_UD_READONLY_PROP(UDim, Offset, int)
+		{"Scale", Property::fromSimple<&UDim::Scale>(true, false)},
+		{"Offset", Property::fromSimple<&UDim::Offset>(true, false)}
 	)
 	G_UD_IMPL_METHODS(
 		UDim,

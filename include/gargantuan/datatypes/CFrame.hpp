@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gargantuan/datatypes/Vector3.hpp"
+#include "gargantuan/reflection/Enums.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 
 #include <glm/glm.hpp>
@@ -9,7 +10,7 @@
 #include <tuple>
 
 namespace gargantuan {
-	// enum class RotationOrder : int { XYZ, XZY, YZX, YXZ, ZXY, ZYX };
+	G_ENUM(RotationOrder, XYZ, XZY, YZX, YXZ, ZXY, ZYX);
 
 	struct CFrame : public Userdata<CFrame> {
 	  public:
@@ -47,10 +48,18 @@ namespace gargantuan {
 
 		// Composes the rotations as Rx * Ry * Rz
 		static CFrame Angles(float x, float y, float z);
+		// The same composition as Angles, under the name Roblox gives it
+		static CFrame fromEulerAnglesXYZ(float x, float y, float z);
 		// Composes them as Ry * Rx * Rz, the order Orientation is reported in
 		static CFrame fromEulerAnglesYXZ(float x, float y, float z);
+		static CFrame fromEulerAngles(float x, float y, float z, Enums::RotationOrder order);
+		static CFrame fromOrientation(float x, float y, float z);
 		static CFrame fromAxisAngle(glm::vec3 axis, float angle);
+		// The shortest rotation carrying `from` onto `to`, positioned at the origin
+		static CFrame fromRotationBetweenVectors(glm::vec3 from, glm::vec3 to);
 		static CFrame lookAt(glm::vec3 at, glm::vec3 target, glm::vec3 up = {0, 1, 0});
+		// lookAt aimed along a direction rather than at a point in space
+		static CFrame lookAlong(glm::vec3 at, glm::vec3 direction, glm::vec3 up = {0, 1, 0});
 		// NOTE: the third axis is the back vector (Roblox names it vZ), which
 		// points opposite the look vector
 		static CFrame fromMatrix(glm::vec3 position, glm::vec3 right, glm::vec3 up, glm::vec3 back);
@@ -63,7 +72,6 @@ namespace gargantuan {
 		CFrame Inverse() const;
 		CFrame Lerp(const CFrame &goal, double alpha) const;
 		CFrame Orthonormalize() const;
-		// NOTE: XToY functions are supposedly tuples on Roblox, not gon do allat rn
 		CFrame ToWorldSpace(const CFrame &cf) const;
 		CFrame ToObjectSpace(const CFrame &cf) const;
 		glm::vec3 PointToWorldSpace(const glm::vec3 &point) const;
@@ -71,7 +79,7 @@ namespace gargantuan {
 		glm::vec3 VectorToWorldSpace(const glm::vec3 &point) const;
 		glm::vec3 VectorToObjectSpace(const glm::vec3 &point) const;
 		Components GetComponents() const;
-		// std::tuple<double, double, double> ToEulerAngles(RotationOrder order);
+		std::tuple<double, double, double> ToEulerAngles(Enums::RotationOrder order);
 		std::tuple<double, double, double> ToEulerAnglesXYZ() const;
 		std::tuple<double, double, double> ToEulerAnglesYXZ() const;
 		std::tuple<double, double, double> ToOrientation() const;
@@ -81,8 +89,8 @@ namespace gargantuan {
 		glm::quat ToQuaternion() const;
 
 		static int LAdd(lua_State *L, CFrame *self);
-		static int LSubtract(lua_State *L, CFrame *self);
-		static int LMultiply(lua_State *L, CFrame *self);
+		static int LSub(lua_State *L, CFrame *self);
+		static int LMul(lua_State *L, CFrame *self);
 		static int LTostring(lua_State *L, CFrame *self);
 		static int LEq(lua_State *L, CFrame *self);
 

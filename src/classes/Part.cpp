@@ -8,13 +8,12 @@
 #include <memory>
 
 namespace gargantuan {
-
 	const Instance::ClassDefinition Part::DEFINITION = {
 		.Name = "Part",
 		.Superclass = "BasePart",
 		.Constructor = ClassDefinition::WrapConstructor<Part>(),
 		.Properties = {
-			G_UD_READWRITE_PROP(Part, Shape, Enums::PartType),
+			{"Shape", Property::fromSimple<&Part::Shape>(true, true)},
 		}
 	};
 
@@ -22,5 +21,4 @@ namespace gargantuan {
 		std::string key = "gargantuan://meshes/" + std::string(magic_enum::enum_name(Shape));
 		return MeshProvider::GetGpuMesh(key);
 	};
-
-} // namespace gargantuan
+}

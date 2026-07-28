@@ -10,7 +10,11 @@
 
 namespace gargantuan {
 	G_UD_IMPL_PRELUDE(SignalConnection);
-	G_UD_IMPL_PROPS(SignalConnection, G_UD_READONLY_PROP(SignalConnection, Connected, bool));
+	G_UD_IMPL_PROPS(
+		SignalConnection,
+
+		{"Connected", Property::fromSimple<&SignalConnection::Connected>(true, false)}
+	);
 	G_UD_IMPL_METHODS(
 		SignalConnection,
 
@@ -51,7 +55,7 @@ namespace gargantuan {
 	G_UD_IMPL_PROPS(
 		BaseSignal,
 
-		{"Type", Property{.Read = Method::Wrap<&BaseSignal::GetSignalType>().Call}}
+		{"Type", Property::fromRead([](BaseSignal *self) { return self->GetSignalType(); })}
 	);
 	G_UD_IMPL_METHODS(
 		BaseSignal,

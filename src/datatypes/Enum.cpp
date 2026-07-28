@@ -15,9 +15,9 @@ namespace gargantuan {
 	G_UD_IMPL_PROPS(
 		EnumItem,
 
-		G_UD_READONLY_PROP(EnumItem, Name, std::string_view),
-		G_UD_READONLY_PROP(EnumItem, Value, int),
-		G_UD_READONLY_PROP(EnumItem, EnumType, Enum::Pointer)
+		{"Name", Property::fromSimple<&EnumItem::Name>(true, false)},
+		{"Value", Property::fromSimple<&EnumItem::Value>(true, false)},
+		{"EnumType", Property::fromSimple<&EnumItem::EnumType>(true, false)}
 	);
 	G_UD_IMPL_METHODS(EnumItem, {"__tostring", {&EnumItem::LTostring}}, {"__eq", {&EnumItem::LEq}});
 

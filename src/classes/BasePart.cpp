@@ -1,7 +1,6 @@
 #include "gargantuan/classes/BasePart.hpp"
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
-#include "gargantuan/datatypes/Color3.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/datatypes/PhysicalProperties.hpp"
 #include "gargantuan/scripting/Userdata.hpp"

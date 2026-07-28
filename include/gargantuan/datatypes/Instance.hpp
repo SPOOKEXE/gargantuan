@@ -19,11 +19,11 @@ namespace gargantuan {
 	class Instance : public std::enable_shared_from_this<Instance>,
 					 public Userdata<Instance, std::shared_ptr<Instance>> {
 	  public:
-		G_UD_DECL_PRELUDE(Instance)
-
 		typedef std::shared_ptr<Instance> Pointer;
 		typedef Userdata<Instance, std::shared_ptr<Instance>> This;
-		struct ClassDefinition {
+		G_UD_DECL_PRELUDE(Instance)
+
+		struct ClassDefinition final {
 			std::string_view Name;
 			std::optional<std::string_view> Superclass;
 
