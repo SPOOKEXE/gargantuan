@@ -38,19 +38,34 @@ namespace gargantuan {
 		// has been set and compiled.
 		std::string Source;
 
-		// Marks this pass as producing a different picture every frame even
-		// when nothing in the scene changed -- anything reading builtin.Time,
-		// so noise, scanlines, tape wobble, a sweeping scan line.
+		// Forces this pass to be treated as producing a different picture every
+		// frame. Rarely needed by hand: a pass that reads builtin.Time is
+		// detected from its own SPIR-V, so noise, scanlines and tape wobble
+		// animate whether or not a script says anything.
+		//
+		// Left settable for the cases reflection cannot see -- a shader whose
+		// animation comes from somewhere the bytecode does not name -- and
+		// because it only ever forces the flag on. Turning it off cannot
+		// override what the shader was found to read, since that is how a pass
+		// freezes.
+		//
+		// NeedsRedrawEveryFrame is the answer the renderer acts on.
+		bool RedrawEveryFrame = false;
+
+		// Whether this pass must run again even on a scene that has not moved:
+		// what RedrawEveryFrame was set to, or what the shader turned out to
+		// read, whichever says yes.
 		//
 		// It is the guard on the camera's cascading cache. Everything ahead of
-		// the first pass carrying this flag is deterministic in its input, so
-		// on a still scene the engine reuses the image it kept from last time
-		// and starts work here instead of redrawing the world. A chain with
-		// none of these is cached whole, and a still scene costs nothing.
-		//
-		// The failure mode if it is missing on a pass that needs it is a frozen
-		// effect rather than a wrong one: the picture stops animating.
-		bool RedrawEveryFrame = false;
+		// the first pass answering true is deterministic in its input, so on a
+		// still scene the engine reuses the image it kept from last time and
+		// starts work here instead of redrawing the world. A chain with none of
+		// these is cached whole, and a still scene costs nothing.
+		bool NeedsRedrawEveryFrame();
+		// Whether the shader reads builtin.Time, read out of its SPIR-V.
+		// Declaring the Builtin block is not enough -- every shader declares
+		// the whole of it -- so this is about the members actually loaded.
+		bool ReadsBuiltinTime();
 
 		// GLSL source compiled at runtime. Setting it marks the script dirty;
 		// Compile() then turns it into bytecode, or fills CompileError.
@@ -152,6 +167,16 @@ namespace gargantuan {
 
 		ShaderReflection::BlockLayout DeclaredParameters;
 		bool Reflected = false;
+
+		// Asking costs a file read for a shader that came from an asset, and
+		// the renderer asks once a frame, so the answer is kept until the
+		// bytecode changes under it. Checked separately from Reflected because
+		// a shader with no parameter block at all still has to be answered for.
+		bool ReadsTime = false;
+		bool BuiltinsChecked = false;
+		// Reads the builtin block's usage out of `spirv`, and records that the
+		// question has now been asked
+		void CheckBuiltins(const void *spirv, size_t bytes);
 
 		std::vector<std::string> ImageOrder;
 		std::unordered_map<std::string, TextureSource> Images;

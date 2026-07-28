@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace gargantuan::ShaderReflection {
@@ -51,4 +52,27 @@ namespace gargantuan::ShaderReflection {
 	};
 
 	ResourceCounts ReflectResources(const void *spirv, size_t bytes);
+
+	// Which members of the block at `binding` a shader actually reads, as
+	// opposed to merely declares. The two differ constantly: every gargantuan
+	// shader declares the whole Builtin block because it is one layout, and
+	// most of them only ever touch Resolution.
+	//
+	// Reading is what matters for the frame cache. A pass that reads Time
+	// paints a different picture every frame and can never be cached; one that
+	// only reads Resolution is as still as the scene it draws.
+	struct BlockUsage {
+		std::unordered_set<std::string> ReadMembers;
+		// False when the SPIR-V could not be read, or had no block at that
+		// binding. Both mean nothing is known to be read, which is the same
+		// answer the engine had before it looked.
+		bool Found = false;
+
+		bool Reads(const std::string &name) const;
+	};
+
+	// Conservative upwards: an access it cannot follow counts as reading
+	// everything, because over-reporting costs a cache that was not needed
+	// while under-reporting freezes the picture.
+	BlockUsage ReflectBlockUsage(const void *spirv, size_t bytes, uint32_t binding);
 } // namespace gargantuan::ShaderReflection

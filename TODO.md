@@ -82,8 +82,6 @@ eyes. What is missing is the runtime that drives them.
       than over the world. Order it by a LastUpdate stamp with a threshold
       before a swap, or a part sitting on the boundary thrashes in and out
       every frame and costs more than it saves
-- [ ] Work out RedrawEveryFrame from the SPIR-V rather than trusting the script
-      to set it; a shader reading builtin.Time without it freezes
 - [ ] Textures
 - [ ] Lighting service
 - [ ] PBR

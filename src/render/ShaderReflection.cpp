@@ -25,6 +25,13 @@ namespace gargantuan::ShaderReflection {
 		constexpr uint16_t OP_DECORATE = 71;
 		constexpr uint16_t OP_MEMBER_DECORATE = 72;
 
+		// Enough to follow a `builtin.Time` read back to the member it names
+		constexpr uint16_t OP_CONSTANT = 43;
+		constexpr uint16_t OP_LOAD = 61;
+		constexpr uint16_t OP_ACCESS_CHAIN = 65;
+		constexpr uint16_t OP_IN_BOUNDS_ACCESS_CHAIN = 66;
+		constexpr uint16_t OP_COPY_OBJECT = 83;
+
 		constexpr uint32_t DECORATION_BINDING = 33;
 		constexpr uint32_t DECORATION_OFFSET = 35;
 		constexpr uint32_t DECORATION_MATRIX_STRIDE = 7;
@@ -387,5 +394,189 @@ namespace gargantuan::ShaderReflection {
 
 		counts.Found = true;
 		return counts;
+	}
+
+	bool BlockUsage::Reads(const std::string &name) const {
+		return ReadMembers.count(name) != 0;
+	}
+
+	BlockUsage ReflectBlockUsage(const void *spirv, size_t bytes, uint32_t binding) {
+		BlockUsage usage;
+
+		if (!spirv || bytes < HEADER_WORDS * sizeof(uint32_t) || bytes % sizeof(uint32_t) != 0) {
+			return usage;
+		}
+
+		const auto *words = static_cast<const uint32_t *>(spirv);
+		size_t wordCount = bytes / sizeof(uint32_t);
+		if (words[0] != SPIRV_MAGIC) {
+			return usage;
+		}
+
+		std::unordered_map<uint32_t, std::unordered_map<uint32_t, std::string>> memberNames;
+		std::unordered_map<uint32_t, uint32_t> variableBindings;
+		std::unordered_map<uint32_t, std::vector<uint32_t>> structMembers;
+		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> pointers;
+		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> variables;
+		// Only 32-bit integer constants, which is all a member index is
+		std::unordered_map<uint32_t, uint32_t> constants;
+
+		// SPIR-V puts names, decorations, types and globals ahead of the
+		// function bodies, so the structure is known by the time the second
+		// pass reaches the code that reads it
+		for (size_t at = HEADER_WORDS; at < wordCount;) {
+			uint32_t instruction = words[at];
+			uint16_t opcode = (uint16_t)(instruction & 0xFFFF);
+			uint16_t length = (uint16_t)(instruction >> 16);
+
+			if (length == 0 || at + length > wordCount) {
+				break;
+			}
+
+			const uint32_t *operands = words + at + 1;
+			uint32_t operandCount = length - 1;
+
+			switch (opcode) {
+			case OP_MEMBER_NAME:
+				if (operandCount >= 3) {
+					size_t cursor = at + 3;
+					memberNames[operands[0]][operands[1]] = ReadString(words, at + length, cursor);
+				}
+				break;
+			case OP_DECORATE:
+				if (operandCount >= 3 && operands[1] == DECORATION_BINDING) {
+					variableBindings[operands[0]] = operands[2];
+				}
+				break;
+			case OP_TYPE_STRUCT:
+				if (operandCount >= 1) {
+					structMembers[operands[0]] = std::vector<uint32_t>(operands + 1, operands + operandCount);
+				}
+				break;
+			case OP_TYPE_POINTER:
+				if (operandCount >= 3) {
+					pointers[operands[0]] = {operands[1], operands[2]};
+				}
+				break;
+			case OP_VARIABLE:
+				if (operandCount >= 3) {
+					variables[operands[1]] = {operands[0], operands[2]};
+				}
+				break;
+			case OP_CONSTANT:
+				// result type, result id, then the literal value
+				if (operandCount >= 3) {
+					constants[operands[1]] = operands[2];
+				}
+				break;
+			default:
+				break;
+			}
+
+			at += length;
+		}
+
+		// The same walk ReflectUniformBlock makes: binding alone is ambiguous,
+		// since a sampler can sit at binding 0 of another set, so the storage
+		// class and a struct pointee are what actually identify the block
+		uint32_t blockVariable = 0;
+		uint32_t blockStruct = 0;
+		for (const auto &[variableId, pointerAndStorage] : variables) {
+			auto bindingIt = variableBindings.find(variableId);
+			if (bindingIt == variableBindings.end() || bindingIt->second != binding) {
+				continue;
+			}
+
+			auto pointerIt = pointers.find(pointerAndStorage.first);
+			if (pointerIt == pointers.end() || pointerIt->second.first != STORAGE_CLASS_UNIFORM) {
+				continue;
+			}
+
+			if (structMembers.count(pointerIt->second.second)) {
+				blockVariable = variableId;
+				blockStruct = pointerIt->second.second;
+				break;
+			}
+		}
+
+		if (blockVariable == 0) {
+			return usage;
+		}
+
+		usage.Found = true;
+		const auto &names = memberNames[blockStruct];
+
+		auto readEverything = [&]() {
+			for (const auto &[index, name] : names) {
+				usage.ReadMembers.insert(name);
+			}
+		};
+
+		// Ids that stand for the block itself, so a copy of the pointer is
+		// followed rather than losing the trail
+		std::unordered_set<uint32_t> aliases{blockVariable};
+
+		for (size_t at = HEADER_WORDS; at < wordCount;) {
+			uint32_t instruction = words[at];
+			uint16_t opcode = (uint16_t)(instruction & 0xFFFF);
+			uint16_t length = (uint16_t)(instruction >> 16);
+
+			if (length == 0 || at + length > wordCount) {
+				break;
+			}
+
+			const uint32_t *operands = words + at + 1;
+			uint32_t operandCount = length - 1;
+
+			switch (opcode) {
+			case OP_ACCESS_CHAIN:
+			case OP_IN_BOUNDS_ACCESS_CHAIN: {
+				// result type, result id, base, then the indices
+				if (operandCount < 3 || !aliases.count(operands[2])) {
+					break;
+				}
+
+				// A chain into the block with no index at all aliases the whole
+				// thing rather than selecting a member
+				if (operandCount < 4) {
+					aliases.insert(operands[1]);
+					break;
+				}
+
+				auto constantIt = constants.find(operands[3]);
+				if (constantIt == constants.end()) {
+					// A computed member index cannot be pinned to one member,
+					// so every member has to count as read
+					readEverything();
+					break;
+				}
+
+				// An unnamed member cannot be matched by name either way, so
+				// there is nothing to record for one
+				auto nameIt = names.find(constantIt->second);
+				if (nameIt != names.end()) {
+					usage.ReadMembers.insert(nameIt->second);
+				}
+				break;
+			}
+			case OP_LOAD:
+				// Loading the block itself takes every member with it
+				if (operandCount >= 3 && aliases.count(operands[2])) {
+					readEverything();
+				}
+				break;
+			case OP_COPY_OBJECT:
+				if (operandCount >= 3 && aliases.count(operands[2])) {
+					aliases.insert(operands[1]);
+				}
+				break;
+			default:
+				break;
+			}
+
+			at += length;
+		}
+
+		return usage;
 	}
 } // namespace gargantuan::ShaderReflection

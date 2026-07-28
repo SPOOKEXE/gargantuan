@@ -120,9 +120,12 @@ namespace gargantuan {
 		}
 
 		Code = std::move(code);
-		// The declared parameters belong to the old code
+		// The declared parameters, and what the old code was found to read,
+		// both belong to the code being replaced
 		Reflected = false;
 		DeclaredParameters = {};
+		BuiltinsChecked = false;
+		ReadsTime = false;
 		// The old bytecode no longer matches the source, so drop it and make
 		// the renderer notice
 		Bytecode.clear();
@@ -137,12 +140,16 @@ namespace gargantuan {
 		if (!result.Success) {
 			Bytecode.clear();
 			Revision++;
+			BuiltinsChecked = false;
+			ReadsTime = false;
 			return false;
 		}
 
 		Bytecode = std::move(result.Bytecode);
 		Revision++;
 		Reflected = false;
+		BuiltinsChecked = false;
+		ReadsTime = false;
 		Reflect();
 		return true;
 	}
@@ -301,11 +308,15 @@ namespace gargantuan {
 		// disk, the same file the renderer would load
 		if (HasBytecode()) {
 			DeclaredParameters = ShaderReflection::ReflectUniformBlock(Bytecode.data(), Bytecode.size(), 1);
+			CheckBuiltins(Bytecode.data(), Bytecode.size());
 			Reflected = true;
 			return DeclaredParameters.Found;
 		}
 
 		if (Source.empty()) {
+			// Nothing to read now and nothing that would arrive later without
+			// going through SetCode or Source, both of which clear this again
+			BuiltinsChecked = true;
 			return false;
 		}
 
@@ -321,13 +332,40 @@ namespace gargantuan {
 		size_t size = 0;
 		void *code = SDL_LoadFile(path.c_str(), &size);
 		if (!code) {
+			// A name that does not resolve will not start resolving on its own,
+			// and the renderer asks once a frame; retrying the read every time
+			// would turn a typo into a per-frame file miss
+			BuiltinsChecked = true;
 			return false;
 		}
 
 		DeclaredParameters = ShaderReflection::ReflectUniformBlock(code, size, 1);
+		CheckBuiltins(code, size);
 		SDL_free(code);
 		Reflected = true;
 		return DeclaredParameters.Found;
+	}
+
+	void ShaderScript::CheckBuiltins(const void *spirv, size_t bytes) {
+		// Binding 0 in the shader's own uniform set, which is where the engine
+		// puts Resolution and Time. A sampler can sit at binding 0 of another
+		// set, so the reflection matches on storage class as well.
+		auto usage = ShaderReflection::ReflectBlockUsage(spirv, bytes, 0);
+		ReadsTime = usage.Reads("Time");
+		BuiltinsChecked = true;
+	}
+
+	bool ShaderScript::ReadsBuiltinTime() {
+		if (!BuiltinsChecked) {
+			Reflect();
+		}
+		return ReadsTime;
+	}
+
+	bool ShaderScript::NeedsRedrawEveryFrame() {
+		// The script's flag only ever forces it on, so a shader found to read
+		// Time animates whatever the script says
+		return RedrawEveryFrame || ReadsBuiltinTime();
 	}
 
 	bool ShaderScript::IsReflected() const {

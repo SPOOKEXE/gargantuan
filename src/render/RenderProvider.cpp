@@ -836,7 +836,7 @@ namespace gargantuan {
 
 	size_t RenderProvider::FindCacheCut(const std::vector<std::shared_ptr<ShaderScript>> &chain) {
 		for (size_t index = 0; index < chain.size(); index++) {
-			if (chain[index] && chain[index]->RedrawEveryFrame) {
+			if (chain[index] && chain[index]->NeedsRedrawEveryFrame()) {
 				return index;
 			}
 		}
@@ -1554,7 +1554,7 @@ namespace gargantuan {
 
 			MixPointer(hash, shader.get());
 			MixBits(hash, shader->GetRevision());
-			MixBits(hash, shader->RedrawEveryFrame ? 1 : 0);
+			MixBits(hash, shader->NeedsRedrawEveryFrame() ? 1 : 0);
 			for (const auto &[name, value] : shader->GetParameters()) {
 				MixBits(hash, std::hash<std::string>{}(name));
 				MixFloat(hash, value.x);
