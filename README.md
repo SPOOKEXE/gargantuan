@@ -32,7 +32,7 @@ And finally,
 
 - **Gargantuan is 100% yours,** From the platform, assets, multiplayer, and even core scripts.
 
-Sparked your interest? [Read the documentation.](./docs/intro.md)
+Sparked your interest? [Read the documentation.](./docs/index.md)
 
 ## Status
 
