@@ -229,6 +229,11 @@ namespace gargantuan {
 			// Set once a compile has been attempted and failed, so the engine
 			// complains once rather than every frame
 			bool Failed = false;
+			// The frame this was last handed out on. Eviction goes by it, and
+			// anything from the current frame is off limits: its pipeline may
+			// already be bound into a command buffer that has not been
+			// submitted yet.
+			uint64_t LastUsedFrame = 0;
 		};
 
 		// What the shaders are handed alongside their own parameters
@@ -304,7 +309,39 @@ namespace gargantuan {
 		std::deque<std::vector<SDL_GPUFence *>> FramesInFlight;
 		// Waits on a frame's fences and releases them
 		void RetireFrame(std::vector<SDL_GPUFence *> &fences);
+		// Every pipeline built so far, by cache key. Bounded two ways: a script
+		// recompiling a shader drops the revision it replaced straight away,
+		// and whatever is left is trimmed to MAXIMUM_CACHED_SHADERS by age.
 		std::unordered_map<std::string, CompiledShader> ShaderCache;
+		// Which revision of each runtime-compiled shader the cache is holding,
+		// so the one it replaces can be found again to release it
+		std::unordered_map<uint64_t, uint64_t> CachedShaderRevisions;
+
+		// Generous, since an entry is a pipeline and a layout rather than
+		// anything large, and a place using more distinct shaders than this at
+		// once would be thrashing whatever the number was.
+		static constexpr size_t MAXIMUM_CACHED_SHADERS = 128;
+
+		// Counts frames so eviction can tell what is still in use. Only
+		// BeginFrame moves it.
+		uint64_t FrameIndex = 0;
+
+		// Marks the entry used this frame and hands it back, or null when the
+		// key is absent
+		CompiledShader *FindCachedShader(const std::string &key);
+		// Makes room, then inserts. Returns a reference that stays valid until
+		// the next insert, which is why every caller finishes with the entry
+		// before asking for another.
+		CompiledShader &InsertCachedShader(const std::string &key, ShaderScript *shader);
+		// Releases one entry's GPU pipelines and erases it
+		void ReleaseCachedShader(const std::string &key);
+		// Drops the revision a recompile just replaced. Exact rather than
+		// waiting for the entry to age out, which is what keeps a script that
+		// recompiles every frame from filling the cache on its own.
+		void DropSupersededShader(ShaderScript *shader);
+		// Trims the cache back to its bound, oldest first, skipping anything
+		// this frame has already handed out
+		void TrimShaderCache();
 		// Cycles are reported once rather than every frame
 		std::unordered_set<Camera *> ReportedCycles;
 		// Cameras read across a cycle, which therefore keep a previous-frame

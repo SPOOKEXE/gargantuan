@@ -86,6 +86,12 @@ namespace gargantuan {
 		// Bumped every time the bytecode changes, so the renderer knows when to
 		// rebuild the pipeline it cached
 		uint64_t GetRevision() const;
+		// Unique for the run, and never reused. The renderer keys its pipeline
+		// cache on this rather than on the address, because a destroyed script
+		// frees an address a later one can be handed straight back -- and
+		// revisions start again from zero with it, so the two together would
+		// name a cache entry belonging to a shader that no longer exists.
+		uint64_t GetSerial() const;
 
 		// Which stage this kind of shader compiles as
 		virtual ShaderCompiler::Stage GetStage() const = 0;
@@ -184,5 +190,8 @@ namespace gargantuan {
 		std::string CompileError;
 		std::vector<unsigned char> Bytecode;
 		uint64_t Revision = 0;
+
+		static uint64_t NextSerial();
+		const uint64_t Serial = NextSerial();
 	};
 } // namespace gargantuan

@@ -176,6 +176,16 @@ namespace gargantuan {
 		return Revision;
 	}
 
+	uint64_t ShaderScript::NextSerial() {
+		// Starts at one, so a zero serial can never name a real shader
+		static uint64_t next = 0;
+		return ++next;
+	}
+
+	uint64_t ShaderScript::GetSerial() const {
+		return Serial;
+	}
+
 	namespace {
 		// Rejects a name the shader never declared, listing what it does take.
 		// Only enforced once the layout is known; before that anything goes,

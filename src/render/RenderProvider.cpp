@@ -92,6 +92,9 @@ namespace gargantuan {
 	void RenderProvider::BeginFrame(int maximumFramesInFlight) {
 		// Who followed whom is a fact about one frame only
 		RedrawnThisFrame.clear();
+		// Only moves here, so everything recorded between this and EndFrame
+		// counts as the same frame and is safe from eviction
+		FrameIndex++;
 
 		// Zero would mean nothing is ever waited on, which is the unbounded
 		// backlog this whole mechanism exists to stop
@@ -158,6 +161,7 @@ namespace gargantuan {
 			if (compiled.ComputePipeline) SDL_ReleaseGPUComputePipeline(Gpu, compiled.ComputePipeline);
 		}
 		ShaderCache.clear();
+		CachedShaderRevisions.clear();
 
 		if (WhiteTexture) {
 			SDL_ReleaseGPUTexture(Gpu, WhiteTexture);
@@ -555,9 +559,120 @@ namespace gargantuan {
 
 	std::string RenderProvider::GetShaderCacheKey(ShaderScript *shader, const char *stageExtension) {
 		if (shader->HasBytecode()) {
-			return "code:" + std::to_string((uintptr_t)shader) + ":" + std::to_string(shader->GetRevision());
+			return "code:" + std::to_string(shader->GetSerial()) + ":" + std::to_string(shader->GetRevision());
 		}
 		return shader->Source + stageExtension;
+	}
+
+	RenderProvider::CompiledShader *RenderProvider::FindCachedShader(const std::string &key) {
+		auto it = ShaderCache.find(key);
+		if (it == ShaderCache.end()) {
+			return nullptr;
+		}
+
+		it->second.LastUsedFrame = FrameIndex;
+		return &it->second;
+	}
+
+	void RenderProvider::ReleaseCachedShader(const std::string &key) {
+		auto it = ShaderCache.find(key);
+		if (it == ShaderCache.end()) {
+			return;
+		}
+
+		if (it->second.GraphicsPipeline) SDL_ReleaseGPUGraphicsPipeline(Gpu, it->second.GraphicsPipeline);
+		if (it->second.ComputePipeline) SDL_ReleaseGPUComputePipeline(Gpu, it->second.ComputePipeline);
+		ShaderCache.erase(it);
+	}
+
+	void RenderProvider::DropSupersededShader(ShaderScript *shader) {
+		if (!shader || !shader->HasBytecode()) {
+			return;
+		}
+
+		uint64_t serial = shader->GetSerial();
+		uint64_t revision = shader->GetRevision();
+
+		auto it = CachedShaderRevisions.find(serial);
+		if (it == CachedShaderRevisions.end()) {
+			CachedShaderRevisions[serial] = revision;
+			return;
+		}
+
+		if (it->second == revision) {
+			return;
+		}
+
+		// Revisions only ever go up, so nothing can ask for the old one again.
+		// Both the plain entry and the per-format surface ones belong to it.
+		std::string stem = "code:" + std::to_string(serial) + ":" + std::to_string(it->second);
+		for (auto entry = ShaderCache.begin(); entry != ShaderCache.end();) {
+			if (entry->first.rfind(stem, 0) != 0) {
+				++entry;
+				continue;
+			}
+
+			// Recompiling partway through a frame would otherwise release a
+			// pipeline already bound into a command buffer waiting to be
+			// submitted. Left behind, it ages out through the trim instead.
+			if (entry->second.LastUsedFrame == FrameIndex) {
+				++entry;
+				continue;
+			}
+
+			if (entry->second.GraphicsPipeline) SDL_ReleaseGPUGraphicsPipeline(Gpu, entry->second.GraphicsPipeline);
+			if (entry->second.ComputePipeline) SDL_ReleaseGPUComputePipeline(Gpu, entry->second.ComputePipeline);
+			entry = ShaderCache.erase(entry);
+		}
+
+		it->second = revision;
+	}
+
+	void RenderProvider::TrimShaderCache() {
+		while (ShaderCache.size() > MAXIMUM_CACHED_SHADERS) {
+			const std::string *oldestKey = nullptr;
+			uint64_t oldestFrame = 0;
+
+			for (const auto &[key, compiled] : ShaderCache) {
+				// Anything already handed out this frame may be bound into a
+				// command buffer that has not been submitted, and releasing it
+				// would leave that binding pointing at nothing
+				if (compiled.LastUsedFrame == FrameIndex) {
+					continue;
+				}
+
+				if (!oldestKey || compiled.LastUsedFrame < oldestFrame) {
+					oldestKey = &key;
+					oldestFrame = compiled.LastUsedFrame;
+				}
+			}
+
+			// Everything left belongs to this frame, so the bound gives way
+			// until the next one rather than the picture doing so
+			if (!oldestKey) {
+				return;
+			}
+
+			ReleaseCachedShader(*oldestKey);
+		}
+	}
+
+	RenderProvider::CompiledShader &RenderProvider::InsertCachedShader(
+		const std::string &key, ShaderScript *shader
+	) {
+		// Erases, so it runs before the reference the caller is about to hold
+		// is taken
+		DropSupersededShader(shader);
+
+		CompiledShader &compiled = ShaderCache[key];
+		compiled.LastUsedFrame = FrameIndex;
+
+		// Trimming afterwards is what makes the bound the real ceiling rather
+		// than one below it. Safe because this entry is stamped with the
+		// current frame, so the trim will not pick it, and erasing any other
+		// entry leaves the reference alone.
+		TrimShaderCache();
+		return compiled;
 	}
 
 	RenderProvider::CompiledShader *RenderProvider::GetSurfaceShader(
@@ -565,12 +680,11 @@ namespace gargantuan {
 	) {
 		std::string key = GetShaderCacheKey(shader, ".frag") + "#surface" + std::to_string((int)colorFormat);
 
-		auto it = ShaderCache.find(key);
-		if (it != ShaderCache.end()) {
-			return it->second.Failed ? nullptr : &it->second;
+		if (CompiledShader *cached = FindCachedShader(key)) {
+			return cached->Failed ? nullptr : cached;
 		}
 
-		CompiledShader &compiled = ShaderCache[key];
+		CompiledShader &compiled = InsertCachedShader(key, shader);
 		compiled.Failed = true;
 
 		SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
@@ -663,12 +777,11 @@ namespace gargantuan {
 	RenderProvider::CompiledShader *RenderProvider::GetPostProcessShader(PostProcessShader *shader) {
 		std::string key = GetShaderCacheKey(shader, ".frag");
 
-		auto it = ShaderCache.find(key);
-		if (it != ShaderCache.end()) {
-			return it->second.Failed ? nullptr : &it->second;
+		if (CompiledShader *cached = FindCachedShader(key)) {
+			return cached->Failed ? nullptr : cached;
 		}
 
-		CompiledShader &compiled = ShaderCache[key];
+		CompiledShader &compiled = InsertCachedShader(key, shader);
 		compiled.Failed = true;
 
 		SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
@@ -766,12 +879,11 @@ namespace gargantuan {
 	RenderProvider::CompiledShader *RenderProvider::GetComputeShader(ComputeShader *shader) {
 		std::string key = GetShaderCacheKey(shader, ".comp");
 
-		auto it = ShaderCache.find(key);
-		if (it != ShaderCache.end()) {
-			return it->second.Failed ? nullptr : &it->second;
+		if (CompiledShader *cached = FindCachedShader(key)) {
+			return cached->Failed ? nullptr : cached;
 		}
 
-		CompiledShader &compiled = ShaderCache[key];
+		CompiledShader &compiled = InsertCachedShader(key, shader);
 		compiled.Failed = true;
 
 		SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;

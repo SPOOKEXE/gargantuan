@@ -70,7 +70,6 @@ eyes. What is missing is the runtime that drives them.
 - [ ] Vertex stage overrides, so a shader can move geometry and not only shade it
 - [ ] Reflect vertex inputs, to reject a surface shader whose layout does not
       match what opaque.vert emits
-- [ ] Bound the shader cache, it grows without limit today
 
 ## Render
 
