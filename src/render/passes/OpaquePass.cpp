@@ -69,7 +69,7 @@ namespace gargantuan {
 
 		SDL_GPURenderPass *Draw(SDL_GPUDevice *gpu, FrameContext &context) override {
 			SDL_GPUColorTargetInfo colorTarget = {
-				.texture = context.SwapchainTexture,
+				.texture = context.ColorTarget,
 				.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f},
 				.load_op = SDL_GPU_LOADOP_CLEAR,
 				.store_op = SDL_GPU_STOREOP_STORE,

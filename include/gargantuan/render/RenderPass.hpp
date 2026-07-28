@@ -20,7 +20,9 @@ namespace gargantuan {
 	struct FrameContext : DrawContext {
 		SDL_GPUCommandBuffer *Commands;
 
-		SDL_GPUTexture *SwapchainTexture;
+		// Where the opaque pass draws. Either the window's swapchain texture
+		// or an offscreen camera target, so passes must not assume a window.
+		SDL_GPUTexture *ColorTarget;
 		SDL_GPUTexture *DepthTexture;
 
 		SDL_GPUTexture *ShadowMapTexture;

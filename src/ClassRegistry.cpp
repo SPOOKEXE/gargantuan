@@ -2,6 +2,7 @@
 #include "gargantuan/classes/BasePart.hpp"
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/classes/DataModel.hpp"
+#include "gargantuan/classes/EditableImage.hpp"
 #include "gargantuan/classes/InputObject.hpp"
 #include "gargantuan/classes/Part.hpp"
 #include "gargantuan/classes/ServiceProvider.hpp"
@@ -29,6 +30,7 @@ namespace gargantuan::ClassRegistry {
 			USE_INSTANCE_DEFINITION(BasePart),
 			USE_INSTANCE_DEFINITION(Camera),
 			USE_INSTANCE_DEFINITION(DataModel),
+			USE_INSTANCE_DEFINITION(EditableImage),
 			USE_INSTANCE_DEFINITION(InputObject),
 			USE_INSTANCE_DEFINITION(Instance),
 			USE_INSTANCE_DEFINITION(Lighting),

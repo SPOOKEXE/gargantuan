@@ -1,12 +1,18 @@
 #include "gargantuan/classes/Camera.hpp"
+#include "gargantuan/classes/EditableImage.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
+#include "gargantuan/render/RenderProvider.hpp"
+#include "gargantuan/scripting/ThreadEngine.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_video.h>
+#include <algorithm>
 #include <glm/trigonometric.hpp>
+#include <lualib.h>
+#include <memory>
 
 namespace gargantuan {
 	const Camera::ClassDefinition Camera::DEFINITION{
@@ -16,6 +22,7 @@ namespace gargantuan {
 		.Properties = {
 			G_UD_READWRITE_PROP(Camera, CameraType, Enums::CameraType),
 			G_UD_READWRITE_PROP(Camera, CFrame, gargantuan::CFrame),
+			G_UD_READWRITE_PROP(Camera, Enabled, bool),
 			G_UD_READWRITE_PROP(Camera, FieldOfView, float),
 			G_UD_READWRITE_PROP(Camera, ViewportSize, gargantuan::Vector2),
 			{
@@ -35,7 +42,79 @@ namespace gargantuan {
 				},
 			},
 		},
+		.Methods = {
+			{"Render",
+			 {&Camera::LRender, []() -> std::string { return "(self): EditableImage"; }}},
+		},
 	};
+
+	// Cameras register themselves so the renderer can find every one of them
+	// without walking the instance tree each frame
+	static std::vector<Camera *> ALL_CAMERAS;
+
+	Camera::Camera() {
+		ALL_CAMERAS.push_back(this);
+	}
+
+	Camera::~Camera() {
+		if (auto *provider = RenderProvider::GetCurrent()) {
+			provider->ReleaseCameraTarget(this);
+		}
+
+		auto it = std::find(ALL_CAMERAS.begin(), ALL_CAMERAS.end(), this);
+		if (it != ALL_CAMERAS.end()) {
+			ALL_CAMERAS.erase(it);
+		}
+	}
+
+	const std::vector<Camera *> &Camera::GetAllCameras() {
+		return ALL_CAMERAS;
+	}
+
+	int Camera::LRender(lua_State *L, Instance *instance) {
+		auto *camera = instance->Cast<Camera>();
+		if (!camera) {
+			luaL_error(L, "Render must be called on a Camera");
+			return 0;
+		}
+
+		auto *provider = RenderProvider::GetCurrent();
+		if (!provider) {
+			luaL_error(L, "Cannot render a Camera before the renderer is running");
+			return 0;
+		}
+
+		if (camera->ViewportSize.GetX() < 1.0f || camera->ViewportSize.GetY() < 1.0f) {
+			luaL_error(L, "Cannot render a Camera whose ViewportSize is empty; set it first");
+			return 0;
+		}
+
+		auto owned = camera->weak_from_this().lock();
+		if (!owned) {
+			luaL_error(L, "Cannot render a Camera that is not owned by the engine");
+			return 0;
+		}
+
+		auto *engine = ThreadEngine::Get(L);
+		if (!provider->Scene.WorldRoot) {
+			luaL_error(L, "Cannot render a Camera before the Workspace exists");
+			return 0;
+		}
+
+		DrawContext drawContext{
+			.WorldRoot = provider->Scene.WorldRoot,
+			.Camera = std::static_pointer_cast<Camera>(owned),
+			.LightDirection = provider->Scene.LightDirection,
+		};
+
+		if (!provider->RequestRender(drawContext, L, engine)) {
+			luaL_error(L, "Failed to start a Camera render");
+			return 0;
+		}
+
+		// The thread resumes with the EditableImage once the download lands
+		return lua_yield(L, 0);
+	}
 
 	float Camera::GetAspectRatio() {
 		return ViewportSize.GetY() > 0.0f ? ViewportSize.GetX() / ViewportSize.GetY() : 1.0f;

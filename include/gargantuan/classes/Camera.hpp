@@ -6,6 +6,8 @@
 #include "gargantuan/reflection/Enums.hpp"
 
 #include <SDL3/SDL.h>
+#include <lua.h>
+#include <vector>
 
 namespace gargantuan {
 	G_ENUM(
@@ -35,6 +37,10 @@ namespace gargantuan {
 		static const ClassDefinition DEFINITION;
 
 		Enums::CameraType CameraType = Enums::CameraType::Freecam;
+		// A disabled camera is skipped by the renderer entirely. The camera
+		// Workspace.CurrentCamera points at draws to the window; every other
+		// enabled camera draws into its own offscreen target instead.
+		bool Enabled = true;
 		CFrame CFrame;
 		float Pitch = 0.0f, Yaw = -90.0f, Roll;
 		// Vertical field of view in degrees.
@@ -56,5 +62,17 @@ namespace gargantuan {
 
 		void OnEvent(SDL_Window *window, SDL_Event &event);
 		void Step(float deltaTime);
+
+		// Renders this camera and yields the calling thread until the GPU
+		// hands the pixels back, then resumes it with an EditableImage
+		static int LRender(lua_State *L, Instance *instance);
+
+		// Every Camera ever constructed and not yet destroyed. The renderer
+		// walks this rather than the instance tree so an offscreen camera does
+		// not have to be parented to anything to be useful.
+		static const std::vector<Camera *> &GetAllCameras();
+
+		Camera();
+		~Camera() override;
 	};
 } // namespace gargantuan

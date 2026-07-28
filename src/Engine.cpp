@@ -1,4 +1,5 @@
 #include "gargantuan/Engine.hpp"
+#include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/classes/DataModel.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/render/MeshProvider.hpp"
@@ -43,6 +44,9 @@ namespace gargantuan {
 		}
 
 		this->RenderProvider = new class RenderProvider(Window, Gpu);
+		// Camera:Render() reaches the renderer through this
+		RenderProvider::SetCurrent(this->RenderProvider);
+
 		this->ScriptEngine = new class ScriptEngine();
 
 		DataModel = std::make_shared<gargantuan::DataModel>();
@@ -124,11 +128,45 @@ namespace gargantuan {
 		// this step are the ones rendered
 		TweenService->Step(deltaTime);
 		MeshProvider::UploadToGpu(Gpu);
-		RenderProvider->Draw({
-			.WorldRoot = std::static_pointer_cast<WorldRoot>(Workspace),
-			.Camera = Workspace->CurrentCamera,
-			.LightDirection = Lighting->GetSunDirection(),
-		});
+
+		auto worldRoot = std::static_pointer_cast<WorldRoot>(Workspace);
+		auto lightDirection = Lighting->GetSunDirection();
+
+		// Published so an ad-hoc Camera:Render() draws this same world
+		RenderProvider->Scene.WorldRoot = worldRoot;
+		RenderProvider->Scene.LightDirection = lightDirection;
+
+		auto currentCamera = Workspace->CurrentCamera;
+		if (currentCamera && currentCamera->Enabled) {
+			RenderProvider->Draw({
+				.WorldRoot = worldRoot,
+				.Camera = currentCamera,
+				.LightDirection = lightDirection,
+			});
+		}
+
+		// Every other enabled camera keeps its own offscreen target up to date
+		for (auto *camera : Camera::GetAllCameras()) {
+			if (!camera->Enabled || camera == currentCamera.get()) {
+				continue;
+			}
+
+			// A Camera that is not owned by a shared_ptr cannot be handed to
+			// the renderer, so skip it rather than throwing bad_weak_ptr
+			auto owned = camera->weak_from_this().lock();
+			if (!owned) {
+				continue;
+			}
+
+			RenderProvider->DrawOffscreen({
+				.WorldRoot = worldRoot,
+				.Camera = std::static_pointer_cast<Camera>(owned),
+				.LightDirection = lightDirection,
+			});
+		}
+
+		// Resume any script waiting on a Camera:Render() readback
+		RenderProvider->PollRenders(&ScriptEngine->ThreadEngine);
 
 		ScriptEngine->Step();
 
