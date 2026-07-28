@@ -125,6 +125,7 @@ target_include_directories(gargantuan SYSTEM PRIVATE
 	"vendor/magicenum/include"
 	"vendor/sdl/include"
 	"vendor/spdlog/include"
+	"vendor/stb"
 )
 
 target_link_libraries(gargantuan

@@ -1,6 +1,7 @@
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/classes/EditableImage.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
+#include "gargantuan/datatypes/UDim2.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
 #include "gargantuan/render/RenderProvider.hpp"
 #include "gargantuan/scripting/ThreadEngine.hpp"
@@ -23,6 +24,9 @@ namespace gargantuan {
 			G_UD_READWRITE_PROP(Camera, CameraType, Enums::CameraType),
 			G_UD_READWRITE_PROP(Camera, CFrame, gargantuan::CFrame),
 			G_UD_READWRITE_PROP(Camera, Enabled, bool),
+			G_UD_READWRITE_PROP(Camera, DrawToWindow, bool),
+			G_UD_READWRITE_PROP(Camera, WindowPosition, UDim2),
+			G_UD_READWRITE_PROP(Camera, WindowSize, UDim2),
 			G_UD_READWRITE_PROP(Camera, FieldOfView, float),
 			{
 				"SurfaceShader",

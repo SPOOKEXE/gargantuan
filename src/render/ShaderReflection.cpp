@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <unordered_set>
 
 namespace gargantuan::ShaderReflection {
 	namespace {
@@ -16,6 +17,8 @@ namespace gargantuan::ShaderReflection {
 		constexpr uint16_t OP_TYPE_VECTOR = 23;
 		constexpr uint16_t OP_TYPE_MATRIX = 24;
 		constexpr uint16_t OP_TYPE_ARRAY = 28;
+		constexpr uint16_t OP_TYPE_IMAGE = 25;
+		constexpr uint16_t OP_TYPE_SAMPLED_IMAGE = 27;
 		constexpr uint16_t OP_TYPE_STRUCT = 30;
 		constexpr uint16_t OP_TYPE_POINTER = 32;
 		constexpr uint16_t OP_VARIABLE = 59;
@@ -27,6 +30,9 @@ namespace gargantuan::ShaderReflection {
 		constexpr uint32_t DECORATION_MATRIX_STRIDE = 7;
 		constexpr uint32_t DECORATION_ARRAY_STRIDE = 6;
 
+		constexpr uint32_t DECORATION_NON_WRITABLE = 24;
+
+		constexpr uint32_t STORAGE_CLASS_UNIFORM_CONSTANT = 0;
 		constexpr uint32_t STORAGE_CLASS_UNIFORM = 2;
 
 		struct TypeInfo {
@@ -81,6 +87,7 @@ namespace gargantuan::ShaderReflection {
 		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> pointers; // id -> (storage, type)
 		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> variables; // id -> (pointerType, storage)
 		std::unordered_map<uint32_t, TypeInfo> types;
+		std::unordered_set<uint32_t> nonWritable;
 
 		for (size_t at = HEADER_WORDS; at < wordCount;) {
 			uint32_t instruction = words[at];
@@ -119,6 +126,8 @@ namespace gargantuan::ShaderReflection {
 					variableBindings[operands[0]] = operands[2];
 				} else if (operandCount >= 3 && operands[1] == DECORATION_ARRAY_STRIDE) {
 					types[operands[0]].Stride = operands[2];
+				} else if (operandCount >= 2 && operands[1] == DECORATION_NON_WRITABLE) {
+					nonWritable.insert(operands[0]);
 				}
 				break;
 			}
@@ -158,6 +167,24 @@ namespace gargantuan::ShaderReflection {
 					type.Opcode = opcode;
 					type.ComponentType = operands[1];
 					type.ComponentCount = operands[2];
+				}
+				break;
+			}
+			case OP_TYPE_IMAGE: {
+				// result, sampled type, dim, depth, arrayed, ms, sampled, format
+				if (operandCount >= 7) {
+					auto &type = types[operands[0]];
+					type.Opcode = OP_TYPE_IMAGE;
+					// 1 means it is read through a sampler, 2 means storage
+					type.ComponentCount = operands[6];
+				}
+				break;
+			}
+			case OP_TYPE_SAMPLED_IMAGE: {
+				if (operandCount >= 2) {
+					auto &type = types[operands[0]];
+					type.Opcode = OP_TYPE_SAMPLED_IMAGE;
+					type.ComponentType = operands[1];
 				}
 				break;
 			}
@@ -247,5 +274,118 @@ namespace gargantuan::ShaderReflection {
 		layout.Size = end;
 		layout.Found = !layout.Members.empty();
 		return layout;
+	}
+
+	ResourceCounts ReflectResources(const void *spirv, size_t bytes) {
+		ResourceCounts counts;
+
+		if (!spirv || bytes < HEADER_WORDS * sizeof(uint32_t) || bytes % sizeof(uint32_t) != 0) {
+			return counts;
+		}
+
+		const auto *words = static_cast<const uint32_t *>(spirv);
+		size_t wordCount = bytes / sizeof(uint32_t);
+		if (words[0] != SPIRV_MAGIC) {
+			return counts;
+		}
+
+		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> pointers;
+		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> variables;
+		std::unordered_map<uint32_t, TypeInfo> types;
+		std::unordered_set<uint32_t> nonWritable;
+		std::unordered_set<uint32_t> hasBinding;
+
+		for (size_t at = HEADER_WORDS; at < wordCount;) {
+			uint32_t instruction = words[at];
+			uint16_t opcode = (uint16_t)(instruction & 0xFFFF);
+			uint16_t length = (uint16_t)(instruction >> 16);
+
+			if (length == 0 || at + length > wordCount) {
+				break;
+			}
+
+			const uint32_t *operands = words + at + 1;
+			uint32_t operandCount = length - 1;
+
+			switch (opcode) {
+			case OP_DECORATE:
+				if (operandCount >= 3 && operands[1] == DECORATION_BINDING) {
+					hasBinding.insert(operands[0]);
+				} else if (operandCount >= 2 && operands[1] == DECORATION_NON_WRITABLE) {
+					nonWritable.insert(operands[0]);
+				}
+				break;
+			case OP_TYPE_POINTER:
+				if (operandCount >= 3) {
+					pointers[operands[0]] = {operands[1], operands[2]};
+				}
+				break;
+			case OP_VARIABLE:
+				if (operandCount >= 3) {
+					variables[operands[1]] = {operands[0], operands[2]};
+				}
+				break;
+			case OP_TYPE_IMAGE:
+				if (operandCount >= 7) {
+					types[operands[0]].Opcode = OP_TYPE_IMAGE;
+					types[operands[0]].ComponentCount = operands[6];
+				}
+				break;
+			case OP_TYPE_SAMPLED_IMAGE:
+				if (operandCount >= 2) {
+					types[operands[0]].Opcode = OP_TYPE_SAMPLED_IMAGE;
+					types[operands[0]].ComponentType = operands[1];
+				}
+				break;
+			case OP_TYPE_STRUCT:
+				if (operandCount >= 1) {
+					types[operands[0]].Opcode = OP_TYPE_STRUCT;
+				}
+				break;
+			default:
+				break;
+			}
+
+			at += length;
+		}
+
+		for (const auto &[variableId, typeAndStorage] : variables) {
+			// Only the bound resources matter; locals and builtins are not
+			if (!hasBinding.count(variableId)) {
+				continue;
+			}
+
+			auto pointerIt = pointers.find(typeAndStorage.first);
+			if (pointerIt == pointers.end()) {
+				continue;
+			}
+
+			uint32_t storageClass = pointerIt->second.first;
+			uint32_t pointeeId = pointerIt->second.second;
+			auto typeIt = types.find(pointeeId);
+			if (typeIt == types.end()) {
+				continue;
+			}
+
+			if (storageClass == STORAGE_CLASS_UNIFORM && typeIt->second.Opcode == OP_TYPE_STRUCT) {
+				counts.UniformBuffers++;
+			} else if (storageClass == STORAGE_CLASS_UNIFORM_CONSTANT) {
+				if (typeIt->second.Opcode == OP_TYPE_SAMPLED_IMAGE) {
+					counts.SampledImages++;
+				} else if (typeIt->second.Opcode == OP_TYPE_IMAGE) {
+					// Sampled == 1 is read through a sampler, 2 is storage
+					if (typeIt->second.ComponentCount == 1) {
+						counts.SampledImages++;
+					} else if (nonWritable.count(variableId)) {
+						counts.ReadOnlyStorageImages++;
+					} else {
+						counts.WriteStorageImages++;
+					}
+				}
+			}
+		}
+
+		counts.Found = true;
+		return counts;
 	}
 } // namespace gargantuan::ShaderReflection

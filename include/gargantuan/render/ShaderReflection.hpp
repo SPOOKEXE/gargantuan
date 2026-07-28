@@ -34,4 +34,21 @@ namespace gargantuan::ShaderReflection {
 	// SetNumber("Intensity", ...) land on the member actually called
 	// Intensity, whatever position it sits in.
 	BlockLayout ReflectUniformBlock(const void *spirv, size_t bytes, uint32_t binding);
+
+	// What a shader actually asks the pipeline for. Building a pipeline from
+	// these rather than from a guess means a shader that declares two samplers
+	// gets two, and a script that supplies the wrong number is told so instead
+	// of failing somewhere inside the driver.
+	struct ResourceCounts {
+		// sampler2D and friends
+		uint32_t SampledImages = 0;
+		// image2D declared readonly
+		uint32_t ReadOnlyStorageImages = 0;
+		// image2D declared writeonly or read-write
+		uint32_t WriteStorageImages = 0;
+		uint32_t UniformBuffers = 0;
+		bool Found = false;
+	};
+
+	ResourceCounts ReflectResources(const void *spirv, size_t bytes);
 } // namespace gargantuan::ShaderReflection

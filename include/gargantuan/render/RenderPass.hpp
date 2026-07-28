@@ -38,6 +38,9 @@ namespace gargantuan {
 		SDL_GPUGraphicsPipeline *SurfacePipeline = nullptr;
 		const void *SurfaceParameters = nullptr;
 		uint32_t SurfaceParameterBytes = 0;
+		// Slot 0 is the shadow map; the script's images follow
+		const SDL_GPUTextureSamplerBinding *SurfaceSamplers = nullptr;
+		uint32_t SurfaceSamplerCount = 0;
 	};
 
 	class RenderPass {

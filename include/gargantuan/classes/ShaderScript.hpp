@@ -6,8 +6,10 @@
 #include "gargantuan/datatypes/Vector2.hpp"
 #include "gargantuan/datatypes/Vector3.hpp"
 #include "gargantuan/render/ShaderCompiler.hpp"
+#include "gargantuan/render/ShaderReflection.hpp"
 
 #include <cstdint>
+#include <lua.h>
 #include <glm/glm.hpp>
 #include <memory>
 #include <utility>
@@ -16,6 +18,8 @@
 #include <vector>
 
 namespace gargantuan {
+	class Camera;
+
 	// Base for the shaders a Camera can run over its output.
 	//
 	// Source names a shader that glslc compiled at build time from
@@ -73,13 +77,43 @@ namespace gargantuan {
 
 		void SetImage(std::string name, std::shared_ptr<EditableImage> image);
 		std::shared_ptr<EditableImage> GetImage(std::string name) const;
+		// Binds another camera's rendered output straight from the GPU, with no
+		// trip through the CPU. That camera has to have rendered already this
+		// frame, which offscreen cameras do before the window one.
+		void SetCameraTexture(std::string name, std::shared_ptr<Camera> camera);
+		std::shared_ptr<Camera> GetCameraTexture(std::string name) const;
 		std::vector<std::string> ListImages();
 		void ClearImages();
+		// One bound texture, which is either an image or a camera's output
+		struct TextureSource {
+			std::shared_ptr<EditableImage> Image;
+			std::shared_ptr<Camera> Camera;
+		};
+
 		// In binding order, for the renderer
 		std::vector<std::shared_ptr<EditableImage>> GetImages() const;
+		std::vector<TextureSource> GetTextureSources() const;
+
+		// Names the shader actually declares, read out of its SPIR-V. Empty
+		// until the shader has been reflected, which Compile and Validate do,
+		// and which happens automatically for a named asset.
+		std::vector<std::string> GetExpectedParameters();
+		// Reads the shader's declared layout. Safe to call repeatedly.
+		bool Reflect();
+		bool IsReflected() const;
+		// True when a parameter of this name can be set
+		bool IsParameterExpected(const std::string &name) const;
 
 		std::vector<std::string> ListParameters();
 		void ClearParameters();
+
+		// Bound by hand rather than through the generic wrapper, so setting a
+		// name the shader never declared can be reported as an error
+		static int LSetNumber(lua_State *L, Instance *instance);
+		static int LSetVector2(lua_State *L, Instance *instance);
+		static int LSetVector3(lua_State *L, Instance *instance);
+		static int LSetColor3(lua_State *L, Instance *instance);
+		static int LSetBool(lua_State *L, Instance *instance);
 
 		// Packed slots, ready to push as uniform data. Only used when a shader's
 		// layout could not be reflected.
@@ -97,8 +131,11 @@ namespace gargantuan {
 		std::unordered_map<std::string, size_t> ParameterIndices;
 		std::vector<glm::vec4> ParameterValues;
 
+		ShaderReflection::BlockLayout DeclaredParameters;
+		bool Reflected = false;
+
 		std::vector<std::string> ImageOrder;
-		std::unordered_map<std::string, std::shared_ptr<EditableImage>> Images;
+		std::unordered_map<std::string, TextureSource> Images;
 		std::string Code;
 		std::string CompileError;
 		std::vector<unsigned char> Bytecode;

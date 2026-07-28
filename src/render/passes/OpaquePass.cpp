@@ -92,7 +92,13 @@ namespace gargantuan {
 			auto pass = SDL_BeginGPURenderPass(context.Commands, &colorTarget, 1, &depthTarget);
 			// A camera's SurfaceShader swaps the fragment stage for its own
 			SDL_BindGPUGraphicsPipeline(pass, context.SurfacePipeline ? context.SurfacePipeline : Pipeline);
-			SDL_BindGPUFragmentSamplers(pass, 0, &shadowBinding, 1);
+
+			// A surface shader may sample its own images after the shadow map
+			if (context.SurfacePipeline && context.SurfaceSamplers && context.SurfaceSamplerCount > 0) {
+				SDL_BindGPUFragmentSamplers(pass, 0, context.SurfaceSamplers, context.SurfaceSamplerCount);
+			} else {
+				SDL_BindGPUFragmentSamplers(pass, 0, &shadowBinding, 1);
+			}
 
 			WorldUniforms worldUniforms{
 				.ViewMatrix = context.Camera->GetViewMatrix(),

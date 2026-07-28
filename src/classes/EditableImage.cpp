@@ -1,6 +1,7 @@
 #include "gargantuan/classes/EditableImage.hpp"
 #include "gargantuan/datatypes/Color3.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
+#include "gargantuan/render/ImageDecoder.hpp"
 #include "gargantuan/scripting/LuauBuffer.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 
@@ -17,6 +18,17 @@ namespace gargantuan {
 		.Properties =
 			{
 				{
+					"LoadError",
+					{
+						[](lua_State *L, Instance *instance) -> int {
+							StackValue<std::string>::Push(L, instance->Cast<EditableImage>()->GetLoadError());
+							return 1;
+						},
+						nullptr,
+						G_UD_REFLECT_TYPE(std::string),
+					},
+				},
+				{
 					"Size",
 					{
 						[](lua_State *L, Instance *instance) -> int {
@@ -32,6 +44,10 @@ namespace gargantuan {
 			{"Resize", Method::Wrap<&EditableImage::Resize>()},
 			{"Crop", Method::Wrap<&EditableImage::Crop>()},
 			{"DrawRectangle", Method::Wrap<&EditableImage::DrawRectangle>()},
+			{"DrawImage", Method::Wrap<&EditableImage::DrawImage>()},
+			{"DrawCircle", Method::Wrap<&EditableImage::DrawCircle>()},
+			{"DrawLine", Method::Wrap<&EditableImage::DrawLine>()},
+			{"Load", Method::Wrap<&EditableImage::Load>()},
 			{"ReadPixelsBuffer",
 			 {&EditableImage::LReadPixelsBuffer,
 			  []() -> std::string { return "(self, position: Vector2, size: Vector2): buffer"; }}},
@@ -154,6 +170,143 @@ namespace gargantuan {
 				pixel += CHANNELS;
 			}
 		}
+	}
+
+	void EditableImage::BlendPixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+		if (x < 0 || y < 0 || x >= Width || y >= Height || a == 0) {
+			return;
+		}
+
+		uint8_t *pixel = Pixels.data() + ((size_t)y * Width + x) * CHANNELS;
+
+		// Fully opaque is the common case and needs no arithmetic
+		if (a == 255) {
+			pixel[0] = r;
+			pixel[1] = g;
+			pixel[2] = b;
+			pixel[3] = 255;
+			return;
+		}
+
+		// Source-over, in 0-255 fixed point
+		int inverse = 255 - a;
+		pixel[0] = (uint8_t)((r * a + pixel[0] * inverse) / 255);
+		pixel[1] = (uint8_t)((g * a + pixel[1] * inverse) / 255);
+		pixel[2] = (uint8_t)((b * a + pixel[2] * inverse) / 255);
+		pixel[3] = (uint8_t)glm::min(255, a + pixel[3] * inverse / 255);
+	}
+
+	void EditableImage::DrawImage(Vector2 position, std::shared_ptr<EditableImage> image) {
+		if (!image || image->Width <= 0 || image->Height <= 0) {
+			return;
+		}
+
+		Revision++;
+		int originX = (int)glm::round(position.GetX());
+		int originY = (int)glm::round(position.GetY());
+
+		for (int y = 0; y < image->Height; y++) {
+			for (int x = 0; x < image->Width; x++) {
+				const uint8_t *source = image->Pixels.data() + ((size_t)y * image->Width + x) * CHANNELS;
+				BlendPixel(originX + x, originY + y, source[0], source[1], source[2], source[3]);
+			}
+		}
+	}
+
+	void EditableImage::DrawCircle(Vector2 centre, float radius, Color3 color, float transparency) {
+		if (radius <= 0.0f) {
+			return;
+		}
+
+		Revision++;
+		uint8_t r = (uint8_t)glm::round(glm::clamp(color.R, 0.0f, 1.0f) * 255.0f);
+		uint8_t g = (uint8_t)glm::round(glm::clamp(color.G, 0.0f, 1.0f) * 255.0f);
+		uint8_t b = (uint8_t)glm::round(glm::clamp(color.B, 0.0f, 1.0f) * 255.0f);
+		uint8_t alpha = (uint8_t)glm::round((1.0f - glm::clamp(transparency, 0.0f, 1.0f)) * 255.0f);
+
+		float centreX = centre.GetX();
+		float centreY = centre.GetY();
+
+		// Only the rows and columns the circle can touch
+		int minX = glm::max(0, (int)glm::floor(centreX - radius));
+		int maxX = glm::min(Width - 1, (int)glm::ceil(centreX + radius));
+		int minY = glm::max(0, (int)glm::floor(centreY - radius));
+		int maxY = glm::min(Height - 1, (int)glm::ceil(centreY + radius));
+
+		float radiusSquared = radius * radius;
+		for (int y = minY; y <= maxY; y++) {
+			for (int x = minX; x <= maxX; x++) {
+				// An integer coordinate names a pixel, so distance is measured
+				// from that pixel rather than from its top-left corner. This is
+				// what makes a one-pixel line actually cover its endpoints.
+				float dx = (float)x - centreX;
+				float dy = (float)y - centreY;
+				if (dx * dx + dy * dy <= radiusSquared) {
+					BlendPixel(x, y, r, g, b, alpha);
+				}
+			}
+		}
+	}
+
+	void EditableImage::DrawLine(Vector2 from, Vector2 to, Color3 color, float transparency, float thickness) {
+		Revision++;
+		uint8_t r = (uint8_t)glm::round(glm::clamp(color.R, 0.0f, 1.0f) * 255.0f);
+		uint8_t g = (uint8_t)glm::round(glm::clamp(color.G, 0.0f, 1.0f) * 255.0f);
+		uint8_t b = (uint8_t)glm::round(glm::clamp(color.B, 0.0f, 1.0f) * 255.0f);
+		uint8_t alpha = (uint8_t)glm::round((1.0f - glm::clamp(transparency, 0.0f, 1.0f)) * 255.0f);
+
+		float radius = glm::max(thickness, 1.0f) / 2.0f;
+		float startX = from.GetX();
+		float startY = from.GetY();
+		float deltaX = to.GetX() - startX;
+		float deltaY = to.GetY() - startY;
+		float length = glm::sqrt(deltaX * deltaX + deltaY * deltaY);
+
+		// A zero-length line is just a dot
+		if (length < 1e-4f) {
+			DrawCircle(from, radius, color, transparency);
+			return;
+		}
+
+		// Walk the line in half-pixel steps and stamp a disc at each, which
+		// gives an even width and rounded ends without any gaps
+		int steps = (int)glm::ceil(length * 2.0f);
+		for (int step = 0; step <= steps; step++) {
+			float t = (float)step / (float)steps;
+			float x = startX + deltaX * t;
+			float y = startY + deltaY * t;
+
+			int minX = glm::max(0, (int)glm::floor(x - radius));
+			int maxX = glm::min(Width - 1, (int)glm::ceil(x + radius));
+			int minY = glm::max(0, (int)glm::floor(y - radius));
+			int maxY = glm::min(Height - 1, (int)glm::ceil(y + radius));
+
+			for (int pixelY = minY; pixelY <= maxY; pixelY++) {
+				for (int pixelX = minX; pixelX <= maxX; pixelX++) {
+					float dx = (float)pixelX - x;
+					float dy = (float)pixelY - y;
+					if (dx * dx + dy * dy <= radius * radius) {
+						BlendPixel(pixelX, pixelY, r, g, b, alpha);
+					}
+				}
+			}
+		}
+	}
+
+	bool EditableImage::Load(std::string path) {
+		auto decoded = ImageDecoder::DecodeFile(path);
+		if (!decoded.Success) {
+			LoadError = decoded.Error;
+			return false;
+		}
+
+		LoadError.clear();
+		SetPixels(decoded.Width, decoded.Height, decoded.Pixels.data());
+		return true;
+	}
+
+	std::string EditableImage::GetLoadError() const {
+		return LoadError;
 	}
 
 	int EditableImage::LReadPixelsBuffer(lua_State *L, Instance *instance) {

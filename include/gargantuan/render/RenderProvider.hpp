@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gargantuan/render/RenderPass.hpp"
+#include "gargantuan/classes/ShaderScript.hpp"
 #include "gargantuan/render/ShaderReflection.hpp"
 
 #include <SDL3/SDL.h>
@@ -11,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace gargantuan {
@@ -52,6 +54,32 @@ namespace gargantuan {
 		// Draws a camera into its own offscreen target, creating or resizing
 		// that target to match the camera's ViewportSize first
 		void DrawOffscreen(DrawContext drawContext);
+
+		// Draws several cameras into one window, each into its own rectangle.
+		// Split-screen: every camera renders offscreen, then its target is
+		// blitted into place.
+		void DrawComposite(const std::vector<DrawContext> &cameras);
+
+		// Cameras a camera samples through its shaders, directly
+		static std::vector<Camera *> GetSampledCameras(Camera *camera);
+
+		// Orders cameras so that anything sampled by another is drawn before
+		// it, pulling in dependencies the caller did not list. Without this a
+		// camera reading another's target would see the previous frame.
+		//
+		// A cycle cannot be satisfied; the edge that closes it is dropped, so
+		// that one camera reads a frame-old picture instead of deadlocking.
+		std::vector<Camera *> GetRenderOrder(const std::vector<Camera *> &roots);
+
+		// Where a camera lands in a window of this size, in pixels. Pure, so
+		// the layout can be checked without a GPU.
+		struct WindowRegion {
+			int X = 0;
+			int Y = 0;
+			int Width = 0;
+			int Height = 0;
+		};
+		static WindowRegion ComputeWindowRegion(const Camera &camera, int windowWidth, int windowHeight);
 
 		// Renders the camera offscreen, starts a download of the result, and
 		// parks `thread` until it lands. The thread is resumed with an
@@ -117,6 +145,9 @@ namespace gargantuan {
 			// Where each named parameter goes, read out of the SPIR-V. Without
 			// it the engine falls back to packing in Set order.
 			ShaderReflection::BlockLayout ParameterLayout;
+			// What the shader itself asks for, so bindings are checked against
+			// the declaration rather than guessed from the script
+			ShaderReflection::ResourceCounts Resources;
 			// Set once a compile has been attempted and failed, so the engine
 			// complains once rather than every frame
 			bool Failed = false;
@@ -141,6 +172,8 @@ namespace gargantuan {
 		std::unordered_map<EditableImage *, UploadedImage> UploadedImages;
 		std::vector<PendingRender> PendingRenders;
 		std::unordered_map<std::string, CompiledShader> ShaderCache;
+		// Cycles are reported once rather than every frame
+		std::unordered_set<Camera *> ReportedCycles;
 		SDL_GPUShader *FullscreenVertexShader = nullptr;
 		SDL_GPUShader *OpaqueVertexShader = nullptr;
 		SDL_GPUSampler *ShaderSampler = nullptr;
@@ -161,10 +194,19 @@ namespace gargantuan {
 		// Uploads or refreshes the GPU copy of an image, returning null when it
 		// is empty or the upload failed
 		SDL_GPUTexture *AcquireImageTexture(EditableImage *image);
+		// An image or another camera's output, whichever the script bound
+		SDL_GPUTexture *ResolveTextureSource(const ShaderScript::TextureSource &source);
 		// Builds opaque.vert paired with a surface shader's fragment stage.
 		// Cached per shader and colour format, since the window and an
 		// offscreen target do not share one.
 		CompiledShader *GetSurfaceShader(SurfaceShader *shader, SDL_GPUTextureFormat colorFormat);
+		bool PrepareSurfaceShader(
+			FrameContext &frameContext,
+			Camera *camera,
+			SDL_GPUTextureFormat colorFormat,
+			std::vector<uint8_t> &parameterStorage,
+			std::vector<SDL_GPUTextureSamplerBinding> &samplerStorage
+		);
 		CompiledShader *GetPostProcessShader(PostProcessShader *shader);
 		CompiledShader *GetComputeShader(ComputeShader *shader);
 		// Cache key: runtime code is keyed by identity and revision, a named

@@ -22,6 +22,7 @@
 #include <luacode.h>
 #include <lualib.h>
 #include <memory>
+#include <vector>
 #include <stdexcept>
 
 namespace gargantuan {
@@ -138,22 +139,52 @@ namespace gargantuan {
 		RenderProvider->Scene.Time = Workspace->DistributedGameTime;
 
 		auto currentCamera = Workspace->CurrentCamera;
+
+		// Anything that draws into the window, CurrentCamera first so it takes
+		// the whole thing when nothing else asks for a share
+		std::vector<DrawContext> windowCameras;
 		if (currentCamera && currentCamera->Enabled) {
-			RenderProvider->Draw({
+			windowCameras.push_back({
 				.WorldRoot = worldRoot,
 				.Camera = currentCamera,
 				.LightDirection = lightDirection,
 			});
 		}
 
-		// Every other enabled camera keeps its own offscreen target up to date
+		// Everything that renders on its own this frame
+		std::vector<Camera *> offscreenRoots;
 		for (auto *camera : Camera::GetAllCameras()) {
 			if (!camera->Enabled || camera == currentCamera.get()) {
 				continue;
 			}
 
-			// A Camera that is not owned by a shared_ptr cannot be handed to
-			// the renderer, so skip it rather than throwing bad_weak_ptr
+			if (camera->DrawToWindow) {
+				// A Camera that is not owned by a shared_ptr cannot be handed
+				// to the renderer, so skip it rather than throwing bad_weak_ptr
+				if (auto owned = camera->weak_from_this().lock()) {
+					windowCameras.push_back({
+						.WorldRoot = worldRoot,
+						.Camera = std::static_pointer_cast<Camera>(owned),
+						.LightDirection = lightDirection,
+					});
+				}
+			} else {
+				offscreenRoots.push_back(camera);
+			}
+		}
+
+		// Anything a window camera samples must also be up to date before the
+		// window is drawn
+		for (const auto &context : windowCameras) {
+			for (Camera *dependency : RenderProvider->GetSampledCameras(context.Camera.get())) {
+				offscreenRoots.push_back(dependency);
+			}
+		}
+
+		// Sorted so a camera reading another's target sees this frame's picture.
+		// Enabled decides whether a camera renders on its own; one that another
+		// camera samples is drawn regardless, or that camera would be wrong.
+		for (Camera *camera : RenderProvider->GetRenderOrder(offscreenRoots)) {
 			auto owned = camera->weak_from_this().lock();
 			if (!owned) {
 				continue;
@@ -164,6 +195,14 @@ namespace gargantuan {
 				.Camera = std::static_pointer_cast<Camera>(owned),
 				.LightDirection = lightDirection,
 			});
+		}
+
+		if (windowCameras.size() == 1) {
+			// One camera filling the window is the common case and can draw
+			// straight into the swapchain
+			RenderProvider->Draw(windowCameras.front());
+		} else if (!windowCameras.empty()) {
+			RenderProvider->DrawComposite(windowCameras);
 		}
 
 		// Resume any script waiting on a Camera:Render() readback

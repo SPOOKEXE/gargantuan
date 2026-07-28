@@ -50,23 +50,24 @@ eyes. What is missing is the runtime that drives them.
 
 ## Cameras
 
-- [ ] Split-screen, several cameras compositing into one window
-- [ ] Sample a camera's target as a texture in-world, ie. ViewportFrame
+- [ ] Let a camera's target be put on a part's surface, not only sampled by a
+      shader
+- [ ] Break camera sampling cycles more usefully than dropping one edge, eg. by
+      giving the loop an explicit previous-frame copy to read
 
 ## Images
 
-- [ ] Decode images from disk, PNG and JPEG
-- [ ] DrawImage, DrawCircle, DrawLine
 - [ ] AssetService:CreateEditableImage
+- [ ] Save an image back out to a file
+- [ ] Antialias the drawing calls; they are hard-edged today
+- [ ] The blend modes Roblox's Draw calls take, ie. Overwrite against BlendSource
 
 ## Shaders
 
-- [ ] Reflect more than the parameter block, so samplers and storage bindings
-      get checked against what the shader declares
-- [ ] Report a shader's expected parameters to scripts, so a misspelled name is
-      an error rather than silently ignored
-- [ ] Let surface shaders take images the way post-process shaders can
-- [ ] Cache compiled runtime shaders on disk so they survive a restart
+- [ ] Vertex stage overrides, so a shader can move geometry and not only shade it
+- [ ] Reflect vertex inputs, to reject a surface shader whose layout does not
+      match what opaque.vert emits
+- [ ] Bound the shader cache, it grows without limit today
 
 ## Render
 

@@ -5,6 +5,8 @@
 #include "gargantuan/datatypes/Vector2.hpp"
 
 #include <cstdint>
+#include <memory>
+#include <string>
 #include <lua.h>
 #include <vector>
 
@@ -39,6 +41,17 @@ namespace gargantuan {
 		// Keeps the pixels inside the rectangle and drops the rest
 		void Crop(Vector2 minimum, Vector2 maximum);
 		void DrawRectangle(Vector2 position, Vector2 size, Color3 color, float transparency);
+		// Composites another image over this one at `position`, respecting the
+		// source's alpha
+		void DrawImage(Vector2 position, std::shared_ptr<EditableImage> image);
+		void DrawCircle(Vector2 centre, float radius, Color3 color, float transparency);
+		void DrawLine(Vector2 from, Vector2 to, Color3 color, float transparency, float thickness);
+
+		// Decodes a PNG, JPEG or other stb-supported file into this image.
+		// Relative paths resolve against the executable's directory.
+		bool Load(std::string path);
+		// Why the last Load failed
+		std::string GetLoadError() const;
 
 		// Replaces the contents wholesale; used by the renderer's readback
 		void SetPixels(int width, int height, const uint8_t *rgba);
@@ -50,6 +63,10 @@ namespace gargantuan {
 		int Width = 0;
 		int Height = 0;
 		uint64_t Revision = 1;
+		std::string LoadError;
+
+		// Source-over blend of one pixel, which every draw call goes through
+		void BlendPixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
 
 		// Clamps a Luau-supplied rectangle to the image, returning false when
 		// nothing of it overlaps

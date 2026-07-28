@@ -65,6 +65,41 @@ namespace gargantuan::ShaderCompiler {
 #endif
 		}
 
+		// Where compiled runtime shaders are kept between runs
+		std::filesystem::path CacheDirectory() {
+			static std::filesystem::path directory = [] {
+				char *preferences = SDL_GetPrefPath("TeamFireworks", "Gargantuan");
+				std::filesystem::path base = preferences ? std::filesystem::path(preferences)
+														 : std::filesystem::temp_directory_path();
+				if (preferences) {
+					SDL_free(preferences);
+				}
+				return base / "shadercache";
+			}();
+			return directory;
+		}
+
+		// FNV-1a over the source and stage. Two different shaders colliding
+		// would serve the wrong bytecode, so the stage is folded in too.
+		std::string CacheKey(const std::string &source, Stage stage) {
+			uint64_t hash = 1469598103934665603ull;
+			auto mix = [&hash](unsigned char byte) {
+				hash ^= byte;
+				hash *= 1099511628211ull;
+			};
+
+			for (char character : source) {
+				mix((unsigned char)character);
+			}
+			mix((unsigned char)stage);
+
+			char text[32];
+			std::snprintf(text, sizeof(text), "%016llx", (unsigned long long)hash);
+			return std::string(text) + StageExtension(stage) + ".spv";
+		}
+
+		bool CACHE_ENABLED = true;
+
 		std::filesystem::path MakeScratchPath(const std::string &name, const char *extension) {
 			static std::mt19937_64 generator{std::random_device{}()};
 			std::ostringstream unique;
@@ -134,6 +169,30 @@ namespace gargantuan::ShaderCompiler {
 #endif
 	}
 
+	namespace {
+		void WriteToCache(const Result &result, const std::filesystem::path &path) {
+			if (!CACHE_ENABLED || !result.Success || result.Bytecode.empty()) {
+				return;
+			}
+
+			std::error_code ignored;
+			std::filesystem::create_directories(path.parent_path(), ignored);
+
+			std::ofstream file{path, std::ios::binary};
+			if (file) {
+				file.write((const char *)result.Bytecode.data(), (std::streamsize)result.Bytecode.size());
+			}
+		}
+	} // namespace
+
+	void SetCacheEnabled(bool enabled) {
+		CACHE_ENABLED = enabled;
+	}
+
+	std::string GetCacheDirectory() {
+		return CacheDirectory().string();
+	}
+
 	std::string GetCompilerCommand() {
 		return COMPILER_COMMAND;
 	}
@@ -171,8 +230,28 @@ namespace gargantuan::ShaderCompiler {
 			return result;
 		}
 
+		// A shader that has been compiled before does not need compiling again
+		auto cachePath = CacheDirectory() / CacheKey(source, stage);
+		if (CACHE_ENABLED) {
+			std::ifstream cached{cachePath, std::ios::binary};
+			if (cached) {
+				result.Bytecode.assign(
+					std::istreambuf_iterator<char>(cached), std::istreambuf_iterator<char>()
+				);
+				if (!result.Bytecode.empty()) {
+					result.Success = true;
+					result.FromCache = true;
+					return result;
+				}
+			}
+		}
+
 #ifdef GARGANTUAN_HAVE_SHADERC
-		return CompileInProcess(source, stage, name);
+		{
+			Result compiled = CompileInProcess(source, stage, name);
+			WriteToCache(compiled, cachePath);
+			return compiled;
+		}
 #else
 
 		if (!IsAvailable()) {
@@ -243,6 +322,7 @@ namespace gargantuan::ShaderCompiler {
 		std::filesystem::remove(outputPath, ignored);
 		std::filesystem::remove(errorPath, ignored);
 
+		WriteToCache(result, cachePath);
 		return result;
 #endif
 	}

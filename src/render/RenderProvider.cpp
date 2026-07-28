@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 
 namespace gargantuan {
 	static RenderProvider *CURRENT_PROVIDER = nullptr;
@@ -235,6 +236,23 @@ namespace gargantuan {
 		return &target;
 	}
 
+	SDL_GPUTexture *RenderProvider::ResolveTextureSource(const ShaderScript::TextureSource &source) {
+		if (source.Image) {
+			return AcquireImageTexture(source.Image.get());
+		}
+
+		// A camera's own target, sampled straight from the GPU. It holds
+		// whatever that camera last rendered.
+		if (source.Camera) {
+			auto it = CameraTargets.find(source.Camera.get());
+			if (it != CameraTargets.end()) {
+				return it->second.ColorTexture;
+			}
+		}
+
+		return nullptr;
+	}
+
 	SDL_GPUTexture *RenderProvider::AcquireImageTexture(EditableImage *image) {
 		if (!image || image->GetWidth() <= 0 || image->GetHeight() <= 0) {
 			return nullptr;
@@ -414,17 +432,18 @@ namespace gargantuan {
 			return nullptr;
 		}
 
+		compiled.Resources = ShaderReflection::ReflectResources(code, size);
 		SDL_GPUShaderCreateInfo fragmentInfo{
 			.code_size = size,
 			.code = static_cast<const Uint8 *>(code),
 			.entrypoint = entrypoint.c_str(),
 			.format = format,
 			.stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
-			// the shadow map, plus the world block and the script's parameters
-			.num_samplers = 1,
+			// the shadow map, then any images the script supplies
+			.num_samplers = compiled.Resources.Found ? compiled.Resources.SampledImages : 1,
 			.num_storage_textures = 0,
 			.num_storage_buffers = 0,
-			.num_uniform_buffers = 2,
+			.num_uniform_buffers = compiled.Resources.Found ? compiled.Resources.UniformBuffers : 2,
 		};
 		SDL_GPUShader *fragment = SDL_CreateGPUShader(Gpu, &fragmentInfo);
 		compiled.ParameterLayout = ShaderReflection::ReflectUniformBlock(code, size, 1);
@@ -456,10 +475,7 @@ namespace gargantuan {
 	}
 
 	RenderProvider::CompiledShader *RenderProvider::GetPostProcessShader(PostProcessShader *shader) {
-		// A shader that samples an extra image declares two samplers, so the
-		// pipeline for it is a different one and needs its own cache entry
-		uint32_t samplerCount = 1 + (uint32_t)shader->GetImages().size();
-		std::string key = GetShaderCacheKey(shader, ".frag") + "#s" + std::to_string(samplerCount);
+		std::string key = GetShaderCacheKey(shader, ".frag");
 
 		auto it = ShaderCache.find(key);
 		if (it != ShaderCache.end()) {
@@ -510,6 +526,11 @@ namespace gargantuan {
 			return nullptr;
 		}
 
+		// Ask the shader what it needs rather than assuming
+		compiled.Resources = ShaderReflection::ReflectResources(code, size);
+		uint32_t samplerCount = compiled.Resources.Found ? compiled.Resources.SampledImages : 1;
+		uint32_t uniformCount = compiled.Resources.Found ? compiled.Resources.UniformBuffers : 2;
+
 		SDL_GPUShaderCreateInfo fragmentInfo{
 			.code_size = size,
 			.code = static_cast<const Uint8 *>(code),
@@ -520,7 +541,7 @@ namespace gargantuan {
 			.num_storage_textures = 0,
 			.num_storage_buffers = 0,
 			// slot 0 builtins, slot 1 the script's own parameters
-			.num_uniform_buffers = 2,
+			.num_uniform_buffers = uniformCount,
 		};
 		SDL_GPUShader *fragment = SDL_CreateGPUShader(Gpu, &fragmentInfo);
 		// Parameters live at binding 1, with the engine builtins at binding 0
@@ -583,6 +604,7 @@ namespace gargantuan {
 			return nullptr;
 		}
 
+		compiled.Resources = ShaderReflection::ReflectResources(code, size);
 		glm::vec3 threadGroupSize = shader->ThreadGroupSize;
 		SDL_GPUComputePipelineCreateInfo info{
 			.code_size = size,
@@ -590,11 +612,11 @@ namespace gargantuan {
 			.entrypoint = entrypoint.c_str(),
 			.format = format,
 			.num_samplers = 0,
-			.num_readonly_storage_textures = 1,
+			.num_readonly_storage_textures = compiled.Resources.Found ? compiled.Resources.ReadOnlyStorageImages : 1,
 			.num_readonly_storage_buffers = 0,
-			.num_readwrite_storage_textures = 1,
+			.num_readwrite_storage_textures = compiled.Resources.Found ? compiled.Resources.WriteStorageImages : 1,
 			.num_readwrite_storage_buffers = 0,
-			.num_uniform_buffers = 2,
+			.num_uniform_buffers = compiled.Resources.Found ? compiled.Resources.UniformBuffers : 2,
 			.threadcount_x = (uint32_t)glm::max(threadGroupSize.x, 1.0f),
 			.threadcount_y = (uint32_t)glm::max(threadGroupSize.y, 1.0f),
 			.threadcount_z = (uint32_t)glm::max(threadGroupSize.z, 1.0f),
@@ -674,19 +696,25 @@ namespace gargantuan {
 				bindings[0] = {.texture = source, .sampler = ShaderSampler};
 				uint32_t bindingCount = 1;
 
-				bool imagesReady = true;
-				for (auto &image : post->GetImages()) {
-					SDL_GPUTexture *texture = image ? AcquireImageTexture(image.get()) : nullptr;
-					if (!texture) {
-						// The pipeline declares a sampler per image, so a
-						// missing one would leave a binding empty
-						imagesReady = false;
-						break;
+				for (auto &source : post->GetTextureSources()) {
+					SDL_GPUTexture *texture = ResolveTextureSource(source);
+					if (!texture || bindingCount > ShaderScript::MAXIMUM_IMAGES) {
+						continue;
 					}
 					bindings[bindingCount++] = {.texture = texture, .sampler = ShaderSampler};
 				}
 
-				if (!imagesReady) {
+				// The shader declared how many samplers it wants; anything else
+				// would fail inside the driver with no explanation
+				uint32_t declared = compiled->Resources.Found ? compiled->Resources.SampledImages : 1;
+				if (bindingCount != declared) {
+					SDL_Log(
+						"Shader '%s' declares %u sampler(s) but %u were supplied; give it %u image(s) with SetImage",
+						post->Source.empty() ? "<code>" : post->Source.c_str(),
+						declared,
+						bindingCount,
+						declared > 0 ? declared - 1 : 0
+					);
 					continue;
 				}
 
@@ -746,6 +774,72 @@ namespace gargantuan {
 		}
 	}
 
+	// Shared by both draw paths: point the frame at a camera's surface shader,
+	// its parameters, and any images it samples after the shadow map
+	bool RenderProvider::PrepareSurfaceShader(
+		FrameContext &frameContext,
+		Camera *camera,
+		SDL_GPUTextureFormat colorFormat,
+		std::vector<uint8_t> &parameterStorage,
+		std::vector<SDL_GPUTextureSamplerBinding> &samplerStorage
+	) {
+		if (!camera || !camera->SurfaceShader) {
+			return false;
+		}
+
+		CompiledShader *surface = GetSurfaceShader(camera->SurfaceShader.get(), colorFormat);
+		if (!surface) {
+			return false;
+		}
+
+		parameterStorage = PackParameters(camera->SurfaceShader.get(), *surface);
+		if (parameterStorage.empty()) {
+			parameterStorage.resize(sizeof(glm::vec4), 0);
+		}
+
+		// Slot 0 is always the shadow map the engine's vertex stage set up
+		samplerStorage.clear();
+		samplerStorage.push_back({.texture = frameContext.ShadowMapTexture, .sampler = ShadowSampler});
+
+		for (auto &source : camera->SurfaceShader->GetTextureSources()) {
+			SDL_GPUTexture *texture = ResolveTextureSource(source);
+			if (!texture) {
+				continue;
+			}
+			samplerStorage.push_back({.texture = texture, .sampler = ShaderSampler});
+		}
+
+		uint32_t declared = surface->Resources.Found ? surface->Resources.SampledImages : 1;
+		if (samplerStorage.size() != declared) {
+			SDL_Log(
+				"Surface shader '%s' declares %u sampler(s) but %zu were supplied",
+				camera->SurfaceShader->Source.empty() ? "<code>" : camera->SurfaceShader->Source.c_str(),
+				declared,
+				samplerStorage.size()
+			);
+			return false;
+		}
+
+		if (!ShaderSampler) {
+			SDL_GPUSamplerCreateInfo samplerInfo{
+				.min_filter = SDL_GPU_FILTER_LINEAR,
+				.mag_filter = SDL_GPU_FILTER_LINEAR,
+				.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR,
+				.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+				.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+				.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+			};
+			ShaderSampler = SDL_CreateGPUSampler(Gpu, &samplerInfo);
+		}
+
+		frameContext.SurfacePipeline = surface->GraphicsPipeline;
+		frameContext.SurfaceParameters = parameterStorage.data();
+		frameContext.SurfaceParameterBytes = (uint32_t)parameterStorage.size();
+		frameContext.SurfaceSamplers = samplerStorage.data();
+		frameContext.SurfaceSamplerCount = (uint32_t)samplerStorage.size();
+		return true;
+	}
+
 	bool RenderProvider::RecordCameraPasses(
 		SDL_GPUCommandBuffer *commands, DrawContext &drawContext, const CameraTarget &target
 	) {
@@ -767,23 +861,195 @@ namespace gargantuan {
 
 		// A camera's SurfaceShader replaces the opaque pass's fragment stage
 		std::vector<uint8_t> surfaceParameters;
-		if (auto *camera = drawContext.Camera.get(); camera && camera->SurfaceShader) {
-			if (auto *surface = GetSurfaceShader(camera->SurfaceShader.get(), OFFSCREEN_FORMAT)) {
-				surfaceParameters = PackParameters(camera->SurfaceShader.get(), *surface);
-				if (surfaceParameters.empty()) {
-					surfaceParameters.resize(sizeof(glm::vec4), 0);
-				}
-				frameContext.SurfacePipeline = surface->GraphicsPipeline;
-				frameContext.SurfaceParameters = surfaceParameters.data();
-				frameContext.SurfaceParameterBytes = (uint32_t)surfaceParameters.size();
-			}
-		}
+		std::vector<SDL_GPUTextureSamplerBinding> surfaceSamplers;
+		PrepareSurfaceShader(
+			frameContext, drawContext.Camera.get(), OFFSCREEN_FORMAT, surfaceParameters, surfaceSamplers
+		);
 
 		// The shadow map only depends on the light, but it has to be recorded
 		// into this command buffer for the opaque pass to sample it
 		SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
 		SDL_EndGPURenderPass(OffscreenOpaquePass->Draw(Gpu, frameContext));
 		return true;
+	}
+
+	std::vector<Camera *> RenderProvider::GetSampledCameras(Camera *camera) {
+		std::vector<Camera *> sampled;
+		if (!camera) {
+			return sampled;
+		}
+
+		auto collect = [&sampled](const std::shared_ptr<ShaderScript> &shader) {
+			if (!shader) {
+				return;
+			}
+			for (const auto &source : shader->GetTextureSources()) {
+				if (source.Camera) {
+					sampled.push_back(source.Camera.get());
+				}
+			}
+		};
+
+		for (const auto &shader : camera->Shaders) {
+			collect(shader);
+		}
+		collect(camera->SurfaceShader);
+
+		return sampled;
+	}
+
+	std::vector<Camera *> RenderProvider::GetRenderOrder(const std::vector<Camera *> &roots) {
+		std::vector<Camera *> order;
+		std::unordered_set<Camera *> finished;
+		std::unordered_set<Camera *> visiting;
+
+		// Post-order depth first, so a camera lands after everything it reads
+		std::function<void(Camera *)> visit = [&](Camera *camera) {
+			if (!camera || finished.count(camera)) {
+				return;
+			}
+
+			if (visiting.count(camera)) {
+				// Two cameras sampling each other cannot both be current. Drop
+				// this edge and let that one read the previous frame.
+				if (ReportedCycles.insert(camera).second) {
+					SDL_Log(
+						"Camera '%.*s' is part of a loop of cameras sampling each other; "
+						"one of them will show the previous frame",
+						(int)camera->Name.size(),
+						camera->Name.data()
+					);
+				}
+				return;
+			}
+
+			visiting.insert(camera);
+			for (Camera *dependency : GetSampledCameras(camera)) {
+				visit(dependency);
+			}
+			visiting.erase(camera);
+
+			finished.insert(camera);
+			order.push_back(camera);
+		};
+
+		for (Camera *root : roots) {
+			visit(root);
+		}
+
+		return order;
+	}
+
+	RenderProvider::WindowRegion RenderProvider::ComputeWindowRegion(
+		const Camera &camera, int windowWidth, int windowHeight
+	) {
+		WindowRegion region;
+
+		region.X = (int)glm::round(camera.WindowPosition.X.Scale * windowWidth) + camera.WindowPosition.X.Offset;
+		region.Y = (int)glm::round(camera.WindowPosition.Y.Scale * windowHeight) + camera.WindowPosition.Y.Offset;
+		region.Width = (int)glm::round(camera.WindowSize.X.Scale * windowWidth) + camera.WindowSize.X.Offset;
+		region.Height = (int)glm::round(camera.WindowSize.Y.Scale * windowHeight) + camera.WindowSize.Y.Offset;
+
+		// Trim anything hanging off the top or left, keeping the far edge put
+		if (region.X < 0) {
+			region.Width += region.X;
+			region.X = 0;
+		}
+		if (region.Y < 0) {
+			region.Height += region.Y;
+			region.Y = 0;
+		}
+
+		region.Width = glm::clamp(region.Width, 0, glm::max(windowWidth - region.X, 0));
+		region.Height = glm::clamp(region.Height, 0, glm::max(windowHeight - region.Y, 0));
+		return region;
+	}
+
+	void RenderProvider::DrawComposite(const std::vector<DrawContext> &cameras) {
+		if (cameras.empty()) {
+			return;
+		}
+
+		// Panes can sample each other, so draw them in dependency order
+		std::vector<Camera *> roots;
+		roots.reserve(cameras.size());
+		for (const auto &drawContext : cameras) {
+			roots.push_back(drawContext.Camera.get());
+		}
+
+		std::unordered_map<Camera *, const DrawContext *> byCamera;
+		for (const auto &drawContext : cameras) {
+			byCamera[drawContext.Camera.get()] = &drawContext;
+		}
+
+		std::vector<DrawContext> ordered;
+		for (Camera *camera : GetRenderOrder(roots)) {
+			auto it = byCamera.find(camera);
+			if (it != byCamera.end()) {
+				ordered.push_back(*it->second);
+			}
+		}
+
+		SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(Gpu);
+		if (!commands) {
+			SDL_Log("Failed to acquire command buffer: %s", SDL_GetError());
+			return;
+		}
+
+		// Every camera is drawn offscreen first, because a swapchain texture
+		// cannot be sampled by a shader chain or blitted from
+		std::vector<std::pair<const CameraTarget *, const Camera *>> ready;
+		for (const auto &drawContext : ordered) {
+			auto *camera = drawContext.Camera.get();
+			CameraTarget *target = AcquireCameraTarget(camera, camera && !camera->Shaders.empty());
+			if (!target) {
+				continue;
+			}
+
+			DrawContext copy = drawContext;
+			if (!RecordCameraPasses(commands, copy, *target)) {
+				continue;
+			}
+			RecordShaderChain(commands, camera, *target);
+			ready.emplace_back(target, camera);
+		}
+
+		SDL_GPUTexture *swapchainTexture = nullptr;
+		uint32_t windowWidth = 0, windowHeight = 0;
+		if (!SDL_AcquireGPUSwapchainTexture(commands, Window, &swapchainTexture, &windowWidth, &windowHeight) ||
+			!swapchainTexture) {
+			SDL_CancelGPUCommandBuffer(commands);
+			return;
+		}
+
+		bool first = true;
+		for (const auto &[target, camera] : ready) {
+			WindowRegion region = ComputeWindowRegion(*camera, (int)windowWidth, (int)windowHeight);
+			if (region.Width <= 0 || region.Height <= 0) {
+				continue;
+			}
+
+			SDL_GPUBlitInfo blit{
+				.source = {.texture = target->ColorTexture, .w = target->Width, .h = target->Height},
+				.destination =
+					{
+						.texture = swapchainTexture,
+						.x = (uint32_t)region.X,
+						.y = (uint32_t)region.Y,
+						.w = (uint32_t)region.Width,
+						.h = (uint32_t)region.Height,
+					},
+				// The first blit clears whatever the window held; the rest must
+				// not wipe the panes drawn before them
+				.load_op = first ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD,
+				.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f},
+				.filter = SDL_GPU_FILTER_LINEAR,
+			};
+			SDL_BlitGPUTexture(commands, &blit);
+			first = false;
+		}
+
+		SDL_SubmitGPUCommandBuffer(commands);
 	}
 
 	void RenderProvider::DrawOffscreen(DrawContext drawContext) {
@@ -810,6 +1076,26 @@ namespace gargantuan {
 
 	bool RenderProvider::RequestRender(DrawContext drawContext, lua_State *thread, ThreadEngine *threadEngine) {
 		auto *camera = drawContext.Camera.get();
+
+		// Anything this camera samples has to be drawn first, or it would read
+		// whatever was in that target from a previous frame. Submissions run in
+		// order, so drawing them now is enough.
+		for (Camera *dependency : GetRenderOrder({camera})) {
+			if (dependency == camera) {
+				continue;
+			}
+
+			auto owned = dependency->weak_from_this().lock();
+			if (!owned) {
+				continue;
+			}
+
+			DrawOffscreen({
+				.WorldRoot = drawContext.WorldRoot,
+				.Camera = std::static_pointer_cast<Camera>(owned),
+				.LightDirection = drawContext.LightDirection,
+			});
+		}
 		CameraTarget *target = AcquireCameraTarget(camera, camera && !camera->Shaders.empty());
 		if (!target || !threadEngine) {
 			return false;
@@ -1002,17 +1288,8 @@ namespace gargantuan {
 		}
 
 		std::vector<uint8_t> surfaceParameters;
-		if (camera && camera->SurfaceShader) {
-			if (auto *surface = GetSurfaceShader(camera->SurfaceShader.get(), SwapchainFormat)) {
-				surfaceParameters = PackParameters(camera->SurfaceShader.get(), *surface);
-				if (surfaceParameters.empty()) {
-					surfaceParameters.resize(sizeof(glm::vec4), 0);
-				}
-				frameContext.SurfacePipeline = surface->GraphicsPipeline;
-				frameContext.SurfaceParameters = surfaceParameters.data();
-				frameContext.SurfaceParameterBytes = (uint32_t)surfaceParameters.size();
-			}
-		}
+		std::vector<SDL_GPUTextureSamplerBinding> surfaceSamplers;
+		PrepareSurfaceShader(frameContext, camera, SwapchainFormat, surfaceParameters, surfaceSamplers);
 
 		SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
 		SDL_EndGPURenderPass(OpaquePass->Draw(Gpu, frameContext));

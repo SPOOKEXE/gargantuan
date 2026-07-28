@@ -4,6 +4,7 @@
 #include "gargantuan/classes/SurfaceShader.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
+#include "gargantuan/datatypes/UDim2.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
 #include "gargantuan/reflection/Enums.hpp"
 
@@ -45,6 +46,14 @@ namespace gargantuan {
 		// Workspace.CurrentCamera points at draws to the window; every other
 		// enabled camera draws into its own offscreen target instead.
 		bool Enabled = true;
+		// Draws this camera into the window alongside the others, rather than
+		// only into its own offscreen target. Workspace.CurrentCamera behaves
+		// as though this were on.
+		bool DrawToWindow = false;
+		// Where in the window it lands, as a fraction of the window plus a
+		// pixel offset. The defaults cover the whole thing.
+		UDim2 WindowPosition = UDim2(0.0f, 0, 0.0f, 0);
+		UDim2 WindowSize = UDim2(1.0f, 0, 1.0f, 0);
 		CFrame CFrame;
 		float Pitch = 0.0f, Yaw = -90.0f, Roll;
 		// Vertical field of view in degrees.
