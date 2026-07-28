@@ -41,6 +41,10 @@ namespace gargantuan {
 		}
 	};
 
+	uint64_t EditableImage::GetRevision() const {
+		return Revision;
+	}
+
 	int EditableImage::GetWidth() const {
 		return Width;
 	}
@@ -54,6 +58,7 @@ namespace gargantuan {
 	}
 
 	void EditableImage::Resize(Vector2 size) {
+		Revision++;
 		int width = glm::clamp((int)glm::round(size.GetX()), 0, MAXIMUM_DIMENSION);
 		int height = glm::clamp((int)glm::round(size.GetY()), 0, MAXIMUM_DIMENSION);
 
@@ -63,6 +68,7 @@ namespace gargantuan {
 	}
 
 	void EditableImage::SetPixels(int width, int height, const uint8_t *rgba) {
+		Revision++;
 		Width = glm::max(width, 0);
 		Height = glm::max(height, 0);
 		Pixels.assign((size_t)Width * Height * CHANNELS, 0);
@@ -103,6 +109,7 @@ namespace gargantuan {
 	}
 
 	void EditableImage::Crop(Vector2 minimum, Vector2 maximum) {
+		Revision++;
 		int x = 0, y = 0, width = 0, height = 0;
 		Vector2 size(maximum.GetX() - minimum.GetX(), maximum.GetY() - minimum.GetY());
 
@@ -126,6 +133,7 @@ namespace gargantuan {
 	}
 
 	void EditableImage::DrawRectangle(Vector2 position, Vector2 size, Color3 color, float transparency) {
+		Revision++;
 		int x = 0, y = 0, width = 0, height = 0;
 		if (!ClampRegion(position, size, x, y, width, height)) {
 			return;
@@ -200,6 +208,7 @@ namespace gargantuan {
 		Vector2 position = CheckStackValue<Vector2>(L, 2);
 		Vector2 size = CheckStackValue<Vector2>(L, 3);
 		LuauBuffer pixels = CheckStackValue<LuauBuffer>(L, 4);
+		image->Revision++;
 
 		int requestedWidth = (int)glm::round(size.GetX());
 		int requestedHeight = (int)glm::round(size.GetY());

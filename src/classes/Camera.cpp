@@ -45,8 +45,47 @@ namespace gargantuan {
 		.Methods = {
 			{"Render",
 			 {&Camera::LRender, []() -> std::string { return "(self): EditableImage"; }}},
+			{"AddShader", Method::Wrap<&Camera::AddShader>()},
+			{"RemoveShader", Method::Wrap<&Camera::RemoveShader>()},
+			{"ListShaders", Method::Wrap<&Camera::ListShaders>()},
+			{"ClearShaders", Method::Wrap<&Camera::ClearShaders>()},
 		},
 	};
+
+	void Camera::AddShader(std::shared_ptr<ShaderScript> shader) {
+		if (!shader) {
+			return;
+		}
+
+		// Adding the same shader twice would run it twice, which is almost
+		// never what was meant
+		auto existing = std::find(Shaders.begin(), Shaders.end(), shader);
+		if (existing != Shaders.end()) {
+			return;
+		}
+
+		Shaders.push_back(std::move(shader));
+	}
+
+	void Camera::RemoveShader(std::shared_ptr<ShaderScript> shader) {
+		auto existing = std::find(Shaders.begin(), Shaders.end(), shader);
+		if (existing != Shaders.end()) {
+			Shaders.erase(existing);
+		}
+	}
+
+	std::vector<std::shared_ptr<Instance>> Camera::ListShaders() {
+		std::vector<std::shared_ptr<Instance>> result;
+		result.reserve(Shaders.size());
+		for (auto &shader : Shaders) {
+			result.push_back(shader);
+		}
+		return result;
+	}
+
+	void Camera::ClearShaders() {
+		Shaders.clear();
+	}
 
 	// Cameras register themselves so the renderer can find every one of them
 	// without walking the instance tree each frame

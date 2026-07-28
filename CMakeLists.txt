@@ -20,6 +20,7 @@ endif()
 file(GLOB_RECURSE SHADER_SOURCES CONFIGURE_DEPENDS
 	"assets/shaders/*.vert"
 	"assets/shaders/*.frag"
+	"assets/shaders/*.comp"
 )
 
 set(SHADER_OUTPUTS "")

@@ -8,12 +8,16 @@
 #include <cstdint>
 #include <lua.h>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace gargantuan {
 	class Camera;
+	class ComputeShader;
 	class EditableImage;
+	class PostProcessShader;
+	class ShaderScript;
 	class ThreadEngine;
 
 	std::unique_ptr<RenderPass> CreateOpaquePass(SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchainFormat);
@@ -25,9 +29,12 @@ namespace gargantuan {
 		// covers them all, whatever the window's swapchain happens to be
 		static constexpr SDL_GPUTextureFormat OFFSCREEN_FORMAT = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 
-		// The colour and depth textures backing one offscreen camera
+		// The colour and depth textures backing one offscreen camera.
+		// ScratchTexture is the other half of the ping-pong pair the shader
+		// chain bounces through, and is only created once a camera has shaders.
 		struct CameraTarget {
 			SDL_GPUTexture *ColorTexture = nullptr;
+			SDL_GPUTexture *ScratchTexture = nullptr;
 			SDL_GPUTexture *DepthTexture = nullptr;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
@@ -67,6 +74,8 @@ namespace gargantuan {
 		struct SceneContext {
 			std::shared_ptr<WorldRoot> WorldRoot;
 			glm::vec3 LightDirection = glm::normalize(glm::vec3(0.75f, 1.0f, 0.5f));
+			// Seconds the place has been running, handed to shaders as a builtin
+			double Time = 0.0;
 		};
 		SceneContext Scene;
 
@@ -98,15 +107,60 @@ namespace gargantuan {
 			std::shared_ptr<EditableImage> Image;
 		};
 
+		// What one shader asset compiled down to. Shaders are named, so they
+		// are cached by name and shared between every camera using them.
+		struct CompiledShader {
+			SDL_GPUGraphicsPipeline *GraphicsPipeline = nullptr;
+			SDL_GPUComputePipeline *ComputePipeline = nullptr;
+			// Set once a compile has been attempted and failed, so the engine
+			// complains once rather than every frame
+			bool Failed = false;
+		};
+
+		// What the shaders are handed alongside their own parameters
+		struct alignas(16) BuiltinUniforms {
+			glm::vec4 Resolution;
+			glm::vec4 Time;
+		};
+
+		// An EditableImage that has been copied onto the GPU so a shader can
+		// sample it, kept until the image changes underneath it
+		struct UploadedImage {
+			SDL_GPUTexture *Texture = nullptr;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			uint64_t Revision = 0;
+		};
+
 		std::unordered_map<Camera *, CameraTarget> CameraTargets;
+		std::unordered_map<EditableImage *, UploadedImage> UploadedImages;
 		std::vector<PendingRender> PendingRenders;
+		std::unordered_map<std::string, CompiledShader> ShaderCache;
+		SDL_GPUShader *FullscreenVertexShader = nullptr;
+		SDL_GPUSampler *ShaderSampler = nullptr;
 
 		// Returns the camera's target, sized to its ViewportSize, or nullptr
-		// when the viewport is empty
-		CameraTarget *AcquireCameraTarget(Camera *camera);
+		// when the viewport is empty. `withScratch` also guarantees the second
+		// ping-pong texture exists.
+		CameraTarget *AcquireCameraTarget(Camera *camera, bool withScratch);
 		// Records the shadow and opaque passes for one camera into `commands`
 		bool RecordCameraPasses(
 			SDL_GPUCommandBuffer *commands, DrawContext &drawContext, const CameraTarget &target
 		);
+		// Runs the camera's shader chain, leaving the result in ColorTexture
+		void RecordShaderChain(SDL_GPUCommandBuffer *commands, Camera *camera, CameraTarget &target);
+
+		// Both prefer the script's runtime-compiled bytecode and fall back to
+		// its named build-time asset
+		// Uploads or refreshes the GPU copy of an image, returning null when it
+		// is empty or the upload failed
+		SDL_GPUTexture *AcquireImageTexture(EditableImage *image);
+		CompiledShader *GetPostProcessShader(PostProcessShader *shader);
+		CompiledShader *GetComputeShader(ComputeShader *shader);
+		// Cache key: runtime code is keyed by identity and revision, a named
+		// asset by its name, so the two never collide
+		static std::string GetShaderCacheKey(ShaderScript *shader, const char *stageExtension);
+		// Loads bytecode for `<source><extension>` from the shaders directory
+		void *LoadShaderBytes(const std::string &source, const char *stageExtension, size_t &outSize);
 	};
 } // namespace gargantuan

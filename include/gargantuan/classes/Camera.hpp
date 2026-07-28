@@ -1,9 +1,12 @@
 #pragma once
 
+#include "gargantuan/classes/ShaderScript.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
 #include "gargantuan/reflection/Enums.hpp"
+
+#include <memory>
 
 #include <SDL3/SDL.h>
 #include <lua.h>
@@ -59,6 +62,15 @@ namespace gargantuan {
 		void SetDiagonalFieldOfView(float fovy);
 		glm::mat4 GetProjectionMatrix();
 		glm::mat4 GetViewMatrix();
+
+		// Shaders run over this camera's output in order, each one reading what
+		// the previous one produced
+		std::vector<std::shared_ptr<ShaderScript>> Shaders;
+
+		void AddShader(std::shared_ptr<ShaderScript> shader);
+		void RemoveShader(std::shared_ptr<ShaderScript> shader);
+		std::vector<std::shared_ptr<Instance>> ListShaders();
+		void ClearShaders();
 
 		void OnEvent(SDL_Window *window, SDL_Event &event);
 		void Step(float deltaTime);

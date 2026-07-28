@@ -26,6 +26,9 @@ namespace gargantuan {
 
 		EditableImage() = default;
 
+		// Bumped on every change, so a cached GPU upload can tell it is stale
+		uint64_t GetRevision() const;
+
 		int GetWidth() const;
 		int GetHeight() const;
 		Vector2 GetSize() const;
@@ -46,6 +49,7 @@ namespace gargantuan {
 	  private:
 		int Width = 0;
 		int Height = 0;
+		uint64_t Revision = 1;
 
 		// Clamps a Luau-supplied rectangle to the image, returning false when
 		// nothing of it overlaps

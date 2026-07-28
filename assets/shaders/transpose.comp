@@ -1,0 +1,36 @@
+#version 450
+
+// Preset: reflects the image across its main diagonal, so rows become columns.
+//
+//   local transpose = Instance.new("ComputeShader")
+//   transpose.Source = "transpose"
+//   camera:AddShader(transpose)
+//
+// Takes no parameters.
+//
+// NOTE: a camera's ping-pong textures are both the viewport's size, so a true
+// transpose only holds for a square viewport. On a non-square one the read is
+// clamped into range, which mirrors the overlapping square and leaves the rest
+// smeared. Give the camera a square ViewportSize if you want the real thing.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform readonly image2D SourceTexture;
+layout(set = 1, binding = 0, rgba8) uniform writeonly image2D OutputTexture;
+
+layout(set = 2, binding = 0) uniform Builtin {
+    vec4 Resolution;
+    vec4 Time;
+} builtin;
+
+void main() {
+    ivec2 coordinate = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(builtin.Resolution.xy);
+
+    if (coordinate.x >= size.x || coordinate.y >= size.y) {
+        return;
+    }
+
+    ivec2 swapped = clamp(coordinate.yx, ivec2(0), size - 1);
+    imageStore(OutputTexture, coordinate, imageLoad(SourceTexture, swapped));
+}

@@ -1,0 +1,42 @@
+#version 450
+
+// An example ComputeShader. Desaturates the camera's image by a settable
+// amount, to show the shape a camera compute shader takes.
+//
+//   local shader = Instance.new("ComputeShader")
+//   shader.Source = "grayscale"
+//   shader.ThreadGroupSize = Vector3.new(8, 8, 1)  -- must match local_size
+//   shader:SetNumber("Strength", 1)
+//   camera:AddShader(shader)
+
+// Must match ComputeShader.ThreadGroupSize; SDL needs the counts to build the
+// pipeline and cannot read them back out of the bytecode
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform readonly image2D SourceTexture;
+layout(set = 1, binding = 0, rgba8) uniform writeonly image2D OutputTexture;
+
+layout(set = 2, binding = 0) uniform Builtin {
+    vec4 Resolution; // xy = pixels, zw = 1/pixels
+    vec4 Time;       // x = seconds since start
+} builtin;
+
+layout(set = 2, binding = 1) uniform Params {
+    vec4 Strength;
+} params;
+
+void main() {
+    ivec2 coordinate = ivec2(gl_GlobalInvocationID.xy);
+
+    // The dispatch is rounded up to whole thread groups, so the edge groups
+    // run past the image and have to be discarded
+    if (coordinate.x >= int(builtin.Resolution.x) || coordinate.y >= int(builtin.Resolution.y)) {
+        return;
+    }
+
+    vec4 source = imageLoad(SourceTexture, coordinate);
+    float luminance = dot(source.rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 result = mix(source.rgb, vec3(luminance), clamp(params.Strength.x, 0.0, 1.0));
+
+    imageStore(OutputTexture, coordinate, vec4(result, source.a));
+}

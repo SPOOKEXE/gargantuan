@@ -156,9 +156,12 @@ namespace gargantuan {
 			return instance->IsA(ClassName());
 		};
 
+		// NOTE: a pointer cast that shares ownership. Building a shared_ptr from
+		// the raw Cast<Subclass>() result would hand out a second owner of an
+		// already-owned instance and free it twice.
 		static std::shared_ptr<Subclass> From(lua_State *L, int idx) {
 			auto instance = gargantuan::StackValue<Instance::Pointer>::From(L, idx);
-			return instance->Cast<Subclass>();
+			return std::dynamic_pointer_cast<Subclass>(instance);
 		};
 
 		static int Push(lua_State *L, std::shared_ptr<Subclass> value) {

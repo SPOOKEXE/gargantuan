@@ -30,9 +30,15 @@
 ## Images
 
 - [ ] Decode images from disk, PNG and JPEG
-- [ ] Upload an EditableImage back to a GPU texture
 - [ ] DrawImage, DrawCircle, DrawLine
 - [ ] AssetService:CreateEditableImage
+
+## Shaders
+
+- [ ] Name parameters properly via SPIR-V reflection, rather than by slot order
+- [ ] Surface shaders, overriding how objects are shaded
+- [ ] Compile GLSL in-process, so runtime shaders do not need glslc on PATH
+- [ ] More than one image bound per shader
 
 ## Render
 

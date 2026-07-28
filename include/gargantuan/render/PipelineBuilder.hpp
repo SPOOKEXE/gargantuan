@@ -17,8 +17,15 @@ namespace gargantuan {
 		SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
 		bool DepthEnabled = false;
 
+		// Off for shaders that generate their own geometry from the vertex
+		// index, like a fullscreen triangle, which bind no vertex buffer
+		bool VertexInputEnabled = true;
+		bool CullingEnabled = true;
+
 		PipelineBuilder &SetVertexShader(SDL_GPUShader *shader);
 		PipelineBuilder &SetFragmentShader(SDL_GPUShader *shader);
+		PipelineBuilder &SetVertexInputEnabled(bool enabled);
+		PipelineBuilder &SetCullingEnabled(bool enabled);
 		PipelineBuilder &SetShaderFromCache(SDL_GPUDevice *gpu, std::string_view alias);
 		PipelineBuilder &SetColorFormat(SDL_GPUTextureFormat format);
 		PipelineBuilder &SetColorEnabled(bool enabled);

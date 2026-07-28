@@ -135,6 +135,7 @@ namespace gargantuan {
 		// Published so an ad-hoc Camera:Render() draws this same world
 		RenderProvider->Scene.WorldRoot = worldRoot;
 		RenderProvider->Scene.LightDirection = lightDirection;
+		RenderProvider->Scene.Time = Workspace->DistributedGameTime;
 
 		auto currentCamera = Workspace->CurrentCamera;
 		if (currentCamera && currentCamera->Enabled) {

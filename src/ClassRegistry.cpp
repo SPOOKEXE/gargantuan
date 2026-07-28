@@ -2,7 +2,10 @@
 #include "gargantuan/classes/BasePart.hpp"
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/classes/DataModel.hpp"
+#include "gargantuan/classes/ComputeShader.hpp"
 #include "gargantuan/classes/EditableImage.hpp"
+#include "gargantuan/classes/PostProcessShader.hpp"
+#include "gargantuan/classes/ShaderScript.hpp"
 #include "gargantuan/classes/InputObject.hpp"
 #include "gargantuan/classes/Part.hpp"
 #include "gargantuan/classes/ServiceProvider.hpp"
@@ -29,14 +32,17 @@ namespace gargantuan::ClassRegistry {
 		static auto *CLASS_DEFINITIONS = new std::unordered_map<std::type_index, Instance::ClassDefinition>{
 			USE_INSTANCE_DEFINITION(BasePart),
 			USE_INSTANCE_DEFINITION(Camera),
+			USE_INSTANCE_DEFINITION(ComputeShader),
 			USE_INSTANCE_DEFINITION(DataModel),
 			USE_INSTANCE_DEFINITION(EditableImage),
 			USE_INSTANCE_DEFINITION(InputObject),
 			USE_INSTANCE_DEFINITION(Instance),
 			USE_INSTANCE_DEFINITION(Lighting),
 			USE_INSTANCE_DEFINITION(Part),
+			USE_INSTANCE_DEFINITION(PostProcessShader),
 			USE_INSTANCE_DEFINITION(RunService),
 			USE_INSTANCE_DEFINITION(ServiceProvider),
+			USE_INSTANCE_DEFINITION(ShaderScript),
 			USE_INSTANCE_DEFINITION(Tween),
 			USE_INSTANCE_DEFINITION(TweenService),
 			USE_INSTANCE_DEFINITION(UserInputService),

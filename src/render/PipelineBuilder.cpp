@@ -13,6 +13,16 @@ namespace gargantuan {
 		return *this;
 	};
 
+	PipelineBuilder &PipelineBuilder::SetVertexInputEnabled(bool enabled) {
+		VertexInputEnabled = enabled;
+		return *this;
+	};
+
+	PipelineBuilder &PipelineBuilder::SetCullingEnabled(bool enabled) {
+		CullingEnabled = enabled;
+		return *this;
+	};
+
 	PipelineBuilder &PipelineBuilder::SetColorFormat(SDL_GPUTextureFormat format) {
 		ColorFormat = format;
 		return *this;
@@ -43,14 +53,18 @@ namespace gargantuan {
 		info.vertex_shader = VertexShader;
 		info.fragment_shader = FragmentShader;
 
-		info.vertex_input_state.vertex_attributes = Vertex::Attributes->data();
-		info.vertex_input_state.num_vertex_attributes = static_cast<Uint32>(Vertex::Attributes->size());
-		info.vertex_input_state.vertex_buffer_descriptions = Vertex::BufferDescriptions->data();
-		info.vertex_input_state.num_vertex_buffers = static_cast<Uint32>(Vertex::BufferDescriptions->size());
+		// A pipeline that declares mesh attributes expects a vertex buffer to be
+		// bound; one generating geometry from gl_VertexIndex must declare none
+		if (VertexInputEnabled) {
+			info.vertex_input_state.vertex_attributes = Vertex::Attributes->data();
+			info.vertex_input_state.num_vertex_attributes = static_cast<Uint32>(Vertex::Attributes->size());
+			info.vertex_input_state.vertex_buffer_descriptions = Vertex::BufferDescriptions->data();
+			info.vertex_input_state.num_vertex_buffers = static_cast<Uint32>(Vertex::BufferDescriptions->size());
+		}
 
 		info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
 		info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-		info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+		info.rasterizer_state.cull_mode = CullingEnabled ? SDL_GPU_CULLMODE_BACK : SDL_GPU_CULLMODE_NONE;
 		info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
 
 		info.depth_stencil_state.enable_depth_test = DepthEnabled;
