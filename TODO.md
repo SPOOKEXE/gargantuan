@@ -84,9 +84,11 @@ eyes. What is missing is the runtime that drives them.
       redraw, never a wrong picture
 - [ ] Occlusion, so a part hidden behind a wall stops costing a redraw. The
       frustum test cannot see it; something depth-aware has to
-- [ ] Cull at draw time off the same test, not only at redraw time. The
-      renderer still submits every part in the world however far off screen it
-      is; the visibility answer is already computed, it is simply thrown away
+- [x] Cull at draw time off the same test, not only at redraw time. The walk
+      now keeps what it found rather than reducing it to a hash, and the passes
+      submit that instead of the whole world. Two sets, because the passes ask
+      different questions: the opaque pass wants what is on screen, the shadow
+      pass also wants the casters off it whose shadows reach in
 - [ ] Keep a fixed-size list of the parts worth looking at rather than walking
       all of them. Anything written to goes to the front and pushes the
       longest-still one off the back, so the sweep is over what moves rather

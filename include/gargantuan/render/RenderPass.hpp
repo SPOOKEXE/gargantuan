@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace gargantuan {
 	struct DrawContext {
@@ -16,6 +17,35 @@ namespace gargantuan {
 		// Direction TOWARDS the light. Defaults to a fixed afternoon sun so a
 		// draw without a Lighting service still shades sensibly.
 		glm::vec3 LightDirection = glm::normalize(glm::vec3(0.75f, 1.0f, 0.5f));
+	};
+
+	// What one camera's frustum walk found. The walk happens because the
+	// redraw check needs a signature over what this camera can see; the sets
+	// are the same answer kept rather than discarded, so the passes can submit
+	// what is on screen instead of the whole world.
+	//
+	// Two sets because the passes ask different questions. The opaque pass
+	// wants what lands in the picture. The shadow pass also wants what is off
+	// screen but throwing a shadow into it, which is a longer reach and a
+	// strictly wider set.
+	struct VisibleSet {
+		// The hash PlanRedraw compares against the camera's last frame
+		uint64_t Signature = 0;
+		// The state the walk was made at, so it can be reused until one of
+		// them moves rather than repeated per pass
+		uint64_t SceneStamp = 0;
+		uint64_t CameraStamp = 0;
+		bool Walked = false;
+
+		std::unordered_set<const BasePart *> InView;
+		std::unordered_set<const BasePart *> ShadowsIntoView;
+
+		bool IsInView(const BasePart *part) const {
+			return InView.count(part) != 0;
+		}
+		bool CastsIntoView(const BasePart *part) const {
+			return ShadowsIntoView.count(part) != 0;
+		}
 	};
 
 	struct FrameContext : DrawContext {
@@ -48,6 +78,11 @@ namespace gargantuan {
 		const std::unordered_map<const BasePart *, SDL_GPUTexture *> *PartTextures = nullptr;
 		SDL_GPUTexture *WhiteTexture = nullptr;
 		SDL_GPUSampler *SurfaceTextureSampler = nullptr;
+
+		// What this camera can see, for the passes to cull against. Null means
+		// no walk was made, and a pass then submits everything: wasteful, never
+		// wrong, which is the right way round for a fallback.
+		const VisibleSet *Visible = nullptr;
 	};
 
 	class RenderPass {

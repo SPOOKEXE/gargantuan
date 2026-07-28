@@ -97,18 +97,27 @@ namespace gargantuan {
 		// it to one camera when the answer is yes.
 		uint64_t ComputeSceneSignature(const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection) const;
 
-		// The same hash over only the parts this camera could possibly draw:
-		// what falls inside its frustum, plus what could throw a shadow into
-		// it. A part outside both cannot change this camera's picture however
-		// much it moves, so it is left out and the camera keeps its cache.
+		// Walks the camera's frustum, recording both which parts it can draw
+		// and the hash over them. Only the parts that fall inside, plus those
+		// that could throw a shadow in, are mixed: a part outside both cannot
+		// change this camera's picture however much it moves, so it is left
+		// out and the camera keeps its cache.
 		//
 		// Conservative in one direction only. A part can pass the test and
 		// still be invisible -- hidden behind a wall, or its bounding sphere
 		// clipping a corner the part itself misses -- which costs a redraw
 		// that was not needed. Nothing visible is ever left out, so the
 		// picture is never wrong.
-		uint64_t ComputeVisibleSceneSignature(
-			Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection
+		void ComputeVisibleSet(
+			Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection, VisibleSet &out
+		);
+
+		// The camera's visible set, walked only when the world or the camera
+		// has moved since the last one. The redraw check asks for it to decide
+		// whether to draw at all, and the passes ask again to decide what to
+		// submit; the second ask is free whenever the first already happened.
+		const VisibleSet &EnsureVisibleSet(
+			Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection, uint64_t cameraSignature
 		);
 
 		// Draws cameras into their own offscreen targets, creating or resizing
@@ -306,6 +315,9 @@ namespace gargantuan {
 		// one instead of needing a second pipeline
 		SDL_GPUTexture *WhiteTexture = nullptr;
 		std::unordered_map<const BasePart *, SDL_GPUTexture *> PartTextures;
+		// One per camera, kept between frames so a still scene is not walked
+		// again. Dropped with the camera's target.
+		std::unordered_map<Camera *, VisibleSet> VisibleSets;
 
 		SDL_GPUShader *FullscreenVertexShader = nullptr;
 		SDL_GPUShader *OpaqueVertexShader = nullptr;

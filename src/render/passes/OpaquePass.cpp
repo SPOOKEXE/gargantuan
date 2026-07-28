@@ -118,6 +118,12 @@ namespace gargantuan {
 			}
 
 			for (auto part : context.WorldRoot->Parts) {
+				// Off the side of the screen, so every uniform push, binding
+				// and draw call below would be work the rasteriser discards
+				if (context.Visible && !context.Visible->IsInView(part.get())) {
+					continue;
+				}
+
 				auto &mesh = part->GetMesh();
 				if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
 					continue;

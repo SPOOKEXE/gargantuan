@@ -215,6 +215,7 @@ namespace gargantuan {
 		if (it->second.CacheTexture) SDL_ReleaseGPUTexture(Gpu, it->second.CacheTexture);
 		if (it->second.DepthTexture) SDL_ReleaseGPUTexture(Gpu, it->second.DepthTexture);
 		NeedsHistory.erase(it->first);
+		VisibleSets.erase(it->first);
 		CameraTargets.erase(it);
 	}
 
@@ -1092,6 +1093,15 @@ namespace gargantuan {
 		frameContext.SurfaceTextureSampler = ShaderSampler ? ShaderSampler : ShadowSampler;
 		frameContext.Width = target.Width;
 		frameContext.Height = target.Height;
+		// Usually the walk PlanRedraw already made. The readback path reaches
+		// here without one, so this is where it is guaranteed rather than
+		// assumed.
+		frameContext.Visible = &EnsureVisibleSet(
+			drawContext.Camera.get(),
+			drawContext.WorldRoot,
+			drawContext.LightDirection,
+			ComputeCameraSignature(drawContext.Camera.get())
+		);
 
 		// A camera's SurfaceShader replaces the opaque pass's fragment stage
 		std::vector<uint8_t> surfaceParameters;
@@ -1431,14 +1441,18 @@ namespace gargantuan {
 		return hash;
 	}
 
-	uint64_t RenderProvider::ComputeVisibleSceneSignature(
-		Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection
+	void RenderProvider::ComputeVisibleSet(
+		Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection, VisibleSet &out
 	) {
+		out.InView.clear();
+		out.ShadowsIntoView.clear();
+
 		uint64_t hash = 0xCBF29CE484222325ull;
 		MixVec3(hash, lightDirection);
 
 		if (!camera || !world) {
-			return hash;
+			out.Signature = hash;
+			return;
 		}
 
 		SidePlanes planes = ExtractSidePlanes(camera->GetProjectionMatrix() * camera->GetViewMatrix());
@@ -1457,8 +1471,30 @@ namespace gargantuan {
 			// costs a redraw, too small drops something that was on screen.
 			float radius = glm::length(part->Size) * 0.5f;
 			glm::vec3 centre = part->CFrame.Position;
-			glm::vec3 reach = part->CastShadow ? centre + shadowStep : centre;
-			if (!CapsuleInside(planes, centre, reach, radius)) {
+
+			// The sphere on its own, which is the capsule test with no sweep:
+			// what the opaque pass would actually put on screen
+			bool inView = CapsuleInside(planes, centre, centre, radius);
+			// The same sphere swept along the shadow, so a caster off the side
+			// of the screen still counts. Only worth asking of a part that
+			// casts at all.
+			bool shadowReaches =
+				part->CastShadow && CapsuleInside(planes, centre, centre + shadowStep, radius);
+
+			if (inView) {
+				out.InView.insert(part.get());
+			}
+			// A caster already on screen throws its shadow onto the screen too,
+			// so this set is the wider of the two and never drops one InView
+			// holds. The sweep starts at the part, so inView implies it, but
+			// saying so costs nothing and does not rely on noticing that.
+			if (part->CastShadow && (inView || shadowReaches)) {
+				out.ShadowsIntoView.insert(part.get());
+			}
+
+			// Anything that can change the picture: by being in it, or by
+			// darkening something that is
+			if (!inView && !shadowReaches) {
 				continue;
 			}
 
@@ -1471,7 +1507,27 @@ namespace gargantuan {
 		// Cheap insurance on how many were in view, since the loop above
 		// contributes nothing at all for a frame where none of them are
 		MixBits(hash, visible);
-		return hash;
+		out.Signature = hash;
+	}
+
+	const VisibleSet &RenderProvider::EnsureVisibleSet(
+		Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection, uint64_t cameraSignature
+	) {
+		VisibleSet &set = VisibleSets[camera];
+
+		// The walk depends on the world and on where the camera is pointing,
+		// and on nothing else. While neither has moved the previous answer is
+		// still the right one, so the redraw check and the passes share a
+		// single walk rather than taking one each.
+		if (set.Walked && set.SceneStamp == SceneSignature && set.CameraStamp == cameraSignature) {
+			return set;
+		}
+
+		ComputeVisibleSet(camera, world, lightDirection, set);
+		set.SceneStamp = SceneSignature;
+		set.CameraStamp = cameraSignature;
+		set.Walked = true;
+		return set;
 	}
 
 	uint64_t RenderProvider::ComputeCameraSignature(Camera *camera) {
@@ -1552,7 +1608,8 @@ namespace gargantuan {
 			sceneMatches = true;
 		} else {
 			uint64_t visibleSignature =
-				ComputeVisibleSceneSignature(camera, drawContext.WorldRoot, drawContext.LightDirection);
+				EnsureVisibleSet(camera, drawContext.WorldRoot, drawContext.LightDirection, cameraSignature)
+					.Signature;
 			sceneMatches = cameraMatches && camera->LastVisibleSignature == visibleSignature;
 			camera->LastVisibleSignature = visibleSignature;
 		}
@@ -1718,6 +1775,13 @@ namespace gargantuan {
 
 	bool RenderProvider::RequestRender(DrawContext drawContext, lua_State *thread, ThreadEngine *threadEngine) {
 		auto *camera = drawContext.Camera.get();
+
+		// This runs from a script, which may well have moved something since
+		// the engine last took the hash at the top of the frame. Everything
+		// below compares against it -- what each camera can see, and whether
+		// a dependency may keep its cached picture -- so it has to describe
+		// the world being drawn now rather than the world one frame ago.
+		SceneSignature = ComputeSceneSignature(drawContext.WorldRoot, drawContext.LightDirection);
 
 		// Anything this camera samples has to be drawn first, or it would read
 		// whatever was in that target from a previous frame. They go into the
@@ -1930,6 +1994,11 @@ namespace gargantuan {
 		frameContext.PartTextures = &PartTextures;
 		frameContext.WhiteTexture = WhiteTexture;
 		frameContext.SurfaceTextureSampler = ShaderSampler ? ShaderSampler : ShadowSampler;
+		// Drawing straight to the swapchain skips PlanRedraw entirely, so this
+		// path pays for its own walk
+		frameContext.Visible = &EnsureVisibleSet(
+			camera, drawContext.WorldRoot, drawContext.LightDirection, ComputeCameraSignature(camera)
+		);
 
 		if (DepthTexture) {
 			frameContext.DepthTexture = DepthTexture;

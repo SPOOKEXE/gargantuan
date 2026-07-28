@@ -62,6 +62,13 @@ namespace gargantuan {
 					continue;
 				}
 
+				// The wider of the two sets: a caster off screen still belongs
+				// here when the shadow it throws lands in the picture. Culling
+				// this by what is on screen instead would drop those shadows.
+				if (context.Visible && !context.Visible->CastsIntoView(part.get())) {
+					continue;
+				}
+
 				auto &mesh = part->GetMesh();
 				if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
 					continue;
