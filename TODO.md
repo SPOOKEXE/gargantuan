@@ -74,6 +74,9 @@ eyes. What is missing is the runtime that drives them.
 
 ## Render
 
+- [ ] Let the window camera reuse its cached target too. It redraws every frame
+      regardless today, because it has to present something; re-blitting the
+      cached image would do
 - [ ] Narrow the redraw check to what a camera can actually see. It compares one
       signature for the whole world today, so a part moving behind a camera
       still costs it a redraw
