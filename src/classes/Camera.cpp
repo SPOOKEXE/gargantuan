@@ -24,6 +24,7 @@ namespace gargantuan {
 			G_UD_READWRITE_PROP(Camera, CameraType, Enums::CameraType),
 			G_UD_READWRITE_PROP(Camera, CFrame, gargantuan::CFrame),
 			G_UD_READWRITE_PROP(Camera, Enabled, bool),
+			G_UD_READWRITE_PROP(Camera, Antialiasing, bool),
 			G_UD_READWRITE_PROP(Camera, DrawToWindow, bool),
 			G_UD_READWRITE_PROP(Camera, WindowPosition, UDim2),
 			G_UD_READWRITE_PROP(Camera, WindowSize, UDim2),
@@ -78,7 +79,9 @@ namespace gargantuan {
 			{"Render",
 			 {&Camera::LRender, []() -> std::string { return "(self): EditableImage"; }}},
 			{"AddShader", Method::Wrap<&Camera::AddShader>()},
-			{"RemoveShader", Method::Wrap<&Camera::RemoveShader>()},
+			{"RemoveShader",
+			 {&Camera::LRemoveShader,
+			  []() -> std::string { return "(self, shaderOrIndex: (ShaderScript | number)?): boolean"; }}},
 			{"ListShaders", Method::Wrap<&Camera::ListShaders>()},
 			{"ClearShaders", Method::Wrap<&Camera::ClearShaders>()},
 		},
@@ -104,6 +107,50 @@ namespace gargantuan {
 		if (existing != Shaders.end()) {
 			Shaders.erase(existing);
 		}
+	}
+
+	int Camera::LRemoveShader(lua_State *L, Instance *instance) {
+		auto *camera = instance->Cast<Camera>();
+		if (!camera) {
+			luaL_error(L, "RemoveShader must be called on a Camera");
+			return 0;
+		}
+
+		// No argument means the one on the end
+		if (lua_isnoneornil(L, 2)) {
+			if (camera->Shaders.empty()) {
+				lua_pushboolean(L, false);
+				return 1;
+			}
+
+			camera->Shaders.pop_back();
+			lua_pushboolean(L, true);
+			return 1;
+		}
+
+		if (lua_isnumber(L, 2)) {
+			// One-based, to match ListShaders and the rest of Luau
+			int index = (int)lua_tointeger(L, 2);
+			if (index < 1 || index > (int)camera->Shaders.size()) {
+				lua_pushboolean(L, false);
+				return 1;
+			}
+
+			camera->Shaders.erase(camera->Shaders.begin() + (index - 1));
+			lua_pushboolean(L, true);
+			return 1;
+		}
+
+		auto shader = std::dynamic_pointer_cast<ShaderScript>(StackValue<Instance::Pointer>::From(L, 2));
+		if (!shader) {
+			luaL_typeerror(L, 2, "ShaderScript or number");
+			return 0;
+		}
+
+		size_t before = camera->Shaders.size();
+		camera->RemoveShader(shader);
+		lua_pushboolean(L, camera->Shaders.size() != before);
+		return 1;
 	}
 
 	std::vector<std::shared_ptr<Instance>> Camera::ListShaders() {
@@ -245,19 +292,29 @@ namespace gargantuan {
 		}
 
 		if (AccumulatedDeltaX != 0.0f || AccumulatedDeltaY != 0.0f) {
-			Yaw += AccumulatedDeltaX * FreecamSensitivity;
+			// SDL reports rightwards and downwards as positive, and both turn
+			// the camera the other way round
+			Yaw -= AccumulatedDeltaX * FreecamSensitivity;
 
-			Pitch += AccumulatedDeltaY * FreecamSensitivity;
+			Pitch -= AccumulatedDeltaY * FreecamSensitivity;
 			Pitch = glm::clamp(Pitch, -89.0f, 89.0f);
 
 			AccumulatedDeltaX = 0.0f;
 			AccumulatedDeltaY = 0.0f;
 
-			auto rotation = CFrame::Angles(glm::radians(Pitch), glm::radians(Yaw), 0.0f);
+			// Yaw about the world's up, then pitch about the camera's own
+			// right: Ry * Rx. Composed the other way, as CFrame::Angles does,
+			// the yaw happens inside the already-pitched frame, which rolls the
+			// horizon and makes a sideways mouse movement curve.
+			auto rotation = CFrame::fromEulerAnglesYXZ(glm::radians(Pitch), glm::radians(Yaw), 0.0f);
 			CFrame = gargantuan::CFrame(CFrame.Position, rotation.Rotation);
 		}
 
 		auto keys = SDL_GetKeyboardState(nullptr);
+		// Null before SDL's video subsystem is up, which the tests rely on
+		if (!keys) {
+			return;
+		}
 
 		auto lookVector = CFrame.GetLookVector();
 		auto rightVector = CFrame.GetRightVector();

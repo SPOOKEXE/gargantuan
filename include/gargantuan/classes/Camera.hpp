@@ -55,7 +55,10 @@ namespace gargantuan {
 		UDim2 WindowPosition = UDim2(0.0f, 0, 0.0f, 0);
 		UDim2 WindowSize = UDim2(1.0f, 0, 1.0f, 0);
 		CFrame CFrame;
-		float Pitch = 0.0f, Yaw = -90.0f, Roll;
+		// Degrees. Yaw starts at zero so it agrees with an identity CFrame,
+		// which looks down -Z; starting elsewhere made the first mouse movement
+		// snap the view round. Roll was left uninitialised.
+		float Pitch = 0.0f, Yaw = 0.0f, Roll = 0.0f;
 		// Vertical field of view in degrees.
 		float FieldOfView = 70.0f;
 		Vector2 ViewportSize = gargantuan::Vector2(0.0f, 0.0f);
@@ -81,8 +84,15 @@ namespace gargantuan {
 		// engine's own lit-and-shadowed shading.
 		std::shared_ptr<SurfaceShader> SurfaceShader = nullptr;
 
+		// Runs the built-in antialias shader after this camera's own chain.
+		// It leaves flat areas exactly as they were and only softens edges.
+		bool Antialiasing = true;
+
 		void AddShader(std::shared_ptr<ShaderScript> shader);
 		void RemoveShader(std::shared_ptr<ShaderScript> shader);
+		// RemoveShader() drops the last one, RemoveShader(n) the nth counting
+		// from one, RemoveShader(shader) that particular one
+		static int LRemoveShader(lua_State *L, Instance *instance);
 		std::vector<std::shared_ptr<Instance>> ListShaders();
 		void ClearShaders();
 
