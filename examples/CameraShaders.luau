@@ -100,6 +100,13 @@ print(
 		.. `{buffer.readu8(pixels, centre * 4 + 2)}`
 )
 
+-- Written next to the executable, so you can look at what the camera saw
+if capture:Save("captures/security.png") then
+	print("saved captures/security.png")
+else
+	warn(`could not save the capture: {capture.SaveError}`)
+end
+
 -- Paste the capture back over the camera as a picture-in-picture
 local overlay = Instance.new("PostProcessShader")
 overlay.Name = "PictureInPicture"

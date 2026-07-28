@@ -21,4 +21,7 @@ namespace gargantuan::ImageDecoder {
 	// Reads a file and decodes it. Relative paths resolve against the
 	// executable's directory, which is where the engine's assets live.
 	Image DecodeFile(const std::string &path);
+
+	// Writes RGBA8 pixels out as a PNG
+	bool WritePng(const std::string &path, int width, int height, const uint8_t *rgba);
 } // namespace gargantuan::ImageDecoder

@@ -38,6 +38,11 @@ struct gargantuan::StackValue<E> {
 	};
 
 	static E From(lua_State *L, int idx) {
+		// An omitted argument reads as the enum's first item rather than
+		// crashing; callers that care use CheckStackValue
+		if (!Is(L, idx)) {
+			return E{};
+		}
 		return (E)StackValue<EnumItem>::From(L, idx).Value;
 	};
 

@@ -268,6 +268,11 @@ namespace gargantuan {
 
 		static StoredAs From(lua_State *L, int idx) {
 			StoredAs *userdata = static_cast<StoredAs *>(lua_touserdatatagged(L, idx, (int)This::GetUserdataTag()));
+			// Reading past the end of a call's arguments, or reading the wrong
+			// type, lands here. Dereferencing null would take the process down.
+			if (!userdata) {
+				return StoredAs{};
+			}
 			return *userdata;
 		};
 

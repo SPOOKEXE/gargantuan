@@ -1,11 +1,13 @@
 #include "gargantuan/classes/EditableImage.hpp"
 #include "gargantuan/datatypes/Color3.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
+#include "gargantuan/Paths.hpp"
 #include "gargantuan/render/ImageDecoder.hpp"
 #include "gargantuan/scripting/LuauBuffer.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <cstring>
 #include <glm/glm.hpp>
 #include <lualib.h>
@@ -17,6 +19,17 @@ namespace gargantuan {
 		.Constructor = ClassDefinition::WrapConstructor<EditableImage>(),
 		.Properties =
 			{
+				{
+					"SaveError",
+					{
+						[](lua_State *L, Instance *instance) -> int {
+							StackValue<std::string>::Push(L, instance->Cast<EditableImage>()->GetSaveError());
+							return 1;
+						},
+						nullptr,
+						G_UD_REFLECT_TYPE(std::string),
+					},
+				},
 				{
 					"LoadError",
 					{
@@ -48,6 +61,7 @@ namespace gargantuan {
 			{"DrawCircle", Method::Wrap<&EditableImage::DrawCircle>()},
 			{"DrawLine", Method::Wrap<&EditableImage::DrawLine>()},
 			{"Load", Method::Wrap<&EditableImage::Load>()},
+			{"Save", Method::Wrap<&EditableImage::Save>()},
 			{"ReadPixelsBuffer",
 			 {&EditableImage::LReadPixelsBuffer,
 			  []() -> std::string { return "(self, position: Vector2, size: Vector2): buffer"; }}},
@@ -148,7 +162,169 @@ namespace gargantuan {
 		Pixels = std::move(cropped);
 	}
 
-	void EditableImage::DrawRectangle(Vector2 position, Vector2 size, Color3 color, float transparency) {
+	void EditableImage::CombinePixel(
+		int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a, Enums::ImageCombineType combine, float coverage
+	) {
+		if (x < 0 || y < 0 || x >= Width || y >= Height || coverage <= 0.0f) {
+			return;
+		}
+
+		// Coverage is how much of the pixel the shape touches, and is separate
+		// from the source's own alpha. Mixing the two would make Overwrite
+		// blend a half-transparent pixel instead of replacing it.
+		int cover = (int)glm::round(glm::clamp(coverage, 0.0f, 1.0f) * 255.0f);
+		uint8_t *pixel = Pixels.data() + ((size_t)y * Width + x) * CHANNELS;
+
+		auto easeIn = [&](int red, int green, int blue, int alpha) {
+			if (cover >= 255) {
+				pixel[0] = (uint8_t)red;
+				pixel[1] = (uint8_t)green;
+				pixel[2] = (uint8_t)blue;
+				pixel[3] = (uint8_t)alpha;
+				return;
+			}
+
+			int inverse = 255 - cover;
+			pixel[0] = (uint8_t)((red * cover + pixel[0] * inverse) / 255);
+			pixel[1] = (uint8_t)((green * cover + pixel[1] * inverse) / 255);
+			pixel[2] = (uint8_t)((blue * cover + pixel[2] * inverse) / 255);
+			pixel[3] = (uint8_t)((alpha * cover + pixel[3] * inverse) / 255);
+		};
+
+		switch (combine) {
+		case Enums::ImageCombineType::Overwrite:
+			// Replaces outright; only a partly covered edge pixel eases in
+			easeIn(r, g, b, a);
+			return;
+
+		case Enums::ImageCombineType::Add: {
+			int alpha = a * cover / 255;
+			easeIn(
+				glm::min(255, pixel[0] + r * alpha / 255),
+				glm::min(255, pixel[1] + g * alpha / 255),
+				glm::min(255, pixel[2] + b * alpha / 255),
+				glm::min(255, pixel[3] + alpha)
+			);
+			return;
+		}
+
+		case Enums::ImageCombineType::Multiply: {
+			int alpha = a * cover / 255;
+			int inverse = 255 - alpha;
+			pixel[0] = (uint8_t)((pixel[0] * r / 255 * alpha + pixel[0] * inverse) / 255);
+			pixel[1] = (uint8_t)((pixel[1] * g / 255 * alpha + pixel[1] * inverse) / 255);
+			pixel[2] = (uint8_t)((pixel[2] * b / 255 * alpha + pixel[2] * inverse) / 255);
+			return;
+		}
+
+		case Enums::ImageCombineType::BlendSourceOver:
+		default:
+			break;
+		}
+
+		// Source-over, where coverage simply weakens the source
+		int alpha = a * cover / 255;
+		if (alpha <= 0) {
+			return;
+		}
+
+		if (alpha >= 255) {
+			pixel[0] = r;
+			pixel[1] = g;
+			pixel[2] = b;
+			pixel[3] = 255;
+			return;
+		}
+
+		// Proper straight-alpha compositing, which has to weight the
+		// destination by its own alpha. Ignoring that is what gives translucent
+		// draws over transparent pixels a dark halo.
+		int inverse = 255 - alpha;
+		int destinationAlpha = pixel[3];
+		int outputAlpha = alpha + destinationAlpha * inverse / 255;
+
+		if (outputAlpha <= 0) {
+			pixel[0] = pixel[1] = pixel[2] = pixel[3] = 0;
+			return;
+		}
+
+		auto composite = [&](int source, int destination) {
+			int numerator = source * alpha * 255 + destination * destinationAlpha * inverse;
+			return (uint8_t)glm::clamp(numerator / (outputAlpha * 255), 0, 255);
+		};
+
+		pixel[0] = composite(r, pixel[0]);
+		pixel[1] = composite(g, pixel[1]);
+		pixel[2] = composite(b, pixel[2]);
+		pixel[3] = (uint8_t)glm::min(255, outputAlpha);
+	}
+
+	namespace {
+		// How much of a pixel a disc of `radius` centred at (cx, cy) covers.
+		// Sampled on a 4x4 grid, which is enough to look smooth and costs
+		// little; an exact area would need the circle-square intersection.
+		float DiscCoverage(int x, int y, float cx, float cy, float radius) {
+			float dx = (float)x - cx;
+			float dy = (float)y - cy;
+			float distance = glm::sqrt(dx * dx + dy * dy);
+
+			// Well inside or well outside needs no sampling at all
+			if (distance <= radius - 0.75f) {
+				return 1.0f;
+			}
+			if (distance >= radius + 0.75f) {
+				return 0.0f;
+			}
+
+			int inside = 0;
+			for (int sy = 0; sy < 4; sy++) {
+				for (int sx = 0; sx < 4; sx++) {
+					float px = (float)x - 0.375f + sx * 0.25f;
+					float py = (float)y - 0.375f + sy * 0.25f;
+					float ox = px - cx;
+					float oy = py - cy;
+					if (ox * ox + oy * oy <= radius * radius) {
+						inside++;
+					}
+				}
+			}
+			return inside / 16.0f;
+		}
+
+		// Same idea for a thick line segment, using distance to the segment
+		float SegmentCoverage(int x, int y, glm::vec2 from, glm::vec2 to, float radius) {
+			auto distanceTo = [&](float px, float py) {
+				glm::vec2 point{px, py};
+				glm::vec2 line = to - from;
+				float lengthSquared = glm::dot(line, line);
+				float t = lengthSquared > 0.0f ? glm::clamp(glm::dot(point - from, line) / lengthSquared, 0.0f, 1.0f)
+											   : 0.0f;
+				return glm::length(point - (from + line * t));
+			};
+
+			float centre = distanceTo((float)x, (float)y);
+			if (centre <= radius - 0.75f) {
+				return 1.0f;
+			}
+			if (centre >= radius + 0.75f) {
+				return 0.0f;
+			}
+
+			int inside = 0;
+			for (int sy = 0; sy < 4; sy++) {
+				for (int sx = 0; sx < 4; sx++) {
+					if (distanceTo((float)x - 0.375f + sx * 0.25f, (float)y - 0.375f + sy * 0.25f) <= radius) {
+						inside++;
+					}
+				}
+			}
+			return inside / 16.0f;
+		}
+	} // namespace
+
+	void EditableImage::DrawRectangle(
+		Vector2 position, Vector2 size, Color3 color, float transparency, Enums::ImageCombineType combine
+	) {
 		Revision++;
 		int x = 0, y = 0, width = 0, height = 0;
 		if (!ClampRegion(position, size, x, y, width, height)) {
@@ -160,43 +336,18 @@ namespace gargantuan {
 		uint8_t blue = (uint8_t)glm::round(glm::clamp(color.B, 0.0f, 1.0f) * 255.0f);
 		uint8_t alpha = (uint8_t)glm::round((1.0f - glm::clamp(transparency, 0.0f, 1.0f)) * 255.0f);
 
+		// A rectangle lands on pixel boundaries, so there is nothing to
+		// antialias; it goes straight through the combine
 		for (int row = 0; row < height; row++) {
-			uint8_t *pixel = Pixels.data() + ((size_t)(y + row) * Width + x) * CHANNELS;
 			for (int column = 0; column < width; column++) {
-				pixel[0] = red;
-				pixel[1] = green;
-				pixel[2] = blue;
-				pixel[3] = alpha;
-				pixel += CHANNELS;
+				CombinePixel(x + column, y + row, red, green, blue, alpha, combine);
 			}
 		}
 	}
 
-	void EditableImage::BlendPixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-		if (x < 0 || y < 0 || x >= Width || y >= Height || a == 0) {
-			return;
-		}
-
-		uint8_t *pixel = Pixels.data() + ((size_t)y * Width + x) * CHANNELS;
-
-		// Fully opaque is the common case and needs no arithmetic
-		if (a == 255) {
-			pixel[0] = r;
-			pixel[1] = g;
-			pixel[2] = b;
-			pixel[3] = 255;
-			return;
-		}
-
-		// Source-over, in 0-255 fixed point
-		int inverse = 255 - a;
-		pixel[0] = (uint8_t)((r * a + pixel[0] * inverse) / 255);
-		pixel[1] = (uint8_t)((g * a + pixel[1] * inverse) / 255);
-		pixel[2] = (uint8_t)((b * a + pixel[2] * inverse) / 255);
-		pixel[3] = (uint8_t)glm::min(255, a + pixel[3] * inverse / 255);
-	}
-
-	void EditableImage::DrawImage(Vector2 position, std::shared_ptr<EditableImage> image) {
+	void EditableImage::DrawImage(
+		Vector2 position, std::shared_ptr<EditableImage> image, Enums::ImageCombineType combine
+	) {
 		if (!image || image->Width <= 0 || image->Height <= 0) {
 			return;
 		}
@@ -208,12 +359,14 @@ namespace gargantuan {
 		for (int y = 0; y < image->Height; y++) {
 			for (int x = 0; x < image->Width; x++) {
 				const uint8_t *source = image->Pixels.data() + ((size_t)y * image->Width + x) * CHANNELS;
-				BlendPixel(originX + x, originY + y, source[0], source[1], source[2], source[3]);
+				CombinePixel(originX + x, originY + y, source[0], source[1], source[2], source[3], combine);
 			}
 		}
 	}
 
-	void EditableImage::DrawCircle(Vector2 centre, float radius, Color3 color, float transparency) {
+	void EditableImage::DrawCircle(
+		Vector2 centre, float radius, Color3 color, float transparency, Enums::ImageCombineType combine
+	) {
 		if (radius <= 0.0f) {
 			return;
 		}
@@ -233,22 +386,23 @@ namespace gargantuan {
 		int minY = glm::max(0, (int)glm::floor(centreY - radius));
 		int maxY = glm::min(Height - 1, (int)glm::ceil(centreY + radius));
 
-		float radiusSquared = radius * radius;
+		// An integer coordinate names a pixel, so coverage is measured from the
+		// pixel itself. This is what makes a one-pixel line cover its endpoints.
 		for (int y = minY; y <= maxY; y++) {
 			for (int x = minX; x <= maxX; x++) {
-				// An integer coordinate names a pixel, so distance is measured
-				// from that pixel rather than from its top-left corner. This is
-				// what makes a one-pixel line actually cover its endpoints.
-				float dx = (float)x - centreX;
-				float dy = (float)y - centreY;
-				if (dx * dx + dy * dy <= radiusSquared) {
-					BlendPixel(x, y, r, g, b, alpha);
-				}
+				CombinePixel(x, y, r, g, b, alpha, combine, DiscCoverage(x, y, centreX, centreY, radius));
 			}
 		}
 	}
 
-	void EditableImage::DrawLine(Vector2 from, Vector2 to, Color3 color, float transparency, float thickness) {
+	void EditableImage::DrawLine(
+		Vector2 from,
+		Vector2 to,
+		Color3 color,
+		float transparency,
+		float thickness,
+		Enums::ImageCombineType combine
+	) {
 		Revision++;
 		uint8_t r = (uint8_t)glm::round(glm::clamp(color.R, 0.0f, 1.0f) * 255.0f);
 		uint8_t g = (uint8_t)glm::round(glm::clamp(color.G, 0.0f, 1.0f) * 255.0f);
@@ -264,33 +418,53 @@ namespace gargantuan {
 
 		// A zero-length line is just a dot
 		if (length < 1e-4f) {
-			DrawCircle(from, radius, color, transparency);
+			DrawCircle(from, radius, color, transparency, combine);
 			return;
 		}
 
-		// Walk the line in half-pixel steps and stamp a disc at each, which
-		// gives an even width and rounded ends without any gaps
-		int steps = (int)glm::ceil(length * 2.0f);
-		for (int step = 0; step <= steps; step++) {
-			float t = (float)step / (float)steps;
-			float x = startX + deltaX * t;
-			float y = startY + deltaY * t;
+		// Cover the segment once, rather than stamping overlapping discs. That
+		// keeps a translucent line from darkening where the stamps overlapped,
+		// and lets each pixel be antialiased exactly once.
+		glm::vec2 start{startX, startY};
+		glm::vec2 end{to.GetX(), to.GetY()};
 
-			int minX = glm::max(0, (int)glm::floor(x - radius));
-			int maxX = glm::min(Width - 1, (int)glm::ceil(x + radius));
-			int minY = glm::max(0, (int)glm::floor(y - radius));
-			int maxY = glm::min(Height - 1, (int)glm::ceil(y + radius));
+		int minX = glm::max(0, (int)glm::floor(glm::min(start.x, end.x) - radius - 1.0f));
+		int maxX = glm::min(Width - 1, (int)glm::ceil(glm::max(start.x, end.x) + radius + 1.0f));
+		int minY = glm::max(0, (int)glm::floor(glm::min(start.y, end.y) - radius - 1.0f));
+		int maxY = glm::min(Height - 1, (int)glm::ceil(glm::max(start.y, end.y) + radius + 1.0f));
 
-			for (int pixelY = minY; pixelY <= maxY; pixelY++) {
-				for (int pixelX = minX; pixelX <= maxX; pixelX++) {
-					float dx = (float)pixelX - x;
-					float dy = (float)pixelY - y;
-					if (dx * dx + dy * dy <= radius * radius) {
-						BlendPixel(pixelX, pixelY, r, g, b, alpha);
-					}
-				}
+		for (int y = minY; y <= maxY; y++) {
+			for (int x = minX; x <= maxX; x++) {
+				CombinePixel(x, y, r, g, b, alpha, combine, SegmentCoverage(x, y, start, end, radius));
 			}
 		}
+	}
+
+	bool EditableImage::Save(std::string path) {
+		if (Width <= 0 || Height <= 0) {
+			SaveError = "The image is empty";
+			return false;
+		}
+
+		std::filesystem::path resolved{path};
+		if (resolved.is_relative()) {
+			resolved = Paths::GetExecutableDirectory() / resolved;
+		}
+
+		std::error_code ignored;
+		std::filesystem::create_directories(resolved.parent_path(), ignored);
+
+		if (!ImageDecoder::WritePng(resolved.string(), Width, Height, Pixels.data())) {
+			SaveError = "Could not write " + resolved.string();
+			return false;
+		}
+
+		SaveError.clear();
+		return true;
+	}
+
+	std::string EditableImage::GetSaveError() const {
+		return SaveError;
 	}
 
 	bool EditableImage::Load(std::string path) {

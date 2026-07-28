@@ -20,9 +20,12 @@ namespace gargantuan {
 		G_UD_DECL_PRELUDE(EnumItem)
 
 		std::string_view Name;
-		int Value;
+		int Value = 0;
 		std::shared_ptr<Enum> EnumType;
 
+		// Default-constructible so a missing argument can produce an empty one
+		// instead of dereferencing null
+		EnumItem() = default;
 		EnumItem(std::string_view name, int value, std::shared_ptr<Enum> enumType)
 			: Name(name), Value(value), EnumType(std::move(enumType)) {};
 
