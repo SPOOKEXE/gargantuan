@@ -1,4 +1,5 @@
 #include "gargantuan/Engine.hpp"
+#include "gargantuan/classes/BasePart.hpp"
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/classes/DataModel.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
@@ -178,6 +179,13 @@ namespace gargantuan {
 		for (const auto &context : windowCameras) {
 			for (Camera *dependency : RenderProvider->GetSampledCameras(context.Camera.get())) {
 				offscreenRoots.push_back(dependency);
+			}
+		}
+
+		// So must any camera being shown on a part's surface
+		for (const auto &part : worldRoot->Parts) {
+			if (part && part->SurfaceCamera) {
+				offscreenRoots.push_back(part->SurfaceCamera.get());
 			}
 		}
 

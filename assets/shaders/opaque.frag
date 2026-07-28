@@ -4,6 +4,7 @@ layout(location = 0) in vec3 FragmentNormal;
 layout(location = 1) in vec4 FragmentColor;
 layout(location = 2) in vec4 WorldPosition;
 layout(location = 3) in vec4 ShadowPosition;
+layout(location = 4) in vec2 FragmentUV;
 
 layout(location = 0) out vec4 OutputColor;
 
@@ -15,6 +16,14 @@ layout(set = 3, binding = 0) uniform WorldUniforms {
 } world;
 
 layout(set = 2, binding = 0) uniform sampler2DShadow ShadowMap;
+// A part can show another camera's picture on its surface. Parts without one
+// get a single white pixel, so the multiply below leaves them alone.
+layout(set = 2, binding = 1) uniform sampler2D SurfaceTexture;
+
+layout(set = 3, binding = 1) uniform PartFragmentUniforms {
+    // x is 1 when this part actually has a surface texture
+    vec4 HasSurfaceTexture;
+} partFragment;
 
 float SHADOW_SPREAD = 2.0;
 vec2 SHADOW_TEXEL_SIZE = vec2(1.0 / 2048.0);
@@ -50,5 +59,11 @@ void main() {
     float ambient = 0.2;
     float lighting = ambient + (nDotL * shadowFactor);
 
-    OutputColor = vec4(FragmentColor.rgb * lighting, FragmentColor.a);
+    vec3 surface = FragmentColor.rgb;
+    if (partFragment.HasSurfaceTexture.x > 0.5) {
+        // Shown as-is rather than tinted, so a camera feed reads true
+        surface = texture(SurfaceTexture, FragmentUV).rgb;
+    }
+
+    OutputColor = vec4(surface * lighting, FragmentColor.a);
 }

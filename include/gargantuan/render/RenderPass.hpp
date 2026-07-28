@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL.h>
 #include <memory>
+#include <unordered_map>
 
 namespace gargantuan {
 	struct DrawContext {
@@ -41,6 +42,12 @@ namespace gargantuan {
 		// Slot 0 is the shadow map; the script's images follow
 		const SDL_GPUTextureSamplerBinding *SurfaceSamplers = nullptr;
 		uint32_t SurfaceSamplerCount = 0;
+
+		// Resolved once per frame: which texture, if any, each part shows on
+		// its surface. Parts absent from the map use WhiteTexture.
+		const std::unordered_map<const BasePart *, SDL_GPUTexture *> *PartTextures = nullptr;
+		SDL_GPUTexture *WhiteTexture = nullptr;
+		SDL_GPUSampler *SurfaceTextureSampler = nullptr;
 	};
 
 	class RenderPass {

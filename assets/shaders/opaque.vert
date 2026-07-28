@@ -20,6 +20,9 @@ layout(location = 0) out vec3 FragmentNormal;
 layout(location = 1) out vec4 FragmentColor;
 layout(location = 2) out vec4 WorldPosition;
 layout(location = 3) out vec4 ShadowPosition;
+// The mesh already carries UVs, so a part's surface texture can use them
+// directly rather than projecting one on
+layout(location = 4) out vec2 FragmentUV;
 
 void main() {
     // NOTE: if u define ANY of the output variables before gl_Position, it
@@ -30,4 +33,5 @@ void main() {
     FragmentColor = part.Color;
     WorldPosition = (part.ModelMatrix * vec4(VertexPosition, 1.0f)).xyzw;
     ShadowPosition = world.ShadowBiasMatrix * WorldPosition;
+    FragmentUV = VertexUV;
 }

@@ -1,6 +1,7 @@
 // #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
 #include "gargantuan/render/RenderProvider.hpp"
+#include "gargantuan/classes/BasePart.hpp"
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/classes/ComputeShader.hpp"
 #include "gargantuan/classes/EditableImage.hpp"
@@ -91,6 +92,7 @@ namespace gargantuan {
 		for (auto &[_, target] : CameraTargets) {
 			if (target.ColorTexture) SDL_ReleaseGPUTexture(Gpu, target.ColorTexture);
 			if (target.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, target.ScratchTexture);
+			if (target.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.HistoryTexture);
 			if (target.DepthTexture) SDL_ReleaseGPUTexture(Gpu, target.DepthTexture);
 		}
 		CameraTargets.clear();
@@ -105,6 +107,11 @@ namespace gargantuan {
 			if (compiled.ComputePipeline) SDL_ReleaseGPUComputePipeline(Gpu, compiled.ComputePipeline);
 		}
 		ShaderCache.clear();
+
+		if (WhiteTexture) {
+			SDL_ReleaseGPUTexture(Gpu, WhiteTexture);
+			WhiteTexture = nullptr;
+		}
 
 		if (FullscreenVertexShader) {
 			SDL_ReleaseGPUShader(Gpu, FullscreenVertexShader);
@@ -153,7 +160,9 @@ namespace gargantuan {
 
 		if (it->second.ColorTexture) SDL_ReleaseGPUTexture(Gpu, it->second.ColorTexture);
 		if (it->second.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, it->second.ScratchTexture);
+		if (it->second.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, it->second.HistoryTexture);
 		if (it->second.DepthTexture) SDL_ReleaseGPUTexture(Gpu, it->second.DepthTexture);
+		NeedsHistory.erase(it->first);
 		CameraTargets.erase(it);
 	}
 
@@ -204,8 +213,10 @@ namespace gargantuan {
 		// The viewport changed, so the old textures are the wrong size
 		if (target.ColorTexture) SDL_ReleaseGPUTexture(Gpu, target.ColorTexture);
 		if (target.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, target.ScratchTexture);
-		if (target.DepthTexture) SDL_ReleaseGPUTexture(Gpu, target.DepthTexture);
+		if (target.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.HistoryTexture);
 		target.ScratchTexture = nullptr;
+		target.HistoryTexture = nullptr;
+		if (target.DepthTexture) SDL_ReleaseGPUTexture(Gpu, target.DepthTexture);
 
 		target.ColorTexture = SDL_CreateGPUTexture(Gpu, &colorInfo);
 		if (withScratch) {
@@ -236,21 +247,140 @@ namespace gargantuan {
 		return &target;
 	}
 
-	SDL_GPUTexture *RenderProvider::ResolveTextureSource(const ShaderScript::TextureSource &source) {
+	SDL_GPUTexture *RenderProvider::ResolveTextureSource(
+		Camera *reader, const ShaderScript::TextureSource &source
+	) {
 		if (source.Image) {
 			return AcquireImageTexture(source.Image.get());
 		}
 
-		// A camera's own target, sampled straight from the GPU. It holds
-		// whatever that camera last rendered.
+		// A camera's own target, sampled straight from the GPU
 		if (source.Camera) {
 			auto it = CameraTargets.find(source.Camera.get());
-			if (it != CameraTargets.end()) {
-				return it->second.ColorTexture;
+			if (it == CameraTargets.end()) {
+				return nullptr;
 			}
+
+			// An edge that closes a cycle cannot see this frame's picture,
+			// because the camera it reads has not been drawn yet. Give it the
+			// finished previous frame rather than a half-written target.
+			if (HistoryEdges.count({reader, source.Camera.get()}) && it->second.HistoryTexture) {
+				return it->second.HistoryTexture;
+			}
+
+			return it->second.ColorTexture;
 		}
 
 		return nullptr;
+	}
+
+	void RenderProvider::RecordHistoryCopy(
+		SDL_GPUCommandBuffer *commands, Camera *camera, const CameraTarget &target
+	) {
+		if (!camera || !NeedsHistory.count(camera) || !target.ColorTexture) {
+			return;
+		}
+
+		CameraTarget &mutableTarget = CameraTargets[camera];
+		if (!mutableTarget.HistoryTexture) {
+			SDL_GPUTextureCreateInfo info{
+				.type = SDL_GPU_TEXTURETYPE_2D,
+				.format = OFFSCREEN_FORMAT,
+				.usage = CAMERA_TARGET_USAGE,
+				.width = target.Width,
+				.height = target.Height,
+				.layer_count_or_depth = 1,
+				.num_levels = 1,
+			};
+			mutableTarget.HistoryTexture = SDL_CreateGPUTexture(Gpu, &info);
+			if (!mutableTarget.HistoryTexture) {
+				return;
+			}
+		}
+
+		// Taken after the chain has run, so the copy is the finished picture
+		SDL_GPUBlitInfo blit{
+			.source = {.texture = target.ColorTexture, .w = target.Width, .h = target.Height},
+			.destination = {.texture = mutableTarget.HistoryTexture, .w = target.Width, .h = target.Height},
+			.load_op = SDL_GPU_LOADOP_DONT_CARE,
+			.filter = SDL_GPU_FILTER_NEAREST,
+		};
+		SDL_BlitGPUTexture(commands, &blit);
+	}
+
+	void RenderProvider::EnsureWhiteTexture() {
+		if (!ShaderSampler) {
+			SDL_GPUSamplerCreateInfo samplerInfo{
+				.min_filter = SDL_GPU_FILTER_LINEAR,
+				.mag_filter = SDL_GPU_FILTER_LINEAR,
+				.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR,
+				.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+				.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+				.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+			};
+			ShaderSampler = SDL_CreateGPUSampler(Gpu, &samplerInfo);
+		}
+
+		if (WhiteTexture) {
+			return;
+		}
+
+		SDL_GPUTextureCreateInfo info{
+			.type = SDL_GPU_TEXTURETYPE_2D,
+			.format = OFFSCREEN_FORMAT,
+			.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
+			.width = 1,
+			.height = 1,
+			.layer_count_or_depth = 1,
+			.num_levels = 1,
+		};
+		WhiteTexture = SDL_CreateGPUTexture(Gpu, &info);
+		if (!WhiteTexture) {
+			return;
+		}
+
+		SDL_GPUTransferBufferCreateInfo transferInfo{
+			.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+			.size = 4,
+		};
+		SDL_GPUTransferBuffer *transferBuffer = SDL_CreateGPUTransferBuffer(Gpu, &transferInfo);
+		if (!transferBuffer) {
+			return;
+		}
+
+		if (auto *mapped = static_cast<uint8_t *>(SDL_MapGPUTransferBuffer(Gpu, transferBuffer, false))) {
+			mapped[0] = mapped[1] = mapped[2] = mapped[3] = 255;
+			SDL_UnmapGPUTransferBuffer(Gpu, transferBuffer);
+		}
+
+		SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(Gpu);
+		SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commands);
+		SDL_GPUTextureTransferInfo source{
+			.transfer_buffer = transferBuffer, .offset = 0, .pixels_per_row = 1, .rows_per_layer = 1
+		};
+		SDL_GPUTextureRegion destination{.texture = WhiteTexture, .w = 1, .h = 1, .d = 1};
+		SDL_UploadToGPUTexture(copyPass, &source, &destination, false);
+		SDL_EndGPUCopyPass(copyPass);
+		SDL_SubmitGPUCommandBuffer(commands);
+		SDL_ReleaseGPUTransferBuffer(Gpu, transferBuffer);
+	}
+
+	void RenderProvider::ResolvePartTextures(const std::shared_ptr<WorldRoot> &worldRoot) {
+		PartTextures.clear();
+		if (!worldRoot) {
+			return;
+		}
+
+		for (const auto &part : worldRoot->Parts) {
+			if (!part || !part->SurfaceCamera) {
+				continue;
+			}
+
+			auto it = CameraTargets.find(part->SurfaceCamera.get());
+			if (it != CameraTargets.end() && it->second.ColorTexture) {
+				PartTextures[part.get()] = it->second.ColorTexture;
+			}
+		}
 	}
 
 	SDL_GPUTexture *RenderProvider::AcquireImageTexture(EditableImage *image) {
@@ -637,7 +767,18 @@ namespace gargantuan {
 	void RenderProvider::RecordShaderChain(
 		SDL_GPUCommandBuffer *commands, Camera *camera, CameraTarget &target
 	) {
-		if (!camera || camera->Shaders.empty() || !target.ScratchTexture) {
+		if (!camera || !target.ScratchTexture) {
+			return;
+		}
+
+		// The built-in antialias pass runs last, after whatever the camera's
+		// own chain did
+		std::vector<std::shared_ptr<ShaderScript>> chain = camera->Shaders;
+		if (camera->Antialiasing) {
+			chain.push_back(GetAntialiasShader());
+		}
+
+		if (chain.empty()) {
 			return;
 		}
 
@@ -697,7 +838,7 @@ namespace gargantuan {
 				uint32_t bindingCount = 1;
 
 				for (auto &source : post->GetTextureSources()) {
-					SDL_GPUTexture *texture = ResolveTextureSource(source);
+					SDL_GPUTexture *texture = ResolveTextureSource(camera, source);
 					if (!texture || bindingCount > ShaderScript::MAXIMUM_IMAGES) {
 						continue;
 					}
@@ -802,7 +943,7 @@ namespace gargantuan {
 		samplerStorage.push_back({.texture = frameContext.ShadowMapTexture, .sampler = ShadowSampler});
 
 		for (auto &source : camera->SurfaceShader->GetTextureSources()) {
-			SDL_GPUTexture *texture = ResolveTextureSource(source);
+			SDL_GPUTexture *texture = ResolveTextureSource(camera, source);
 			if (!texture) {
 				continue;
 			}
@@ -856,6 +997,11 @@ namespace gargantuan {
 		frameContext.ShadowSampler = ShadowSampler;
 		frameContext.ColorTarget = target.ColorTexture;
 		frameContext.DepthTexture = target.DepthTexture;
+		EnsureWhiteTexture();
+		ResolvePartTextures(drawContext.WorldRoot);
+		frameContext.PartTextures = &PartTextures;
+		frameContext.WhiteTexture = WhiteTexture;
+		frameContext.SurfaceTextureSampler = ShaderSampler ? ShaderSampler : ShadowSampler;
 		frameContext.Width = target.Width;
 		frameContext.Height = target.Height;
 
@@ -871,6 +1017,17 @@ namespace gargantuan {
 		SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
 		SDL_EndGPURenderPass(OffscreenOpaquePass->Draw(Gpu, frameContext));
 		return true;
+	}
+
+	std::shared_ptr<PostProcessShader> RenderProvider::GetAntialiasShader() {
+		if (!AntialiasShader) {
+			AntialiasShader = std::make_shared<PostProcessShader>();
+			AntialiasShader->Name = "Antialias";
+			AntialiasShader->Source = "antialias";
+			// Below this much local contrast a pixel is passed through untouched
+			AntialiasShader->SetNumber("Threshold", 0.0625f);
+		}
+		return AntialiasShader;
 	}
 
 	std::vector<Camera *> RenderProvider::GetSampledCameras(Camera *camera) {
@@ -910,12 +1067,14 @@ namespace gargantuan {
 			}
 
 			if (visiting.count(camera)) {
-				// Two cameras sampling each other cannot both be current. Drop
-				// this edge and let that one read the previous frame.
+				// Two cameras sampling each other cannot both be current. The
+				// edge that closes the loop reads a previous-frame copy, which
+				// is kept for exactly this reason.
+				NeedsHistory.insert(camera);
 				if (ReportedCycles.insert(camera).second) {
 					SDL_Log(
 						"Camera '%.*s' is part of a loop of cameras sampling each other; "
-						"one of them will show the previous frame",
+						"the edge that closes the loop reads its previous frame",
 						(int)camera->Name.size(),
 						camera->Name.data()
 					);
@@ -925,6 +1084,10 @@ namespace gargantuan {
 
 			visiting.insert(camera);
 			for (Camera *dependency : GetSampledCameras(camera)) {
+				if (visiting.count(dependency)) {
+					// Remember which reader takes the previous-frame path
+					HistoryEdges.insert({camera, dependency});
+				}
 				visit(dependency);
 			}
 			visiting.erase(camera);
@@ -1001,7 +1164,7 @@ namespace gargantuan {
 		std::vector<std::pair<const CameraTarget *, const Camera *>> ready;
 		for (const auto &drawContext : ordered) {
 			auto *camera = drawContext.Camera.get();
-			CameraTarget *target = AcquireCameraTarget(camera, camera && !camera->Shaders.empty());
+			CameraTarget *target = AcquireCameraTarget(camera, camera && (!camera->Shaders.empty() || camera->Antialiasing));
 			if (!target) {
 				continue;
 			}
@@ -1011,6 +1174,7 @@ namespace gargantuan {
 				continue;
 			}
 			RecordShaderChain(commands, camera, *target);
+			RecordHistoryCopy(commands, camera, *target);
 			ready.emplace_back(target, camera);
 		}
 
@@ -1054,7 +1218,7 @@ namespace gargantuan {
 
 	void RenderProvider::DrawOffscreen(DrawContext drawContext) {
 		auto *camera = drawContext.Camera.get();
-		CameraTarget *target = AcquireCameraTarget(camera, camera && !camera->Shaders.empty());
+		CameraTarget *target = AcquireCameraTarget(camera, camera && (!camera->Shaders.empty() || camera->Antialiasing));
 		if (!target) {
 			return;
 		}
@@ -1071,6 +1235,7 @@ namespace gargantuan {
 		}
 
 		RecordShaderChain(commands, camera, *target);
+		RecordHistoryCopy(commands, camera, *target);
 		SDL_SubmitGPUCommandBuffer(commands);
 	}
 
@@ -1080,7 +1245,19 @@ namespace gargantuan {
 		// Anything this camera samples has to be drawn first, or it would read
 		// whatever was in that target from a previous frame. Submissions run in
 		// order, so drawing them now is enough.
-		for (Camera *dependency : GetRenderOrder({camera})) {
+		std::vector<Camera *> roots{camera};
+
+		// A part showing another camera on its surface is a dependency too,
+		// even though nothing in this camera's own shaders mentions it
+		if (drawContext.WorldRoot) {
+			for (const auto &part : drawContext.WorldRoot->Parts) {
+				if (part && part->SurfaceCamera && part->SurfaceCamera.get() != camera) {
+					roots.push_back(part->SurfaceCamera.get());
+				}
+			}
+		}
+
+		for (Camera *dependency : GetRenderOrder(roots)) {
 			if (dependency == camera) {
 				continue;
 			}
@@ -1096,7 +1273,7 @@ namespace gargantuan {
 				.LightDirection = drawContext.LightDirection,
 			});
 		}
-		CameraTarget *target = AcquireCameraTarget(camera, camera && !camera->Shaders.empty());
+		CameraTarget *target = AcquireCameraTarget(camera, camera && (!camera->Shaders.empty() || camera->Antialiasing));
 		if (!target || !threadEngine) {
 			return false;
 		}
@@ -1129,6 +1306,7 @@ namespace gargantuan {
 
 		// The readback has to see what the shaders produced, not the raw render
 		RecordShaderChain(commands, camera, *target);
+		RecordHistoryCopy(commands, camera, *target);
 
 		SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commands);
 		SDL_GPUTextureRegion region{
@@ -1212,7 +1390,7 @@ namespace gargantuan {
 		// With shaders in play the world has to land somewhere the chain can
 		// read, so it renders offscreen first and the result is blitted across.
 		// Without them the swapchain is drawn straight into, exactly as before.
-		bool useShaderChain = camera != nullptr && !camera->Shaders.empty();
+		bool useShaderChain = camera != nullptr && (!camera->Shaders.empty() || camera->Antialiasing);
 
 		SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(Gpu);
 		if (!commands) {
@@ -1262,6 +1440,11 @@ namespace gargantuan {
 		frameContext.ShadowMapTexture = ShadowMapTexture;
 		frameContext.ShadowSampler = ShadowSampler;
 		frameContext.LightDirection = glm::normalize(drawContext.LightDirection);
+		EnsureWhiteTexture();
+		ResolvePartTextures(drawContext.WorldRoot);
+		frameContext.PartTextures = &PartTextures;
+		frameContext.WhiteTexture = WhiteTexture;
+		frameContext.SurfaceTextureSampler = ShaderSampler ? ShaderSampler : ShadowSampler;
 
 		if (DepthTexture) {
 			frameContext.DepthTexture = DepthTexture;

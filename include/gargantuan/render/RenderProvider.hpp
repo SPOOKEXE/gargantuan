@@ -12,12 +12,14 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <set>
 #include <unordered_set>
 #include <vector>
 
 namespace gargantuan {
 	class Camera;
 	class ComputeShader;
+	class BasePart;
 	class EditableImage;
 	class PostProcessShader;
 	class SurfaceShader;
@@ -39,6 +41,10 @@ namespace gargantuan {
 		struct CameraTarget {
 			SDL_GPUTexture *ColorTexture = nullptr;
 			SDL_GPUTexture *ScratchTexture = nullptr;
+			// Last frame's finished picture. Only allocated for a camera that
+			// something reads across a sampling cycle, where no ordering can
+			// give every reader this frame's copy.
+			SDL_GPUTexture *HistoryTexture = nullptr;
 			SDL_GPUTexture *DepthTexture = nullptr;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
@@ -174,6 +180,15 @@ namespace gargantuan {
 		std::unordered_map<std::string, CompiledShader> ShaderCache;
 		// Cycles are reported once rather than every frame
 		std::unordered_set<Camera *> ReportedCycles;
+		// Cameras read across a cycle, which therefore keep a previous-frame
+		// copy, and the exact reader-to-target edges that use it
+		std::unordered_set<Camera *> NeedsHistory;
+		std::set<std::pair<Camera *, Camera *>> HistoryEdges;
+		// A single white pixel, so a part with no surface camera multiplies by
+		// one instead of needing a second pipeline
+		SDL_GPUTexture *WhiteTexture = nullptr;
+		std::unordered_map<const BasePart *, SDL_GPUTexture *> PartTextures;
+
 		SDL_GPUShader *FullscreenVertexShader = nullptr;
 		SDL_GPUShader *OpaqueVertexShader = nullptr;
 		SDL_GPUSampler *ShaderSampler = nullptr;
@@ -188,6 +203,12 @@ namespace gargantuan {
 		);
 		// Runs the camera's shader chain, leaving the result in ColorTexture
 		void RecordShaderChain(SDL_GPUCommandBuffer *commands, Camera *camera, CameraTarget &target);
+		// Works out which texture each part shows this frame
+		void ResolvePartTextures(const std::shared_ptr<WorldRoot> &worldRoot);
+		void EnsureWhiteTexture();
+		// The one shared instance of the built-in antialias pass
+		std::shared_ptr<PostProcessShader> GetAntialiasShader();
+		std::shared_ptr<PostProcessShader> AntialiasShader;
 
 		// Both prefer the script's runtime-compiled bytecode and fall back to
 		// its named build-time asset
@@ -195,7 +216,11 @@ namespace gargantuan {
 		// is empty or the upload failed
 		SDL_GPUTexture *AcquireImageTexture(EditableImage *image);
 		// An image or another camera's output, whichever the script bound
-		SDL_GPUTexture *ResolveTextureSource(const ShaderScript::TextureSource &source);
+		// `reader` decides whether this edge is the one that closes a cycle and
+		// so has to read last frame's copy
+		SDL_GPUTexture *ResolveTextureSource(Camera *reader, const ShaderScript::TextureSource &source);
+		// Keeps a camera's previous-frame copy up to date, once it is done
+		void RecordHistoryCopy(SDL_GPUCommandBuffer *commands, Camera *camera, const CameraTarget &target);
 		// Builds opaque.vert paired with a surface shader's fragment stage.
 		// Cached per shader and colour format, since the window and an
 		// offscreen target do not share one.

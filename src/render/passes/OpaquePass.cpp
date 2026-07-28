@@ -46,12 +46,16 @@ namespace gargantuan {
 			glm::vec4 Color;
 		};
 
+		struct alignas(16) PartFragmentUniforms {
+			glm::vec4 HasSurfaceTexture;
+		};
+
 		FileShader Shader{
 			.VertexFilepath = GetShaderPath("opaque.vert"),
 			.VertexUniformBufferCount = 2,
 			.FragmentFilepath = GetShaderPath("opaque.frag"),
-			.FragmentUniformBufferCount = 1,
-			.FragmentSamplerCount = 1,
+			.FragmentUniformBufferCount = 2,
+			.FragmentSamplerCount = 2,
 		};
 
 		OpaquePass(SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchainFormat) {
@@ -96,8 +100,6 @@ namespace gargantuan {
 			// A surface shader may sample its own images after the shadow map
 			if (context.SurfacePipeline && context.SurfaceSamplers && context.SurfaceSamplerCount > 0) {
 				SDL_BindGPUFragmentSamplers(pass, 0, context.SurfaceSamplers, context.SurfaceSamplerCount);
-			} else {
-				SDL_BindGPUFragmentSamplers(pass, 0, &shadowBinding, 1);
 			}
 
 			WorldUniforms worldUniforms{
@@ -126,6 +128,32 @@ namespace gargantuan {
 					.Color = glm::vec4((glm::vec3)part->Color, 1.0f - part->Transparency),
 				};
 				SDL_PushGPUVertexUniformData(context.Commands, 1, &uniforms, sizeof(PartUniforms));
+
+				// Only the engine's own pipeline knows about part textures; a
+				// surface shader has taken the fragment stage over instead
+				if (!context.SurfacePipeline) {
+					SDL_GPUTexture *surfaceTexture = context.WhiteTexture;
+					if (context.PartTextures) {
+						auto it = context.PartTextures->find(part.get());
+						if (it != context.PartTextures->end() && it->second) {
+							surfaceTexture = it->second;
+						}
+					}
+
+					PartFragmentUniforms fragmentUniforms{
+						.HasSurfaceTexture =
+							glm::vec4(surfaceTexture != context.WhiteTexture ? 1.0f : 0.0f, 0, 0, 0),
+					};
+					SDL_PushGPUFragmentUniformData(
+						context.Commands, 1, &fragmentUniforms, sizeof(PartFragmentUniforms)
+					);
+
+					SDL_GPUTextureSamplerBinding partBindings[2] = {
+						shadowBinding,
+						{.texture = surfaceTexture, .sampler = context.SurfaceTextureSampler},
+					};
+					SDL_BindGPUFragmentSamplers(pass, 0, partBindings, 2);
+				}
 
 				SDL_GPUBufferBinding vertexBinding{.buffer = mesh->VertexBuffer, .offset = 0};
 				SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);

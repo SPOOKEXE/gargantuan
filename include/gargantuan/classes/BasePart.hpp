@@ -7,10 +7,13 @@
 #include "gargantuan/render/GpuMesh.hpp"
 
 #include <glm/glm.hpp>
+#include <memory>
 #include <optional>
 #include <string>
 
 namespace gargantuan {
+	class Camera;
+
 	class BasePart : public Instance {
 	  public:
 		static const ClassDefinition DEFINITION;
@@ -31,6 +34,9 @@ namespace gargantuan {
 		std::string CollisionGroup = "Default";
 		// Unset means the part inherits its Material's properties
 		std::optional<PhysicalProperties> CustomPhysicalProperties;
+		// Shows another camera's picture on this part's faces, using the mesh's
+		// own UVs. Null leaves the part its flat Color.
+		std::shared_ptr<Camera> SurfaceCamera;
 
 		// Euler angles in degrees, the way Roblox reports part rotation
 		glm::vec3 GetOrientation() const;

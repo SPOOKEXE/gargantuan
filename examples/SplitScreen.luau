@@ -89,6 +89,29 @@ else
 	warn(`rear view failed to compile:\n{inset.CompileError}`)
 end
 
+-- A part in the scene showing the mirror camera on its own faces, which is
+-- different from a shader sampling it: this is geometry with a live picture on
+-- it, lit like anything else
+local monitor = Instance.new("Part")
+monitor.Name = "Monitor"
+monitor.Anchored = true
+monitor.Size = Vector3.new(8, 6, 0.5)
+monitor.Position = Vector3.new(-10, 5, 4)
+monitor.Color = Color3.new(1, 1, 1)
+monitor.SurfaceCamera = mirror
+monitor.Parent = Workspace
+print("monitor part showing the mirror camera")
+
+-- Grab a still of the right-hand pane and write it out
+local still = right:Render()
+still:DrawCircle(Vector2.new(40, 40), 18, Color3.new(1, 0.9, 0), 0.35, Enum.ImageCombineType.BlendSourceOver)
+still:DrawLine(Vector2.new(8, 8), Vector2.new(120, 90), Color3.new(0, 1, 1), 0, 3, Enum.ImageCombineType.BlendSourceOver)
+if still:Save("captures/right_pane.png") then
+	print(`saved captures/right_pane.png at {still.Size.X}x{still.Size.Y}`)
+else
+	warn(`could not save the still: {still.SaveError}`)
+end
+
 -- Keep every camera pointed at the subject
 RunService.PreRender:Connect(function()
 	left.CFrame = CFrame.lookAt(left.CFrame.Position, subject.Position)

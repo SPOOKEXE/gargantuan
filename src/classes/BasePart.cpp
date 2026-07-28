@@ -1,9 +1,12 @@
 #include "gargantuan/classes/BasePart.hpp"
+#include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
 #include "gargantuan/datatypes/Color3.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/datatypes/PhysicalProperties.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
+
+#include <lualib.h>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
@@ -43,6 +46,34 @@ namespace gargantuan {
 						return 0;
 					},
 					G_UD_REFLECT_TYPE(std::optional<PhysicalProperties>),
+				},
+			},
+			{
+				"SurfaceCamera",
+				{
+					[](lua_State *L, Instance *instance) -> int {
+						StackValue<Instance::Pointer>::Push(L, instance->Cast<BasePart>()->SurfaceCamera);
+						return 1;
+					},
+					[](lua_State *L, Instance *instance) -> int {
+						auto part = instance->Cast<BasePart>();
+						if (lua_isnoneornil(L, -1)) {
+							part->SurfaceCamera = nullptr;
+							return 0;
+						}
+
+						auto camera = std::dynamic_pointer_cast<Camera>(
+							StackValue<Instance::Pointer>::From(L, -1)
+						);
+						if (!camera) {
+							luaL_error(L, "SurfaceCamera must be a Camera");
+							return 0;
+						}
+
+						part->SurfaceCamera = camera;
+						return 0;
+					},
+					G_UD_REFLECT_TYPE(Instance::Pointer),
 				},
 			},
 			{
