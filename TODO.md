@@ -60,7 +60,8 @@ eyes. What is missing is the runtime that drives them.
 
 - [ ] AssetService:CreateEditableImage
 - [ ] Save formats besides PNG, ie. JPEG and BMP
-- [ ] DrawText, which needs a font first
+- [ ] DrawText, which needs a font first; examples/SecurityCamera.luau draws its
+      clock as seven-segment rectangles to work around this
 
 ## Shaders
 
