@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gargantuan/scripting/StackGuard.hpp"
+
 #include <lua.h>
 #include <lualib.h>
 #include <optional>
@@ -77,12 +79,21 @@ namespace gargantuan {
 	STRING_STACK_VALUE(std::string_view);
 
 	template <typename... Types> struct StackValue<std::tuple<Types...>> {
-		static inline std::string_view ReflectedTypedef() {
-			// NOTE: tuples are probably not used for typedef generation right?
-			return "any";
+		// A tuple is Luau's multiple-return, so it reflects as "(A, B, C)"
+		static inline std::string ReflectedTypedef() {
+			std::string result = "(";
+
+			bool first = true;
+			((result += (first ? (first = false, "") : ", ") +
+						std::string(StackValue<std::decay_t<Types>>::ReflectedTypedef())),
+			 ...);
+
+			return result + ")";
 		};
 
 		static int Push(lua_State *L, const std::tuple<Types...> &tuple) {
+			// Each element may push more than one slot, so ask for headroom
+			EnsureStackSpace(L, sizeof...(Types) + 1);
 			std::apply(
 				[L](const auto &...args) { (StackValue<std::decay_t<decltype(args)>>::Push(L, args), ...); }, tuple
 			);
@@ -102,12 +113,16 @@ namespace gargantuan {
 	};
 
 	template <typename T> struct StackValue<std::vector<T>> {
-		static inline std::string_view ReflectedTypedef() {
-			return std::string("{ ") + StackValue<T>::ReflectedTypedef() + " }";
+		// NOTE: std::string, not string_view -- the text is built here, so a
+		// view would point at a temporary that dies with the return statement
+		static inline std::string ReflectedTypedef() {
+			return "{ " + std::string(StackValue<T>::ReflectedTypedef()) + " }";
 		};
 
 		static int Push(lua_State *L, const std::vector<T> &value) {
 			auto len = value.size();
+			// The table plus one element at a time
+			EnsureStackSpace(L, 2);
 			lua_createtable(L, len, 0);
 			int tableIdx = lua_gettop(L);
 			for (size_t i = 0; i < len; ++i) {
@@ -119,8 +134,8 @@ namespace gargantuan {
 	};
 
 	template <typename T> struct StackValue<std::optional<T>> {
-		static inline std::string_view ReflectedTypedef() {
-			return StackValue<T>::ReflectedTypedef() + "?";
+		static inline std::string ReflectedTypedef() {
+			return std::string(StackValue<T>::ReflectedTypedef()) + "?";
 		};
 
 		static bool Is(lua_State *L, int idx) {

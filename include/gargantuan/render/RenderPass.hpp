@@ -12,8 +12,9 @@ namespace gargantuan {
 		std::shared_ptr<WorldRoot> WorldRoot;
 		std::shared_ptr<Camera> Camera;
 
-		// Direction TOWARDS the light
-		glm::vec3 LightDirection;
+		// Direction TOWARDS the light. Defaults to a fixed afternoon sun so a
+		// draw without a Lighting service still shades sensibly.
+		glm::vec3 LightDirection = glm::normalize(glm::vec3(0.75f, 1.0f, 0.5f));
 	};
 
 	struct FrameContext : DrawContext {

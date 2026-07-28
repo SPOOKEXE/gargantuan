@@ -5,6 +5,7 @@
 
 #include <lua.h>
 #include <lualib.h>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
@@ -17,33 +18,66 @@ namespace gargantuan {
 	  public:
 		typedef Userdata<Class, StoredAs> This;
 
+		// Builds the Luau type text for one property or method signature.
+		// Null on hand-written entries, which typedef generation reports as
+		// `any` rather than guessing.
+		typedef std::string (*TypeReflector)();
+
 		struct Property {
 			int (*Read)(lua_State *L, Class *instance);
 			int (*Write)(lua_State *L, Class *instance);
+			TypeReflector ReflectType = nullptr;
 		};
+
+		// `(self, a1: number, a2: Vector3): CFrame`, assembled from the member
+		// function's own signature
+		template <typename Returns, typename... Arguments> static std::string BuildSignature() {
+			std::string signature = "(self";
+
+			int index = 0;
+			((signature += ", a" + std::to_string(++index) + ": " +
+						   std::string(StackValue<std::decay_t<Arguments>>::ReflectedTypedef())),
+			 ...);
+
+			signature += "): ";
+			if constexpr (std::is_void_v<Returns>) {
+				signature += "()";
+			} else {
+				signature += std::string(StackValue<std::decay_t<Returns>>::ReflectedTypedef());
+			}
+
+			return signature;
+		}
 
 		struct Method {
 		  public:
 			int (*Call)(lua_State *L, Class *instance);
+			TypeReflector ReflectType = nullptr;
 
 			template <auto MethodPointer, typename TargetClass, typename Returns, typename... Arguments>
 			static Method Wrap(Returns (TargetClass::*)(Arguments...)) {
-				return {[](lua_State *L, Class *instance) -> int {
-					auto *derived = static_cast<TargetClass *>(instance);
-					return WrappedCall<MethodPointer, TargetClass, Arguments...>(
-						L, derived, std::index_sequence_for<Arguments...>{}
-					);
-				}};
+				return {
+					[](lua_State *L, Class *instance) -> int {
+						auto *derived = static_cast<TargetClass *>(instance);
+						return WrappedCall<MethodPointer, TargetClass, Arguments...>(
+							L, derived, std::index_sequence_for<Arguments...>{}
+						);
+					},
+					[]() -> std::string { return This::template BuildSignature<Returns, Arguments...>(); },
+				};
 			}
 
 			template <auto MethodPointer, typename TargetClass, typename Returns, typename... Arguments>
 			static Method Wrap(Returns (TargetClass::*)(Arguments...) const) {
-				return {[](lua_State *L, Class *instance) -> int {
-					auto *derived = static_cast<TargetClass *>(instance);
-					return WrappedCall<MethodPointer, TargetClass, Arguments...>(
-						L, derived, std::index_sequence_for<Arguments...>{}
-					);
-				}};
+				return {
+					[](lua_State *L, Class *instance) -> int {
+						auto *derived = static_cast<TargetClass *>(instance);
+						return WrappedCall<MethodPointer, TargetClass, Arguments...>(
+							L, derived, std::index_sequence_for<Arguments...>{}
+						);
+					},
+					[]() -> std::string { return This::template BuildSignature<Returns, Arguments...>(); },
+				};
 			}
 
 			template <auto MethodPointer> static Method Wrap() {
@@ -62,8 +96,9 @@ namespace gargantuan {
 					auto &&res = std::invoke(
 						MethodPointer, instance, StackValue<std::decay_t<Arguments>>::From(L, Indices + 2)...
 					);
-					StackValue<std::decay_t<Ret>>::Push(L, std::forward<decltype(res)>(res));
-					return 1;
+					// Push returns how many values it left on the stack, which is
+					// more than one for tuple returns
+					return StackValue<std::decay_t<Ret>>::Push(L, std::forward<decltype(res)>(res));
 				}
 			}
 		};
@@ -260,22 +295,27 @@ namespace gargantuan {
 		return 0;                                                                                                      \
 	}
 
+#define G_UD_REFLECT_TYPE(valueType)                                                                                   \
+	[]() -> std::string { return std::string(::gargantuan::StackValue<valueType>::ReflectedTypedef()); }
+
 #define G_UD_READONLY_PROP(classType, propertyName, valueType)                                                         \
 	{                                                                                                                  \
 		#propertyName, {                                                                                               \
 			[](lua_State *L, auto *inst) -> int {                                                                      \
 				return G_UD_READONLY_PROP_IMPL(classType, propertyName, valueType)(L, inst);                           \
 			},                                                                                                         \
-				nullptr                                                                                                \
+				nullptr, G_UD_REFLECT_TYPE(valueType)                                                                  \
 		}                                                                                                              \
 	}
 
 #define G_UD_WRITEONLY_PROP(classType, propertyName, valueType)                                                        \
 	{                                                                                                                  \
 		#propertyName, {                                                                                               \
-			nullptr, [](lua_State *L, auto *inst) -> int {                                                             \
-				return G_UD_WRITEONLY_PROP_IMPL(classType, propertyName, valueType)(L, inst);                          \
-			}                                                                                                          \
+			nullptr,                                                                                                   \
+				[](lua_State *L, auto *inst) -> int {                                                                  \
+					return G_UD_WRITEONLY_PROP_IMPL(classType, propertyName, valueType)(L, inst);                      \
+				},                                                                                                     \
+				G_UD_REFLECT_TYPE(valueType)                                                                           \
 		}                                                                                                              \
 	}
 
@@ -287,7 +327,8 @@ namespace gargantuan {
 			},                                                                                                         \
 				[](lua_State *L, auto *inst) -> int {                                                                  \
 					return G_UD_WRITEONLY_PROP_IMPL(classType, propertyName, valueType)(L, inst);                      \
-				}                                                                                                      \
+				},                                                                                                     \
+				G_UD_REFLECT_TYPE(valueType)                                                                           \
 		}                                                                                                              \
 	}
 

@@ -23,6 +23,7 @@ namespace gargantuan {
 				Property{
 					Method::Wrap<&Camera::GetHorizontalFieldOfView>().Call,
 					Method::Wrap<&Camera::SetHorizontalFieldOfView>().Call,
+					G_UD_REFLECT_TYPE(float),
 				},
 			},
 			{
@@ -30,6 +31,7 @@ namespace gargantuan {
 				Property{
 					Method::Wrap<&Camera::GetDiagonalFieldOfView>().Call,
 					Method::Wrap<&Camera::SetDiagonalFieldOfView>().Call,
+					G_UD_REFLECT_TYPE(float),
 				},
 			},
 		},

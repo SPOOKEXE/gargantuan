@@ -11,10 +11,10 @@ namespace gargantuan {
 	G_UD_IMPL_PRELUDE(Vector2);
 	G_UD_IMPL_PROPS(
 		Vector2,
-		{"X", {Method::Wrap<&Vector2::GetX>().Call, nullptr}},
-		{"Y", {Method::Wrap<&Vector2::GetY>().Call, nullptr}},
-		{"Magnitude", {Method::Wrap<&Vector2::GetMagnitude>().Call, nullptr}},
-		{"Unit", {Method::Wrap<&Vector2::GetUnit>().Call, nullptr}},
+		{"X", {Method::Wrap<&Vector2::GetX>().Call, nullptr, G_UD_REFLECT_TYPE(float)}},
+		{"Y", {Method::Wrap<&Vector2::GetY>().Call, nullptr, G_UD_REFLECT_TYPE(float)}},
+		{"Magnitude", {Method::Wrap<&Vector2::GetMagnitude>().Call, nullptr, G_UD_REFLECT_TYPE(float)}},
+		{"Unit", {Method::Wrap<&Vector2::GetUnit>().Call, nullptr, G_UD_REFLECT_TYPE(Vector2)}},
 	)
 	G_UD_IMPL_METHODS(
 		Vector2,
@@ -33,7 +33,9 @@ namespace gargantuan {
 		{"__add", {Vector2::LAdd}},
 		{"__sub", {Vector2::LSub}},
 		{"__mul", {Vector2::LMul}},
-		{"__div", {Vector2::LDiv}}
+		{"__div", {Vector2::LDiv}},
+		{"__unm", {Vector2::LUnm}},
+		{"__eq", {Vector2::LEq}}
 	)
 
 	Vector2::Vector2(float x, float y) : Value(x, y) {};
@@ -53,7 +55,7 @@ namespace gargantuan {
 	};
 
 	float Vector2::Cross(const Vector2 &other) const {
-		return (GetX() * other.GetY()) - (GetY() * GetX());
+		return (GetX() * other.GetY()) - (GetY() * other.GetX());
 	};
 	Vector2 Vector2::Abs() const {
 		return glm::abs(Value);
@@ -83,8 +85,8 @@ namespace gargantuan {
 	Vector2 Vector2::Min(const Vector2 &other) const {
 		return glm::min(Value, other.Value);
 	};
-	Vector2 Vector2::FuzzyEq(const Vector2 &other, float epsilon) const {
-		return glm::abs(Value.x - this->Value.x) <= epsilon && glm::abs(Value.y - this->Value.y) <= epsilon;
+	bool Vector2::FuzzyEq(const Vector2 &other, float epsilon) const {
+		return glm::abs(Value.x - other.Value.x) <= epsilon && glm::abs(Value.y - other.Value.y) <= epsilon;
 	};
 
 	int Vector2::LTostring(lua_State *L, Vector2 *self) {
@@ -118,6 +120,22 @@ namespace gargantuan {
 			luaL_typeerror(L, 2, "Vector2 or number");
 			return 0;
 		}
+		return 1;
+	}
+
+	int Vector2::LUnm(lua_State *L, Vector2 *self) {
+		StackValue<Vector2>::Push(L, -*self);
+		return 1;
+	}
+
+	int Vector2::LEq(lua_State *L, Vector2 *self) {
+		if (!StackValue<Vector2>::Is(L, 2)) {
+			lua_pushboolean(L, false);
+			return 1;
+		}
+
+		Vector2 other = StackValue<Vector2>::From(L, 2);
+		lua_pushboolean(L, *self == other);
 		return 1;
 	}
 

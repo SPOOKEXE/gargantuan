@@ -94,7 +94,7 @@ namespace gargantuan {
 
 		frameContext.ShadowMapTexture = ShadowMapTexture;
 		frameContext.ShadowSampler = ShadowSampler;
-		frameContext.LightDirection = glm::normalize(glm::vec3(0.75f, 1.0f, 0.5f));
+		frameContext.LightDirection = glm::normalize(drawContext.LightDirection);
 
 		if (DepthTexture) {
 			frameContext.DepthTexture = DepthTexture;

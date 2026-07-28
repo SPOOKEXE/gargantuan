@@ -5,9 +5,12 @@
 #include "gargantuan/classes/InputObject.hpp"
 #include "gargantuan/classes/Part.hpp"
 #include "gargantuan/classes/ServiceProvider.hpp"
+#include "gargantuan/classes/Tween.hpp"
 #include "gargantuan/classes/WorldRoot.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
+#include "gargantuan/services/Lighting.hpp"
 #include "gargantuan/services/RunService.hpp"
+#include "gargantuan/services/TweenService.hpp"
 #include "gargantuan/services/UserInputService.hpp"
 #include "gargantuan/services/Workspace.hpp"
 
@@ -28,9 +31,12 @@ namespace gargantuan::ClassRegistry {
 			USE_INSTANCE_DEFINITION(DataModel),
 			USE_INSTANCE_DEFINITION(InputObject),
 			USE_INSTANCE_DEFINITION(Instance),
+			USE_INSTANCE_DEFINITION(Lighting),
 			USE_INSTANCE_DEFINITION(Part),
 			USE_INSTANCE_DEFINITION(RunService),
 			USE_INSTANCE_DEFINITION(ServiceProvider),
+			USE_INSTANCE_DEFINITION(Tween),
+			USE_INSTANCE_DEFINITION(TweenService),
 			USE_INSTANCE_DEFINITION(UserInputService),
 			USE_INSTANCE_DEFINITION(Workspace),
 			USE_INSTANCE_DEFINITION(WorldRoot),

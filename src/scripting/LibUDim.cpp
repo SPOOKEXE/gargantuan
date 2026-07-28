@@ -6,7 +6,7 @@
 namespace gargantuan {
 	int LibUDim_new(lua_State *L) {
 		float scale = luaL_optnumber(L, 1, 0.0f);
-		int offset = luaL_optnumber(L, 1, 0);
+		int offset = luaL_optinteger(L, 2, 0);
 		StackValue<UDim>::Push(L, {scale, offset});
 		return 1;
 	}

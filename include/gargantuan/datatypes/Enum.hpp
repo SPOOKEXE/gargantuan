@@ -27,6 +27,7 @@ namespace gargantuan {
 			: Name(name), Value(value), EnumType(std::move(enumType)) {};
 
 		static int LTostring(lua_State *L, EnumItem *self);
+		static int LEq(lua_State *L, EnumItem *self);
 	};
 
 	struct Enum : Userdata<Enum, std::shared_ptr<Enum>> {
@@ -63,6 +64,7 @@ namespace gargantuan {
 		std::optional<EnumItem> FromValue(int value);
 		static int LIndex(lua_State *L, Enum *self);
 		static int LTostring(lua_State *L, Enum *self);
+		static int LEq(lua_State *L, Enum *self);
 	};
 
 	G_UD_STACKVALUE(EnumItem);

@@ -20,8 +20,10 @@ namespace gargantuan {
 	G_ENUM(KeyCodeStringFormat, Default, Abbreviated);
 	G_ENUM(SwipeDirection, Right, Left, Up, Down, None);
 
-	typedef std::string_view Content;
-	typedef std::string_view ContentId;
+	// NOTE: owning strings, not views -- these are assignable from Luau, and a
+	// view would be left dangling once the Luau string is collected
+	typedef std::string Content;
+	typedef std::string ContentId;
 
 	class UserInputService : public Instance {
 	  protected:
@@ -44,7 +46,7 @@ namespace gargantuan {
 	  public:
 		static const ClassDefinition DEFINITION;
 
-		Enums::MouseBehavior MouseBehavior;
+		Enums::MouseBehavior MouseBehavior = Enums::MouseBehavior::Default;
 		ContentId MouseIcon = "";
 		Content MouseIconContent = "";
 		bool MouseIconEnabled = false;

@@ -7,9 +7,12 @@
 
 namespace gargantuan {
 	int LibTweenInfo_new(lua_State *L) {
+		// Every argument but the first is optional, matching Roblox's defaults
 		float time = luaL_optnumber(L, 1, 1.0f);
-		Enums::EasingStyle style = CheckStackValue<Enums::EasingStyle>(L, 2);
-		Enums::EasingDirection direction = CheckStackValue<Enums::EasingDirection>(L, 3);
+		Enums::EasingStyle style =
+			lua_isnoneornil(L, 2) ? Enums::EasingStyle::Quad : CheckStackValue<Enums::EasingStyle>(L, 2);
+		Enums::EasingDirection direction =
+			lua_isnoneornil(L, 3) ? Enums::EasingDirection::Out : CheckStackValue<Enums::EasingDirection>(L, 3);
 		int32_t repeatCount = luaL_optinteger(L, 4, 0);
 		bool reverses = luaL_optboolean(L, 5, false);
 		float delayTime = luaL_optnumber(L, 6, 0.0f);

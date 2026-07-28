@@ -10,42 +10,42 @@
 ### By API Completeness
 
 - [x] Camera
-- [ ] Part
+- [x] Part
 - [ ] MeshPart
-- [ ] ServiceProvider
+- [x] ServiceProvider
 
 ## Data Types
 
 ### By Implementation
 
 - [x] CFrame
-- [ ] Color3
+- [x] Color3
 - [x] Instance
 - [ ] InstanceHandle
-- [ ] UDim
-- [ ] UDim2
-- [ ] Random
-- [ ] PhysicalProperties
+- [x] UDim
+- [x] UDim2
+- [x] Random
+- [x] PhysicalProperties
 - [x] Signal
 - [x] SignalConnection
-- [ ] TweenInfo
+- [x] TweenInfo
 - [x] Vector2
 - [x] Vector3
 
 ### By API Completeness
 
-- [ ] CFrame
-- [ ] Color3
-- [ ] Color4
+- [x] CFrame
+- [x] Color3
+- [x] Color4
 - [ ] Instance
 - [ ] InstanceHandle
-- [ ] UDim
-- [ ] UDim2
-- [ ] Random
-- [ ] PhysicalProperties
+- [x] UDim
+- [x] UDim2
+- [x] Random
+- [x] PhysicalProperties
 - [x] Signal
 - [x] SignalConnection
-- [ ] TweenInfo
+- [x] TweenInfo
 - [x] Vector2
 - [x] Vector3
 
@@ -60,15 +60,15 @@
 
 ## Scripting
 
-- [ ] Luau typedef file generation
+- [x] Luau typedef file generation
 - [ ] Access levels/Script securities/Script capabilities/proper sandboxing
-- [ ] StackGuard to prevent stack errors
-- [ ] LibSignal/Signal global for user-created Signals
+- [x] StackGuard to prevent stack errors
+- [x] LibSignal/Signal global for user-created Signals
 
 ## Services
 
-- [ ] Lighting
-- [ ] RunService
-- [ ] UserInputService
-- [ ] TweenService
-- [ ] Workspace
+- [x] Lighting
+- [x] RunService
+- [x] UserInputService
+- [x] TweenService
+- [x] Workspace

@@ -27,10 +27,18 @@ namespace gargantuan {
 		return 1;
 	}
 
+	int LibColor3_fromHex(lua_State *L) {
+		size_t length;
+		const char *hex = luaL_checklstring(L, 1, &length);
+		StackValue<Color3>::Push(L, Color3::fromHex({hex, length}));
+		return 1;
+	}
+
 	luaL_Reg LibColor3[]{
 		{"new", LibColor3_new},
 		{"fromRGB", LibColor3_fromRGB},
 		{"fromHSV", LibColor3_fromHSV},
+		{"fromHex", LibColor3_fromHex},
 		{nullptr, nullptr},
 	};
 

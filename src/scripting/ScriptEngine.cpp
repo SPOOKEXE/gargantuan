@@ -1,10 +1,15 @@
 #include "gargantuan/scripting/ScriptEngine.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
 #include "gargantuan/datatypes/Color3.hpp"
+#include "gargantuan/datatypes/Color4.hpp"
 #include "gargantuan/datatypes/Enum.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
+#include "gargantuan/datatypes/PhysicalProperties.hpp"
+#include "gargantuan/datatypes/Random.hpp"
 #include "gargantuan/datatypes/Signal.hpp"
+#include "gargantuan/datatypes/TweenInfo.hpp"
 #include "gargantuan/datatypes/UDim.hpp"
+#include "gargantuan/datatypes/UDim2.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
 #include "gargantuan/scripting/ThreadEngine.hpp"
 
@@ -72,9 +77,13 @@ namespace gargantuan {
 
 		{"CFrame", OpenLibCFrame},
 		{"Color3", OpenLibColor3},
+		{"Color4", OpenLibColor4},
 		{"Enum", OpenLibEnum},
 		{"Instance", OpenLibInstance},
+		{"PhysicalProperties", OpenLibPhysicalProperties},
+		{"Random", OpenLibRandom},
 		{"UDim", OpenLibUDim},
+		{"UDim2", OpenLibUDim2},
 		{"Signal", OpenLibSignal},
 		{"Vector2", OpenLibVector2},
 		{"Vector3", OpenLibVector3},
@@ -101,11 +110,16 @@ namespace gargantuan {
 		BaseSignal::CreateUserdataMetatable(L);
 		CFrame::CreateUserdataMetatable(L);
 		Color3::CreateUserdataMetatable(L);
+		Color4::CreateUserdataMetatable(L);
 		Enum::CreateUserdataMetatable(L);
 		EnumItem::CreateUserdataMetatable(L);
 		Instance::CreateUserdataMetatable(L);
+		PhysicalProperties::CreateUserdataMetatable(L);
+		Random::CreateUserdataMetatable(L);
 		SignalConnection::CreateUserdataMetatable(L);
+		TweenInfo::CreateUserdataMetatable(L);
 		UDim::CreateUserdataMetatable(L);
+		UDim2::CreateUserdataMetatable(L);
 		Vector2::CreateUserdataMetatable(L);
 
 		const luaL_Reg *lib = SCRIPT_LIBS;

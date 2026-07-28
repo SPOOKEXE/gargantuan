@@ -19,77 +19,117 @@ namespace gargantuan {
 		G_UD_READONLY_PROP(CFrame, Position, glm::vec3),
 		{
 			"Rotation",
-			Property{.Read = [](lua_State *L, CFrame *self) -> int {
-				StackValue<CFrame>::Push(L, CFrame({0, 0, 0}, self->Rotation));
-				return 1;
-			}},
+			Property{
+				.Read =
+					[](lua_State *L, CFrame *self) -> int {
+					StackValue<CFrame>::Push(L, CFrame({0, 0, 0}, self->Rotation));
+					return 1;
+				},
+				.ReflectType = G_UD_REFLECT_TYPE(CFrame),
+			},
 		},
 		{
 			"X",
-			Property{.Read = [](lua_State *L, CFrame *self) -> int {
-				lua_pushnumber(L, self->Position.x);
-				return 1;
-			}},
+			Property{
+				.Read =
+					[](lua_State *L, CFrame *self) -> int {
+					lua_pushnumber(L, self->Position.x);
+					return 1;
+				},
+				.ReflectType = G_UD_REFLECT_TYPE(float),
+			},
 		},
 		{
 			"Y",
 			Property{
-				.Read = [](lua_State *L, CFrame *self) -> int {
+				.Read =
+					[](lua_State *L, CFrame *self) -> int {
 					lua_pushnumber(L, self->Position.y);
 					return 1;
 				},
+				.ReflectType = G_UD_REFLECT_TYPE(float),
 			},
 		},
 		{
 			"Z",
 			Property{
-				.Read = [](lua_State *L, CFrame *self) -> int {
+				.Read =
+					[](lua_State *L, CFrame *self) -> int {
 					lua_pushnumber(L, self->Position.z);
 					return 1;
 				},
+				.ReflectType = G_UD_REFLECT_TYPE(float),
+			},
+		},
+		// NOTE: these push glm::vec3, which reaches Luau as a Vector3. Pushing
+		// them through StackValue<CFrame> would silently build a CFrame from
+		// the vector instead, because CFrame has an implicit vec3 constructor.
+		{
+			"RightVector",
+			Property{
+				.Read =
+					[](lua_State *L, CFrame *self) -> int {
+					StackValue<glm::vec3>::Push(L, self->GetRightVector());
+					return 1;
+				},
+				.ReflectType = G_UD_REFLECT_TYPE(glm::vec3),
 			},
 		},
 		{
-			"RightVector",
-			Property{.Read = [](lua_State *L, CFrame *self) -> int {
-				StackValue<CFrame>::Push(L, self->GetRightVector());
-				return 1;
-			}},
-		},
-		{
 			"UpVector",
-			Property{.Read = [](lua_State *L, CFrame *self) -> int {
-				StackValue<CFrame>::Push(L, self->GetUpVector());
-				return 1;
-			}},
+			Property{
+				.Read =
+					[](lua_State *L, CFrame *self) -> int {
+					StackValue<glm::vec3>::Push(L, self->GetUpVector());
+					return 1;
+				},
+				.ReflectType = G_UD_REFLECT_TYPE(glm::vec3),
+			},
 		},
 		{
 			"LookVector",
-			Property{.Read = [](lua_State *L, CFrame *self) -> int {
-				StackValue<CFrame>::Push(L, self->GetLookVector());
-				return 1;
-			}},
+			Property{
+				.Read =
+					[](lua_State *L, CFrame *self) -> int {
+					StackValue<glm::vec3>::Push(L, self->GetLookVector());
+					return 1;
+				},
+				.ReflectType = G_UD_REFLECT_TYPE(glm::vec3),
+			},
 		},
 		{
 			"XVector",
-			Property{.Read = [](lua_State *L, CFrame *self) -> int {
-				StackValue<CFrame>::Push(L, self->GetRightVector());
-				return 1;
-			}},
+			Property{
+				.Read =
+					[](lua_State *L, CFrame *self) -> int {
+					StackValue<glm::vec3>::Push(L, self->GetRightVector());
+					return 1;
+				},
+				.ReflectType = G_UD_REFLECT_TYPE(glm::vec3),
+			},
 		},
 		{
 			"YVector",
-			Property{.Read = [](lua_State *L, CFrame *self) -> int {
-				StackValue<CFrame>::Push(L, self->GetUpVector());
-				return 1;
-			}},
+			Property{
+				.Read =
+					[](lua_State *L, CFrame *self) -> int {
+					StackValue<glm::vec3>::Push(L, self->GetUpVector());
+					return 1;
+				},
+				.ReflectType = G_UD_REFLECT_TYPE(glm::vec3),
+			},
 		},
 		{
+			// ZVector points backwards, opposite LookVector
 			"ZVector",
-			Property{.Read = [](lua_State *L, CFrame *self) -> int {
-				StackValue<CFrame>::Push(L, self->GetLookVector());
-				return 1;
-			}},
+			Property{
+				.Read =
+					[](lua_State *L, CFrame *self) -> int {
+					StackValue<glm::vec3>::Push(L, -self->GetLookVector());
+					return 1;
+				},
+				.ReflectType = G_UD_REFLECT_TYPE(glm::vec3),
+			},
 		},
 	);
 	G_UD_IMPL_METHODS(
@@ -99,22 +139,22 @@ namespace gargantuan {
 		G_UD_METHOD(CFrame, Orthonormalize),
 		G_UD_METHOD(CFrame, ToWorldSpace),
 		G_UD_METHOD(CFrame, ToObjectSpace),
-		// G_UD_METHOD(CFrame, PointToWorldSpace),
-		// G_UD_METHOD(CFrame, PointToObjectSpace),
-		// G_UD_METHOD(CFrame, VectorToWorldSpace),
-		// G_UD_METHOD(CFrame, VectorToObjectSpace),
-		// G_UD_METHOD(CFrame, GetComponents),
-		// G_UD_METHOD(CFrame, ToEulerAngles),
-		// G_UD_METHOD(CFrame, ToEulerAnglesXYZ),
-		// G_UD_METHOD(CFrame, ToEulerAnglesYXZ),
-		// G_UD_METHOD(CFrame, ToOrientation),
-		// G_UD_METHOD(CFrame, ToAxisAngle),
-		// G_UD_METHOD(CFrame, FuzzyEq),
-		// G_UD_METHOD(CFrame, AngleBetween),
-		// {"__add", Method{CFrame::LAdd}},
-		// {"__sub", Method{CFrame::LSubtract}},
+		G_UD_METHOD(CFrame, PointToWorldSpace),
+		G_UD_METHOD(CFrame, PointToObjectSpace),
+		G_UD_METHOD(CFrame, VectorToWorldSpace),
+		G_UD_METHOD(CFrame, VectorToObjectSpace),
+		G_UD_METHOD(CFrame, GetComponents),
+		G_UD_METHOD(CFrame, ToEulerAnglesXYZ),
+		G_UD_METHOD(CFrame, ToEulerAnglesYXZ),
+		G_UD_METHOD(CFrame, ToOrientation),
+		G_UD_METHOD(CFrame, ToAxisAngle),
+		G_UD_METHOD(CFrame, FuzzyEq),
+		G_UD_METHOD(CFrame, AngleBetween),
+		{"__add", Method{CFrame::LAdd}},
+		{"__sub", Method{CFrame::LSubtract}},
 		{"__mul", Method{CFrame::LMultiply}},
 		{"__tostring", Method{CFrame::LTostring}},
+		{"__eq", Method{CFrame::LEq}},
 	);
 
 	CFrame::CFrame() : Position(0.0f, 0.0f, 0.0f), Rotation(CFrame::DEFAULT_ROTATION) {};
@@ -137,21 +177,40 @@ namespace gargantuan {
 		float r21,
 		float r22
 	)
-		: Position(x, y, z), Rotation(r00, r01, r02, r10, r11, r12, r20, r21, r22) {};
+		// The components arrive in Roblox's row-major order, while Rotation
+		// stores the right/up/back basis vectors as glm columns
+		: Position(x, y, z), Rotation(r00, r10, r20, r01, r11, r21, r02, r12, r22) {};
 
 	glm::vec3 CFrame::GetRightVector() const {
-		return {Rotation[0][0], Rotation[1][0], Rotation[2][0]};
+		return Rotation[0];
 	}
 	glm::vec3 CFrame::GetUpVector() const {
-		return {Rotation[0][1], Rotation[1][1], Rotation[2][1]};
+		return Rotation[1];
 	}
 	glm::vec3 CFrame::GetLookVector() const {
-		return {-Rotation[0][2], -Rotation[1][2], -Rotation[2][2]};
+		// Rotation's third column points backwards, away from what the frame faces
+		return -Rotation[2];
 	}
 
 	CFrame CFrame::Angles(float x, float y, float z) {
 		glm::mat4 rot4 = glm::eulerAngleXYZ(x, y, z);
 		return CFrame(glm::vec3(0, 0, 0), glm::mat3(rot4));
+	}
+
+	// glm names the YXZ parameters yaw, pitch, roll, so they go in as (y, x, z)
+	CFrame CFrame::fromEulerAnglesYXZ(float x, float y, float z) {
+		glm::mat4 rotation = glm::eulerAngleYXZ(y, x, z);
+		return CFrame(glm::vec3(0, 0, 0), glm::mat3(rotation));
+	}
+
+	CFrame CFrame::fromAxisAngle(glm::vec3 axis, float angle) {
+		glm::vec3 unit = SafeUnit(axis, glm::vec3(1, 0, 0));
+		glm::quat rotation = glm::angleAxis(angle, unit);
+		return CFrame(glm::vec3(0, 0, 0), glm::mat3_cast(rotation));
+	}
+
+	CFrame CFrame::lookAt(glm::vec3 at, glm::vec3 target, glm::vec3 up) {
+		return CFrame(at, BuildLookRotation(at, target, up));
 	}
 
 	CFrame CFrame::fromMatrix(glm::vec3 position, glm::vec3 x, glm::vec3 y, glm::vec3 z) {
@@ -179,11 +238,13 @@ namespace gargantuan {
 		auto m21 = 2 * (yz + wx);
 		auto m22 = 1 - 2 * (xx + yy);
 
+		// fromMatrix's third axis is the back vector (Roblox's vZ), not the
+		// look vector, so the column is taken as-is rather than negated
 		glm::vec3 right{m00, m10, m20};
 		glm::vec3 up{m01, m11, m21};
-		glm::vec3 look{-m02, -m12, -m22};
+		glm::vec3 back{m02, m12, m22};
 
-		return fromMatrix(position, right, up, look);
+		return fromMatrix(position, right, up, back);
 	}
 
 	CFrame CFrame::Inverse() const {
@@ -249,7 +310,7 @@ namespace gargantuan {
 		y = glm::normalize(y - x * glm::dot(x, y));
 		glm::vec3 z = glm::cross(x, y);
 
-		return CFrame(Position.x, Position.y, Position.z, x.x, y.x, z.x, x.y, y.y, z.y, x.z, y.z, z.z);
+		return CFrame(Position, glm::mat3(x, y, z));
 	}
 
 	CFrame CFrame::ToWorldSpace(const CFrame &cf) const {
@@ -260,41 +321,183 @@ namespace gargantuan {
 		return this->Inverse() * cf;
 	}
 
+	glm::vec3 CFrame::PointToWorldSpace(const glm::vec3 &point) const {
+		return Position + (Rotation * point);
+	}
+
+	glm::vec3 CFrame::PointToObjectSpace(const glm::vec3 &point) const {
+		return glm::transpose(Rotation) * (point - Position);
+	}
+
+	// Vectors ignore the translation; only the rotation applies
+	glm::vec3 CFrame::VectorToWorldSpace(const glm::vec3 &vector) const {
+		return Rotation * vector;
+	}
+
+	glm::vec3 CFrame::VectorToObjectSpace(const glm::vec3 &vector) const {
+		return glm::transpose(Rotation) * vector;
+	}
+
+	CFrame::Components CFrame::GetComponents() const {
+		return {
+			Position.x,
+			Position.y,
+			Position.z,
+			Rotation[0][0],
+			Rotation[1][0],
+			Rotation[2][0],
+			Rotation[0][1],
+			Rotation[1][1],
+			Rotation[2][1],
+			Rotation[0][2],
+			Rotation[1][2],
+			Rotation[2][2],
+		};
+	}
+
+	// Decomposes R = Rx * Ry * Rz, the order CFrame.Angles composes them in
+	std::tuple<double, double, double> CFrame::ToEulerAnglesXYZ() const {
+		auto R = [this](int row, int column) { return (double)Rotation[column][row]; };
+
+		double sy = glm::clamp(R(0, 2), -1.0, 1.0);
+		double ry = glm::asin(sy);
+
+		// Near a pole the X and Z rotations collapse into one; pin Z and solve X
+		if (glm::abs(sy) > 1.0 - CF_EPSILON) {
+			return {glm::atan(-R(1, 0), R(1, 1)), ry, 0.0};
+		}
+
+		return {glm::atan(-R(1, 2), R(2, 2)), ry, glm::atan(-R(0, 1), R(0, 0))};
+	}
+
+	// Decomposes R = Ry * Rx * Rz, which is what Roblox reports as Orientation
+	std::tuple<double, double, double> CFrame::ToEulerAnglesYXZ() const {
+		auto R = [this](int row, int column) { return (double)Rotation[column][row]; };
+
+		double sx = glm::clamp(-R(1, 2), -1.0, 1.0);
+		double rx = glm::asin(sx);
+
+		if (glm::abs(sx) > 1.0 - CF_EPSILON) {
+			return {rx, glm::atan(-R(2, 0), R(0, 0)), 0.0};
+		}
+
+		return {rx, glm::atan(R(0, 2), R(2, 2)), glm::atan(R(1, 0), R(1, 1))};
+	}
+
+	std::tuple<double, double, double> CFrame::ToOrientation() const {
+		return ToEulerAnglesYXZ();
+	}
+
+	std::tuple<glm::vec3, double> CFrame::ToAxisAngle() const {
+		glm::quat quaternion = ToQuaternion();
+
+		// A negative real part describes the same rotation the long way round
+		if (quaternion.w < 0.0f) {
+			quaternion = glm::quat(-quaternion.w, -quaternion.x, -quaternion.y, -quaternion.z);
+		}
+
+		double angle = 2.0 * glm::acos(glm::clamp((double)quaternion.w, -1.0, 1.0));
+		double sinHalf = glm::sqrt(glm::max(0.0, 1.0 - (double)quaternion.w * quaternion.w));
+
+		// No rotation leaves the axis undefined, so report Roblox's default
+		if (sinHalf < CF_EPSILON) {
+			return {glm::vec3(1, 0, 0), 0.0};
+		}
+
+		return {
+			glm::vec3(quaternion.x / sinHalf, quaternion.y / sinHalf, quaternion.z / sinHalf),
+			angle,
+		};
+	}
+
+	bool CFrame::FuzzyEq(const CFrame &other, double epsilon) const {
+		for (int component = 0; component < 3; component++) {
+			if (glm::abs(Position[component] - other.Position[component]) > epsilon) {
+				return false;
+			}
+		}
+
+		for (int column = 0; column < 3; column++) {
+			for (int row = 0; row < 3; row++) {
+				if (glm::abs(Rotation[column][row] - other.Rotation[column][row]) > epsilon) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	double CFrame::AngleBetween(const CFrame &other) const {
+		auto [axis, angle] = ToObjectSpace(other).ToAxisAngle();
+		return angle;
+	}
+
 	glm::quat CFrame::ToQuaternion() const {
 		auto cf = Orthonormalize();
 		auto r = cf.Rotation;
 
-		auto trace = r[0][0] + r[1][1] + r[2][2];
+		// R(row, column); Rotation indexes column-first, so the two are swapped
+		auto R = [&r](int row, int column) { return r[column][row]; };
+
+		auto trace = R(0, 0) + R(1, 1) + R(2, 2);
 
 		float s, w, x, y, z;
 
 		if (trace > 0) {
 			s = glm::sqrt(trace + 1.0) * 2;
 			w = 0.25 * s;
-			x = (r[2][1] - r[1][2]) / s;
-			y = (r[0][2] - r[2][0]) / s;
-			z = (r[1][0] - r[0][1]) / s;
-		} else if (r[0][0] > r[1][1] && r[0][0] > r[2][2]) {
-			s = glm::sqrt(1.0 + r[0][0] - r[1][1] - r[2][2]) * 2;
-			w = (r[2][1] - r[1][2]) / s;
+			x = (R(2, 1) - R(1, 2)) / s;
+			y = (R(0, 2) - R(2, 0)) / s;
+			z = (R(1, 0) - R(0, 1)) / s;
+		} else if (R(0, 0) > R(1, 1) && R(0, 0) > R(2, 2)) {
+			s = glm::sqrt(1.0 + R(0, 0) - R(1, 1) - R(2, 2)) * 2;
+			w = (R(2, 1) - R(1, 2)) / s;
 			x = 0.25 * s;
-			y = (r[0][1] + r[1][0]) / s;
-			z = (r[0][2] + r[2][0]) / s;
-		} else if (r[1][1] > r[2][2]) {
-			s = glm::sqrt(1.0 + r[1][1] - r[0][0] - r[2][2]) * 2;
-			w = (r[0][2] - r[2][0]) / s;
-			x = (r[0][1] + r[1][0]) / s;
+			y = (R(0, 1) + R(1, 0)) / s;
+			z = (R(0, 2) + R(2, 0)) / s;
+		} else if (R(1, 1) > R(2, 2)) {
+			s = glm::sqrt(1.0 + R(1, 1) - R(0, 0) - R(2, 2)) * 2;
+			w = (R(0, 2) - R(2, 0)) / s;
+			x = (R(0, 1) + R(1, 0)) / s;
 			y = 0.25 * s;
-			z = (r[1][2] + r[2][1]) / s;
+			z = (R(1, 2) + R(2, 1)) / s;
 		} else {
-			s = glm::sqrt(1.0 + r[2][2] - r[0][0] - r[1][1]) * 2;
-			w = (r[1][0] - r[0][1]) / s;
-			x = (r[0][2] + r[2][0]) / s;
-			y = (r[1][2] + r[2][1]) / s;
+			s = glm::sqrt(1.0 + R(2, 2) - R(0, 0) - R(1, 1)) * 2;
+			w = (R(1, 0) - R(0, 1)) / s;
+			x = (R(0, 2) + R(2, 0)) / s;
+			y = (R(1, 2) + R(2, 1)) / s;
 			z = 0.25 * s;
 		};
 
-		return glm::quat(x, y, z, w);
+		// glm stores quaternions as x,y,z,w but its four-argument constructor
+		// takes them as w,x,y,z
+		return glm::quat(w, x, y, z);
+	}
+
+	// CFrame + Vector3 and CFrame - Vector3 shift the position, leaving the
+	// rotation untouched
+	int CFrame::LAdd(lua_State *L, CFrame *self) {
+		auto offset = CheckStackValue<glm::vec3>(L, 2);
+		StackValue<CFrame>::Push(L, CFrame(self->Position + offset, self->Rotation));
+		return 1;
+	}
+
+	int CFrame::LSubtract(lua_State *L, CFrame *self) {
+		auto offset = CheckStackValue<glm::vec3>(L, 2);
+		StackValue<CFrame>::Push(L, CFrame(self->Position - offset, self->Rotation));
+		return 1;
+	}
+
+	int CFrame::LEq(lua_State *L, CFrame *self) {
+		if (!StackValue<CFrame>::Is(L, 2)) {
+			lua_pushboolean(L, false);
+			return 1;
+		}
+
+		CFrame other = StackValue<CFrame>::From(L, 2);
+		lua_pushboolean(L, self->Position == other.Position && self->Rotation == other.Rotation);
+		return 1;
 	}
 
 	int CFrame::LMultiply(lua_State *L, CFrame *self) {
@@ -319,14 +522,15 @@ namespace gargantuan {
 			self->Position.x,
 			self->Position.y,
 			self->Position.z,
+			// printed row by row, the order CFrame.new's twelve-argument form takes
 			self->Rotation[0][0],
-			self->Rotation[0][1],
-			self->Rotation[0][2],
 			self->Rotation[1][0],
-			self->Rotation[1][1],
-			self->Rotation[1][2],
 			self->Rotation[2][0],
+			self->Rotation[0][1],
+			self->Rotation[1][1],
 			self->Rotation[2][1],
+			self->Rotation[0][2],
+			self->Rotation[1][2],
 			self->Rotation[2][2]
 		);
 		return 1;

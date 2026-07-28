@@ -3,6 +3,7 @@
 #include "gargantuan/classes/DataModel.hpp"
 #include "gargantuan/render/RenderProvider.hpp"
 #include "gargantuan/scripting/ScriptEngine.hpp"
+#include "gargantuan/services/Lighting.hpp"
 #include "gargantuan/services/RunService.hpp"
 #include "gargantuan/services/TweenService.hpp"
 #include "gargantuan/services/UserInputService.hpp"
@@ -23,7 +24,9 @@ namespace gargantuan {
 		glm::vec2 ViewportSize = glm::vec2(720, 540);
 		std::shared_ptr<DataModel> DataModel = nullptr;
 		std::shared_ptr<Workspace> Workspace = nullptr;
+		std::shared_ptr<Lighting> Lighting = nullptr;
 		std::shared_ptr<RunService> RunService = nullptr;
+		std::shared_ptr<TweenService> TweenService = nullptr;
 		std::shared_ptr<UserInputService> UserInputService = nullptr;
 
 		SDL_Window *Window;

@@ -22,10 +22,10 @@ namespace gargantuan {
 		.Constructor = ClassDefinition::WrapConstructor<UserInputService>(),
 		.Properties =
 			{
-				G_UD_READONLY_PROP(UserInputService, MouseBehavior, Enums::MouseBehavior),
-				G_UD_READONLY_PROP(UserInputService, MouseIcon, ContentId),
-				G_UD_READONLY_PROP(UserInputService, MouseIconContent, Content),
-				G_UD_READONLY_PROP(UserInputService, MouseIconEnabled, bool),
+				G_UD_READWRITE_PROP(UserInputService, MouseBehavior, Enums::MouseBehavior),
+				G_UD_READWRITE_PROP(UserInputService, MouseIcon, ContentId),
+				G_UD_READWRITE_PROP(UserInputService, MouseIconContent, Content),
+				G_UD_READWRITE_PROP(UserInputService, MouseIconEnabled, bool),
 
 				G_UD_READONLY_PROP(UserInputService, KeyboardEnabled, bool),
 				G_UD_READONLY_PROP(UserInputService, OnScreenKeyboardVisible, bool),
@@ -173,20 +173,20 @@ namespace gargantuan {
 				if (!ActiveKeys.contains(input->KeyCode)) ActiveKeys.emplace(input->KeyCode, input);
 				if (input->KeyCode == Enums::KeyCode::Space) JumpRequest->Fire({});
 			} else if (IsMouseButtonType(inputType)) {
-				if (!ActiveMouseButtons.contains(input->UserInputType)) ActiveKeys.emplace(input->KeyCode, input);
+				if (!ActiveMouseButtons.contains(inputType)) ActiveMouseButtons.emplace(inputType, input);
 			}
 			InputBegan->Fire({input, false});
 		} else if (inputState == Enums::UserInputState::Change) {
 			if (inputType == Enums::UserInputType::MouseMovement) {
 				MouseDelta = Vector2(input->Delta);
-				MouseLocation = Vector2(input->Delta);
+				MouseLocation = Vector2(input->Position);
 			}
 			InputChanged->Fire({input, false});
 		} else if (inputState == Enums::UserInputState::End) {
 			if (inputType == Enums::UserInputType::Keyboard) {
-				if (ActiveKeys.contains(input->KeyCode)) ActiveKeys.erase(input->KeyCode);
+				ActiveKeys.erase(input->KeyCode);
 			} else if (IsMouseButtonType(inputType)) {
-				if (ActiveMouseButtons.contains(input->UserInputType)) ActiveKeys.erase(input->KeyCode);
+				ActiveMouseButtons.erase(inputType);
 			}
 			InputEnded->Fire({input, false});
 		}

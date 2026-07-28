@@ -51,11 +51,17 @@ namespace gargantuan {
 		auto workspace = this->DataModel->GetService("Workspace");
 		this->Workspace = std::dynamic_pointer_cast<gargantuan::Workspace>(workspace);
 
+		auto lighting = this->DataModel->GetService("Lighting");
+		this->Lighting = std::dynamic_pointer_cast<gargantuan::Lighting>(lighting);
+
 		auto runService = this->DataModel->GetService("RunService");
 		this->RunService = std::dynamic_pointer_cast<gargantuan::RunService>(runService);
 
 		auto uis = this->DataModel->GetService("UserInputService");
 		this->UserInputService = std::dynamic_pointer_cast<gargantuan::UserInputService>(uis);
+
+		auto tweenService = this->DataModel->GetService("TweenService");
+		this->TweenService = std::dynamic_pointer_cast<gargantuan::TweenService>(tweenService);
 
 		StackValue<Instance::Pointer>::Push(ScriptEngine->L, this->DataModel);
 		lua_pushvalue(ScriptEngine->L, -1);
@@ -108,15 +114,20 @@ namespace gargantuan {
 			Workspace->CurrentCamera->OnEvent(Window, event);
 		}
 
-		RunService->PreSimulation->Fire(deltaTime);
+		RunService->FireSimulation(deltaTime);
 		Workspace->CurrentCamera->Step(deltaTime);
-		RunService->PostSimulation->Fire(deltaTime);
+		Workspace->DistributedGameTime += deltaTime;
+		RunService->FirePostSimulation(deltaTime);
 
-		RunService->PreRender->Fire(deltaTime);
+		RunService->FireRender(deltaTime);
+		// Tweens settle right before the frame is drawn, so the values written
+		// this step are the ones rendered
+		TweenService->Step(deltaTime);
 		MeshProvider::UploadToGpu(Gpu);
 		RenderProvider->Draw({
 			.WorldRoot = std::static_pointer_cast<WorldRoot>(Workspace),
 			.Camera = Workspace->CurrentCamera,
+			.LightDirection = Lighting->GetSunDirection(),
 		});
 
 		ScriptEngine->Step();

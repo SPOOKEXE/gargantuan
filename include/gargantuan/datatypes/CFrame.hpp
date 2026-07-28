@@ -45,8 +45,15 @@ namespace gargantuan {
 			float r22
 		);
 
+		// Composes the rotations as Rx * Ry * Rz
 		static CFrame Angles(float x, float y, float z);
-		static CFrame fromMatrix(glm::vec3 position, glm::vec3 right, glm::vec3 up, glm::vec3 look);
+		// Composes them as Ry * Rx * Rz, the order Orientation is reported in
+		static CFrame fromEulerAnglesYXZ(float x, float y, float z);
+		static CFrame fromAxisAngle(glm::vec3 axis, float angle);
+		static CFrame lookAt(glm::vec3 at, glm::vec3 target, glm::vec3 up = {0, 1, 0});
+		// NOTE: the third axis is the back vector (Roblox names it vZ), which
+		// points opposite the look vector
+		static CFrame fromMatrix(glm::vec3 position, glm::vec3 right, glm::vec3 up, glm::vec3 back);
 		static CFrame fromQuaternion(float x, float y, float z, float w, glm::vec3 position);
 
 		glm::vec3 GetRightVector() const;
@@ -69,7 +76,7 @@ namespace gargantuan {
 		std::tuple<double, double, double> ToEulerAnglesYXZ() const;
 		std::tuple<double, double, double> ToOrientation() const;
 		std::tuple<glm::vec3, double> ToAxisAngle() const;
-		CFrame FuzzyEq(const CFrame &other, double epsilon = 1e-5) const;
+		bool FuzzyEq(const CFrame &other, double epsilon = 1e-5) const;
 		double AngleBetween(const CFrame &other) const;
 		glm::quat ToQuaternion() const;
 
@@ -77,6 +84,7 @@ namespace gargantuan {
 		static int LSubtract(lua_State *L, CFrame *self);
 		static int LMultiply(lua_State *L, CFrame *self);
 		static int LTostring(lua_State *L, CFrame *self);
+		static int LEq(lua_State *L, CFrame *self);
 
 		static glm::vec3 SafeUnit(glm::vec3 vec, glm::vec3 fallback);
 		static glm::mat3 BuildLookRotation(glm::vec3 position, glm::vec3 target, glm::vec3 up = {0, 1, 0});

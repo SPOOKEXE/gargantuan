@@ -16,13 +16,33 @@
 namespace gargantuan {
 	G_UD_IMPL_PRELUDE(Instance);
 	G_UD_IMPL_PROPS(Instance);
-	G_UD_IMPL_METHODS(Instance);
+	// Instances reach Luau as a fresh userdata every push, so identity
+	// comparison would never hold; compare the instances they point at
+	G_UD_IMPL_METHODS(Instance, {"__eq", {&Instance::LEq}});
+
+	int Instance::LEq(lua_State *L, Instance *self) {
+		if (!StackValue<Instance::Pointer>::Is(L, 2)) {
+			lua_pushboolean(L, false);
+			return 1;
+		}
+
+		Instance::Pointer other = StackValue<Instance::Pointer>::From(L, 2);
+		lua_pushboolean(L, other.get() == self);
+		return 1;
+	};
 
 	const Instance::ClassDefinition Instance::DEFINITION = {
 		.Name = "Instance",
 		.Properties =
 			{
 				G_UD_READWRITE_PROP(Instance, Name, std::string_view),
+				G_UD_READWRITE_PROP(Instance, Archivable, bool),
+				G_UD_READONLY_PROP(Instance, ChildAdded, Signal<Instance::Pointer>::Pointer),
+				G_UD_READONLY_PROP(Instance, ChildRemoved, Signal<Instance::Pointer>::Pointer),
+				G_UD_READONLY_PROP(Instance, DescendantAdded, Signal<Instance::Pointer>::Pointer),
+				G_UD_READONLY_PROP(Instance, DescendantRemoved, Signal<Instance::Pointer>::Pointer),
+				G_UD_READONLY_PROP(Instance, AncestryChanged, Signal<AncestryChangedArguments>::Pointer),
+				G_UD_READONLY_PROP(Instance, Destroying, Signal<std::monostate>::Pointer),
 				{
 					"ClassName",
 					{
@@ -31,6 +51,7 @@ namespace gargantuan {
 							return 1;
 						},
 						nullptr,
+						G_UD_REFLECT_TYPE(std::string_view),
 					},
 				},
 				{
@@ -45,10 +66,17 @@ namespace gargantuan {
 							return 1;
 						},
 						+[](lua_State *L, Instance *instance) -> int {
+							// Parent = nil is how Luau detaches an instance
+							if (lua_isnoneornil(L, -1)) {
+								instance->SetParent(nullptr);
+								return 0;
+							}
+
 							Instance::Pointer newParent = CheckStackValue<Instance::Pointer>(L, -1);
 							instance->SetParent(newParent);
 							return 0;
 						},
+						G_UD_REFLECT_TYPE(Instance::Pointer),
 					},
 				},
 			},
@@ -59,18 +87,44 @@ namespace gargantuan {
 			{"GetDescendants", Method::Wrap<&Instance::GetDescendants>()},
 			{"FindFirstChild", Method::Wrap<&Instance::FindFirstChild>()},
 			{"FindFirstChildOfClass", Method::Wrap<&Instance::FindFirstChildOfClass>()},
+			{"FindFirstChildWhichIsA", Method::Wrap<&Instance::FindFirstChildWhichIsA>()},
+			{"FindFirstDescendant", Method::Wrap<&Instance::FindFirstDescendant>()},
+			{"FindFirstDescendantOfClass", Method::Wrap<&Instance::FindFirstDescendantOfClass>()},
+			{"FindFirstDescendantWhichIsA", Method::Wrap<&Instance::FindFirstDescendantWhichIsA>()},
+			{"FindFirstAncestor", Method::Wrap<&Instance::FindFirstAncestor>()},
+			{"FindFirstAncestorOfClass", Method::Wrap<&Instance::FindFirstAncestorOfClass>()},
+			{"FindFirstAncestorWhichIsA", Method::Wrap<&Instance::FindFirstAncestorWhichIsA>()},
+			{"IsAncestorOf", Method::Wrap<&Instance::IsAncestorOf>()},
+			{"IsDescendantOf", Method::Wrap<&Instance::IsDescendantOf>()},
+			{"ClearAllChildren", Method::Wrap<&Instance::ClearAllChildren>()},
+			{"Destroy", Method::Wrap<&Instance::Destroy>()},
 		}
 	};
 
-	// TODO: fire DescendantAdded/Removed signals
 	void Instance::SetParent(std::shared_ptr<Instance> newParent) {
+		// Destroy permanently detaches an instance, so its parent stays locked
+		if (Destroyed || Parent == newParent.get()) {
+			return;
+		}
+
 		std::shared_ptr<Instance> self = shared_from_this();
+
+		// This whole subtree leaves the old ancestry and joins the new one, so
+		// collect it once up front and reuse it for both sets of signals
+		std::vector<std::shared_ptr<Instance>> subtree = {self};
+		CollectDescendants(subtree);
 
 		if (Parent != nullptr) {
 			auto &oldChildren = Parent->Children;
 			if (auto it = std::find(oldChildren.begin(), oldChildren.end(), self); it != oldChildren.end()) {
 				oldChildren.erase(it);
 				Parent->ChildRemoved->Fire(self);
+			}
+
+			for (Instance *ancestor = Parent; ancestor != nullptr; ancestor = ancestor->Parent) {
+				for (auto &node : subtree) {
+					ancestor->DescendantRemoved->Fire(node);
+				}
 			}
 		}
 
@@ -79,7 +133,52 @@ namespace gargantuan {
 		if (newParent != nullptr) {
 			newParent->Children.push_back(self);
 			newParent->ChildAdded->Fire(self);
+
+			for (Instance *ancestor = newParent.get(); ancestor != nullptr; ancestor = ancestor->Parent) {
+				for (auto &node : subtree) {
+					ancestor->DescendantAdded->Fire(node);
+				}
+			}
 		}
+
+		FireAncestryChanged(self, newParent);
+	}
+
+	// AncestryChanged fires on the moved instance and on everything beneath it,
+	// always reporting the instance whose Parent actually changed
+	void Instance::FireAncestryChanged(std::shared_ptr<Instance> child, std::shared_ptr<Instance> parent) {
+		AncestryChanged->Fire({child, parent});
+		for (auto &descendant : Children) {
+			descendant->FireAncestryChanged(child, parent);
+		}
+	}
+
+	void Instance::ClearAllChildren() {
+		// Destroy detaches from Children as it goes, so iterate a copy
+		auto children = Children;
+		for (auto &child : children) {
+			child->Destroy();
+		}
+	}
+
+	void Instance::Destroy() {
+		if (Destroyed) {
+			return;
+		}
+
+		Destroying->Fire({});
+
+		auto children = Children;
+		for (auto &child : children) {
+			child->Destroy();
+		}
+
+		SetParent(nullptr);
+		Destroyed = true;
+	}
+
+	bool Instance::IsDestroyed() const {
+		return Destroyed;
 	}
 
 	std::optional<Instance::Userdata::Property> Instance::FindProperty(std::string_view name) {
@@ -216,7 +315,7 @@ namespace gargantuan {
 
 	bool Instance::IsA(std::string_view className) {
 		auto currentDefinition = ClassRegistry::GetDefinition(this);
-		while (true) {
+		while (currentDefinition) {
 			if (currentDefinition->Name == className) {
 				return true;
 			}
@@ -228,6 +327,8 @@ namespace gargantuan {
 				return false;
 			}
 		}
+
+		return false;
 	}
 
 	std::vector<std::shared_ptr<Instance>> &Instance::GetChildren() {
@@ -253,15 +354,119 @@ namespace gargantuan {
 				return child;
 			}
 		};
+
+		if (recursive) {
+			for (const auto &child : Children) {
+				if (auto found = child->FindFirstChild(name, true)) {
+					return found;
+				}
+			}
+		}
+
 		return nullptr;
 	}
 
 	std::shared_ptr<Instance> Instance::FindFirstChildOfClass(std::string_view className) {
 		for (const auto &child : Children) {
-			if (ClassRegistry::GetDefinition(child.get())->Name == className) {
+			auto definition = ClassRegistry::GetDefinition(child.get());
+			if (definition && definition->Name == className) {
 				return child;
 			}
 		};
 		return nullptr;
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstChildWhichIsA(std::string_view className, bool recursive) {
+		for (const auto &child : Children) {
+			if (child->IsA(className)) {
+				return child;
+			}
+		};
+
+		if (recursive) {
+			for (const auto &child : Children) {
+				if (auto found = child->FindFirstChildWhichIsA(className, true)) {
+					return found;
+				}
+			}
+		}
+
+		return nullptr;
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstDescendant(std::string_view name) {
+		for (const auto &descendant : GetDescendants()) {
+			if (descendant->Name == name) {
+				return descendant;
+			}
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstDescendantOfClass(std::string_view className) {
+		for (const auto &descendant : GetDescendants()) {
+			auto definition = ClassRegistry::GetDefinition(descendant.get());
+			if (definition && definition->Name == className) {
+				return descendant;
+			}
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstDescendantWhichIsA(std::string_view className) {
+		for (const auto &descendant : GetDescendants()) {
+			if (descendant->IsA(className)) {
+				return descendant;
+			}
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstAncestor(std::string_view name) {
+		for (Instance *ancestor = Parent; ancestor != nullptr; ancestor = ancestor->Parent) {
+			if (ancestor->Name == name) {
+				return ancestor->shared_from_this();
+			}
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstAncestorOfClass(std::string_view className) {
+		for (Instance *ancestor = Parent; ancestor != nullptr; ancestor = ancestor->Parent) {
+			auto definition = ClassRegistry::GetDefinition(ancestor);
+			if (definition && definition->Name == className) {
+				return ancestor->shared_from_this();
+			}
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstAncestorWhichIsA(std::string_view className) {
+		for (Instance *ancestor = Parent; ancestor != nullptr; ancestor = ancestor->Parent) {
+			if (ancestor->IsA(className)) {
+				return ancestor->shared_from_this();
+			}
+		}
+		return nullptr;
+	}
+
+	bool Instance::IsAncestorOf(std::shared_ptr<Instance> descendant) {
+		if (!descendant) {
+			return false;
+		}
+		return descendant->IsDescendantOf(shared_from_this());
+	}
+
+	bool Instance::IsDescendantOf(std::shared_ptr<Instance> ancestor) {
+		if (!ancestor) {
+			return false;
+		}
+
+		for (Instance *current = Parent; current != nullptr; current = current->Parent) {
+			if (current == ancestor.get()) {
+				return true;
+			}
+		}
+		return false;
 	}
 } // namespace gargantuan

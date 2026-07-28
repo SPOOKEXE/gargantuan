@@ -83,6 +83,13 @@ file(GLOB_RECURSE GARGANTUAN_SOURCES CONFIGURE_DEPENDS
 
 add_executable(gargantuan ${GARGANTUAN_SOURCES} ${SHADER_OUTPUTS})
 
+# Members named after their own type (RenderProvider *RenderProvider) keep the
+# Luau-facing API familiar, but GCC 13+ rejects them by default. Clang does not
+# implement this diagnostic, which is why it only bites on GCC.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+	target_compile_options(gargantuan PRIVATE -Wno-changes-meaning)
+endif()
+
 target_include_directories(gargantuan PRIVATE
 	"src"
 	"include"

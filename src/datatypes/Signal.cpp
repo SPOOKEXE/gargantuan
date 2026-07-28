@@ -21,15 +21,15 @@ namespace gargantuan {
 	SignalConnection::SignalConnection(CallbackType callback, lua_State *L, int callbackReference)
 		: Callback(std::move(callback)), L(L), CallbackReference(callbackReference), Connected(true) {}
 
+	// Idempotent: releasing the Luau reference is guarded on its own, so this is
+	// safe to call on a connection that is already marked disconnected
 	void SignalConnection::Disconnect() {
-		if (Connected) {
-			Connected = false;
-			if (L && CallbackReference != LUA_NOREF && CallbackReference != LUA_REFNIL) {
-				lua_State *mainState = lua_mainthread(L);
-				lua_unref(mainState, CallbackReference);
-				CallbackReference = LUA_NOREF;
-				L = nullptr;
-			}
+		Connected = false;
+		if (L && CallbackReference != LUA_NOREF && CallbackReference != LUA_REFNIL) {
+			lua_State *mainState = lua_mainthread(L);
+			lua_unref(mainState, CallbackReference);
+			CallbackReference = LUA_NOREF;
+			L = nullptr;
 		}
 	}
 
@@ -74,12 +74,21 @@ namespace gargantuan {
 		auto connection = std::make_shared<SignalConnection>(nullptr, L, callbackReference);
 		std::weak_ptr<SignalConnection> weakConnection = connection;
 		connection->Callback = [weakConnection, callback](CallbackArgument value) {
-			if (auto conn = weakConnection.lock()) {
-				conn->Disconnect();
+			auto conn = weakConnection.lock();
+
+			// Mark it spent before running so a re-entrant fire cannot call it
+			// twice, but hold onto the Luau reference until the call is done --
+			// Disconnect releases it, and the callback still needs it
+			if (conn) {
+				conn->Connected = false;
 			}
 
 			if (callback) {
 				callback(value);
+			}
+
+			if (conn) {
+				conn->Disconnect();
 			}
 		};
 		Connections.push_back(connection);
@@ -87,17 +96,19 @@ namespace gargantuan {
 	};
 
 	void BaseSignal::Fire(CallbackArgument value) {
-		for (auto it = Connections.begin(); it != Connections.end();) {
-			auto &connection = *it;
-			if (!connection || !connection->Connected) {
-				it = Connections.erase(it);
-			} else {
-				if (connection->Callback) {
-					connection->Callback(value);
-				}
-				++it;
+		// A handler may connect, disconnect or fire this signal again, so run
+		// over a snapshot rather than the live list
+		auto connections = Connections;
+
+		for (auto &connection : connections) {
+			if (connection && connection->Connected && connection->Callback) {
+				connection->Callback(value);
 			}
 		}
+
+		std::erase_if(Connections, [](const SignalConnection::Pointer &connection) {
+			return !connection || !connection->Connected;
+		});
 	}
 
 	int BaseSignal::LConnect(lua_State *L, BaseSignal *signal) {
@@ -154,6 +165,9 @@ namespace gargantuan {
 
 		auto stackCount = lua_gettop(L);
 		auto argumentCount = std::max(stackCount - 1, 0);
+		// Every argument gets pushed again to be referenced
+		EnsureStackSpace(L, 1);
+
 		auto argumentVector = std::make_shared<std::vector<int>>();
 		argumentVector->reserve(argumentCount);
 
@@ -179,9 +193,19 @@ namespace gargantuan {
 		}
 
 		lua_State *mainState = lua_mainthread(L);
-		int pushedCount = 0;
+		auto &arguments = **argumentsPointer;
 
-		for (int ref : **argumentsPointer) {
+		// The argument count comes from the script, so make room for it up
+		// front; a signal fired with thousands of values must not run off the
+		// end of the stack
+		int slots = (int)arguments.size();
+		if (!TryEnsureStackSpace(mainState, slots + 1) || (L != mainState && !TryEnsureStackSpace(L, slots + 1))) {
+			SDL_Log("Dropping a signal firing with %d arguments: the Luau stack cannot grow that far", slots);
+			return 0;
+		}
+
+		int pushedCount = 0;
+		for (int ref : arguments) {
 			lua_getref(mainState, ref);
 
 			if (L != mainState) {

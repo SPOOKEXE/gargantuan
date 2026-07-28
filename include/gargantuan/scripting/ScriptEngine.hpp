@@ -13,8 +13,12 @@ namespace gargantuan {
 	int OpenLibBase(lua_State *L);
 	int OpenLibCFrame(lua_State *L);
 	int OpenLibColor3(lua_State *L);
+	int OpenLibColor4(lua_State *L);
 	int OpenLibEnum(lua_State *L);
+	int OpenLibPhysicalProperties(lua_State *L);
+	int OpenLibRandom(lua_State *L);
 	int OpenLibUDim(lua_State *L);
+	int OpenLibUDim2(lua_State *L);
 	int OpenLibVector2(lua_State *L);
 	int OpenLibVector3(lua_State *L);
 	int OpenLibInstance(lua_State *L);
