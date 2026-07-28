@@ -50,20 +50,22 @@ eyes. What is missing is the runtime that drives them.
 
 ## Cameras
 
-- [ ] Let a camera's target be put on a part's surface, not only sampled by a
-      shader
-- [ ] Break camera sampling cycles more usefully than dropping one edge, eg. by
-      giving the loop an explicit previous-frame copy to read
+- [ ] Give the freecam a configurable invert-Y and separate sensitivity per axis
+
+- [ ] Let a part choose which face a SurfaceCamera lands on, and how it is
+      tiled; it uses the mesh's own UVs on every face today
+- [ ] Show an EditableImage on a part's surface, not only a camera
 
 ## Images
 
 - [ ] AssetService:CreateEditableImage
-- [ ] Save an image back out to a file
-- [ ] Antialias the drawing calls; they are hard-edged today
-- [ ] The blend modes Roblox's Draw calls take, ie. Overwrite against BlendSource
+- [ ] Save formats besides PNG, ie. JPEG and BMP
+- [ ] DrawText, which needs a font first
 
 ## Shaders
 
+- [ ] Let the built-in antialias pass be swapped for a better one, eg. TAA using
+      the previous-frame copies cameras already keep
 - [ ] Vertex stage overrides, so a shader can move geometry and not only shade it
 - [ ] Reflect vertex inputs, to reject a surface shader whose layout does not
       match what opaque.vert emits
