@@ -8,7 +8,7 @@ namespace gargantuan {
 		// The enum item is named for the look, the file for what it does, so the
 		// two rarely match and every preset gets an entry rather than falling
 		// back to a guess that would only be right some of the time
-		constexpr std::array<std::pair<Enums::PresetShaders, std::string_view>, 19> PRESET_SOURCES = {{
+		constexpr std::array<std::pair<Enums::PresetShaders, std::string_view>, 20> PRESET_SOURCES = {{
 			{Enums::PresetShaders::None, ""},
 			{Enums::PresetShaders::AnalogueHorror, "analogue_horror"},
 			{Enums::PresetShaders::Antialias, "antialias"},
@@ -25,6 +25,7 @@ namespace gargantuan {
 			{Enums::PresetShaders::SurfaceTextured, "surface_textured"},
 			{Enums::PresetShaders::SurfaceUnlit, "surface_unlit"},
 			{Enums::PresetShaders::Swirl, "swirl"},
+			{Enums::PresetShaders::TemporalAntialias, "taa"},
 			{Enums::PresetShaders::ThermalRed, "thermal"},
 			{Enums::PresetShaders::Transpose, "transpose"},
 			{Enums::PresetShaders::Vignette, "vignette"},

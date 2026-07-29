@@ -29,12 +29,21 @@ namespace gargantuan {
 
 	std::unique_ptr<RenderPass> CreateOpaquePass(SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchainFormat);
 	std::unique_ptr<RenderPass> CreateShadowPass(SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchainFormat);
+	// Draws into a fixed format of its own, so unlike the opaque pass it needs
+	// no swapchain format to match
+	std::unique_ptr<RenderPass> CreateVelocityPass(SDL_GPUDevice *gpu);
 
 	class RenderProvider {
 	  public:
 		// Offscreen cameras render at a fixed format so one extra pipeline
 		// covers them all, whatever the window's swapchain happens to be
 		static constexpr SDL_GPUTextureFormat OFFSCREEN_FORMAT = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+
+		// Motion vectors are a signed screen-space step, so the eight-bit
+		// unsigned format the pictures use cannot hold them. Two half floats
+		// carry sub-pixel motion across the whole target and cost half of what
+		// full floats would.
+		static constexpr SDL_GPUTextureFormat VELOCITY_FORMAT = SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
 
 		// The colour and depth textures backing one offscreen camera.
 		// ScratchTexture is the other half of the ping-pong pair the shader
@@ -46,6 +55,10 @@ namespace gargantuan {
 			// something reads across a sampling cycle, where no ordering can
 			// give every reader this frame's copy.
 			SDL_GPUTexture *HistoryTexture = nullptr;
+			// Where every pixel was last frame. Only allocated for a camera
+			// whose chain bound Enum.RenderTexture.Velocity, and written by a
+			// second geometry pass that only such a camera records.
+			SDL_GPUTexture *VelocityTexture = nullptr;
 			SDL_GPUTexture *DepthTexture = nullptr;
 			// The cascading cache: the chain's output at the last pass before
 			// the first one marked RedrawEveryFrame. On a still scene the
@@ -208,6 +221,10 @@ namespace gargantuan {
 
 		std::unique_ptr<RenderPass> ShadowPass;
 		std::unique_ptr<RenderPass> OpaquePass;
+		// Built lazily, on the first camera that asks for motion vectors: a
+		// place that never wants them should not pay for the pipeline either
+		RenderPass *GetVelocityPass();
+		std::unique_ptr<RenderPass> VelocityPass;
 		// A second opaque pass built for OFFSCREEN_FORMAT; a pipeline's colour
 		// format has to match the texture it draws into
 		std::unique_ptr<RenderPass> OffscreenOpaquePass;
@@ -245,10 +262,19 @@ namespace gargantuan {
 			uint64_t LastUsedFrame = 0;
 		};
 
-		// What the shaders are handed alongside their own parameters
+		// What the shaders are handed alongside their own parameters.
+		//
+		// Every shader declares the block it wants and reads it at binding 0;
+		// one declaring only Resolution and Time is handed the same buffer and
+		// simply never looks past what it named, which is what lets a member be
+		// added here without touching a single existing asset.
 		struct alignas(16) BuiltinUniforms {
 			glm::vec4 Resolution;
 			glm::vec4 Time;
+			// xy is where inside the pixel this frame was sampled, in pixels,
+			// and zw where the frame before it was. Zero on a camera with no
+			// pass asking to jitter, which is nearly all of them.
+			glm::vec4 Jitter;
 		};
 
 		// An EditableImage that has been copied onto the GPU so a shader can
@@ -372,6 +398,14 @@ namespace gargantuan {
 		// surface picture. Kept apart from ShaderSampler because a post-process
 		// pass reading past its own edge wants the edge, not the far side.
 		SDL_GPUSampler *PartSurfaceSampler = nullptr;
+		// Motion vectors are measurements, not a picture: averaging the ones
+		// either side of an edge invents a step neither surface took, and a
+		// pass reprojecting by it lands between the two. Point sampling gives
+		// back exactly what was written.
+		SDL_GPUSampler *PointSampler = nullptr;
+		void EnsurePointSampler();
+		// Which of the two a binding should be read through
+		SDL_GPUSampler *GetSourceSampler(const ShaderScript::TextureSource &source);
 
 		// Returns the camera's target, sized to its ViewportSize, or nullptr
 		// when the viewport is empty. `withScratch` also guarantees the second
@@ -415,6 +449,47 @@ namespace gargantuan {
 		SDL_GPUTexture *ResolveTextureSource(Camera *reader, const ShaderScript::TextureSource &source);
 		// Keeps a camera's previous-frame copy up to date, once it is done
 		void RecordHistoryCopy(SDL_GPUCommandBuffer *commands, Camera *camera, const CameraTarget &target);
+
+		// What a camera's shaders want the renderer to produce for them beyond
+		// the picture itself. All three are off for a camera whose passes are
+		// ordinary, which is what keeps the cost of the temporal machinery on
+		// the places that asked for it.
+		struct TemporalNeeds {
+			// A pass bound Enum.RenderTexture.History, so the finished picture
+			// is copied aside each frame -- and the camera can never sit still,
+			// since its own output is an input that changed
+			bool History = false;
+			// A pass bound Enum.RenderTexture.Velocity, so the scene is drawn a
+			// second time into a motion vector buffer
+			bool Velocity = false;
+			// A pass asked for the sub-pixel offset, so the projection moves
+			// inside the pixel each frame
+			bool Jitter = false;
+
+			bool Any() const {
+				return History || Velocity || Jitter;
+			}
+		};
+		TemporalNeeds GetTemporalNeeds(Camera *camera);
+		// Creates whatever `needs` asks for that is missing. History is seeded
+		// from the picture already in the target rather than left as whatever
+		// the driver handed back, so the first frame of a reprojecting pass
+		// blends against something plausible instead of noise.
+		void EnsureTemporalTargets(
+			SDL_GPUCommandBuffer *commands, Camera *camera, CameraTarget &target, const TemporalNeeds &needs
+		);
+		// Records where every part stood, once the frame is over, so the next
+		// one can measure motion against it. Every camera in a frame has to
+		// compare against the same previous positions, which is why this
+		// happens at the end of the frame rather than as each camera draws.
+		void StampPreviousTransforms();
+		// Whether any camera drew motion vectors this frame, and whether the
+		// parts are currently carrying a previous position. The pair is what
+		// lets the stamp stop when nothing wants it and clear up after itself,
+		// so a camera that starts asking again is not handed a position from
+		// whenever the last one lost interest.
+		bool VelocityInUse = false;
+		bool TransformsStamped = false;
 		// Builds opaque.vert paired with a surface shader's fragment stage.
 		// Cached per shader and colour format, since the window and an
 		// offscreen target do not share one.

@@ -78,6 +78,20 @@ namespace gargantuan {
 		PhysicalProperties GetPhysicalProperties() const;
 
 		glm::mat4 GetModelMatrix();
+
+		// Where this part stood last frame. Bookkeeping, not a property: the
+		// renderer stamps it once a frame, after every camera has drawn, so
+		// each of them measures motion against the same "last frame" rather
+		// than against whichever camera happened to go first.
+		//
+		// Only kept while something asks for motion vectors, so a part is not
+		// paying for a matrix nothing reads. A part that has never been stamped
+		// -- one built this frame, or the frame a camera first asks -- reports
+		// no motion at all, which is the right answer: there is no earlier
+		// position for it to have moved from.
+		glm::mat4 PreviousModelMatrix = glm::mat4(1.0f);
+		bool HasPreviousModelMatrix = false;
+
 		virtual std::unique_ptr<GpuMesh> &GetMesh() const = 0;
 	};
 } // namespace gargantuan

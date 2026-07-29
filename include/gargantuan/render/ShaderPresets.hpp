@@ -36,9 +36,33 @@ namespace gargantuan {
 		SurfaceTextured,
 		SurfaceUnlit,
 		Swirl,
+		TemporalAntialias,
 		ThermalRed,
 		Transpose,
 		Vignette
+	)
+
+	// Textures the renderer produces for whichever camera is running the pass,
+	// rather than anything a script hands it. SetCameraTexture names another
+	// camera; this names one of the reader's own buffers, which is the only way
+	// a shared pass -- RenderSettings.AntialiasShader runs on every camera --
+	// can reach the camera it happens to be running on.
+	G_ENUM(
+		RenderTexture,
+
+		None,
+
+		// This camera's finished picture from last frame. Asking for it is what
+		// makes the engine keep the copy, and a camera whose picture feeds back
+		// into itself can never sit still, so it redraws every frame.
+		History,
+
+		// Where each pixel was last frame, in texture coordinates: sample the
+		// history at `uv - velocity` to find the same surface point again.
+		// Written by a geometry pass the camera only pays for when a pass asks
+		// for it, and measured off the unjittered projection so the offset a
+		// jittering camera adds does not leak into it.
+		Velocity
 	)
 
 	// Every parameter and texture binding the built-in shaders declare. The
@@ -54,8 +78,10 @@ namespace gargantuan {
 		Background,
 		BlockSize,
 		Brightness,
+		Clamping,
 		Contrast,
 		Distortion,
+		Feedback,
 		FirstPosition,
 		Gain,
 		Grain,
@@ -75,14 +101,16 @@ namespace gargantuan {
 		Tracking,
 		Vignette,
 
-		// Texture bindings, for SetImage and SetCameraTexture
+		// Texture bindings, for SetImage, SetCameraTexture and SetRenderTexture
 		FirstTexture,
+		HistoryTexture,
 		OutputTexture,
 		OverlayTexture,
 		SecondTexture,
 		Skin,
 		SourceTexture,
-		SurfaceTexture
+		SurfaceTexture,
+		VelocityTexture
 	)
 
 	// The asset name a preset stands for, without extension or directory.

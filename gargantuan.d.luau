@@ -54,6 +54,8 @@ declare class Enum_PreferredInput extends EnumItem
 end
 declare class Enum_PresetShaders extends EnumItem
 end
+declare class Enum_RenderTexture extends EnumItem
+end
 declare class Enum_RotationOrder extends EnumItem
 end
 declare class Enum_SaveFormat extends EnumItem
@@ -388,9 +390,15 @@ declare Enum: {
 		SurfaceTextured: Enum_PresetShaders,
 		SurfaceUnlit: Enum_PresetShaders,
 		Swirl: Enum_PresetShaders,
+		TemporalAntialias: Enum_PresetShaders,
 		ThermalRed: Enum_PresetShaders,
 		Transpose: Enum_PresetShaders,
 		Vignette: Enum_PresetShaders,
+	},
+	RenderTexture: Enum & {
+		None: Enum_RenderTexture,
+		History: Enum_RenderTexture,
+		Velocity: Enum_RenderTexture,
 	},
 	RotationOrder: Enum & {
 		XYZ: Enum_RotationOrder,
@@ -410,8 +418,10 @@ declare Enum: {
 		Background: Enum_ShaderProperty,
 		BlockSize: Enum_ShaderProperty,
 		Brightness: Enum_ShaderProperty,
+		Clamping: Enum_ShaderProperty,
 		Contrast: Enum_ShaderProperty,
 		Distortion: Enum_ShaderProperty,
+		Feedback: Enum_ShaderProperty,
 		FirstPosition: Enum_ShaderProperty,
 		Gain: Enum_ShaderProperty,
 		Grain: Enum_ShaderProperty,
@@ -431,12 +441,14 @@ declare Enum: {
 		Tracking: Enum_ShaderProperty,
 		Vignette: Enum_ShaderProperty,
 		FirstTexture: Enum_ShaderProperty,
+		HistoryTexture: Enum_ShaderProperty,
 		OutputTexture: Enum_ShaderProperty,
 		OverlayTexture: Enum_ShaderProperty,
 		SecondTexture: Enum_ShaderProperty,
 		Skin: Enum_ShaderProperty,
 		SourceTexture: Enum_ShaderProperty,
 		SurfaceTexture: Enum_ShaderProperty,
+		VelocityTexture: Enum_ShaderProperty,
 	},
 	SignalType: Enum & {
 		Engine: Enum_SignalType,
@@ -770,6 +782,7 @@ end
 declare class ShaderScript extends Instance
 	Code: string
 	CompileError: string
+	JitterProjection: boolean
 	Preset: Enum_PresetShaders
 	RedrawEveryFrame: boolean
 	Source: string | Enum_PresetShaders
@@ -779,6 +792,7 @@ declare class ShaderScript extends Instance
 	function GetCameraTexture(self, name: string | Enum_ShaderProperty): Camera?
 	function GetExpectedParameters(self): { string }
 	function GetImage(self, name: string | Enum_ShaderProperty): EditableImage?
+	function GetRenderTexture(self, name: string | Enum_ShaderProperty): Enum_RenderTexture
 	function ListImages(self): { string }
 	function ListParameters(self): { string }
 	function Reflect(self): boolean
@@ -787,6 +801,7 @@ declare class ShaderScript extends Instance
 	function SetColor3(self, name: string | Enum_ShaderProperty, value: Color3): ()
 	function SetImage(self, name: string | Enum_ShaderProperty, value: EditableImage): ()
 	function SetNumber(self, name: string | Enum_ShaderProperty, value: number): ()
+	function SetRenderTexture(self, name: string | Enum_ShaderProperty, value: Enum_RenderTexture): ()
 	function SetVector2(self, name: string | Enum_ShaderProperty, value: Vector2): ()
 	function SetVector3(self, name: string | Enum_ShaderProperty, value: Vector3): ()
 	function Validate(self): boolean

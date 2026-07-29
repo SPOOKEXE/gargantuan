@@ -92,6 +92,8 @@ namespace gargantuan {
 	void RenderProvider::BeginFrame(int maximumFramesInFlight) {
 		// Who followed whom is a fact about one frame only
 		RedrawnThisFrame.clear();
+		// Re-answered by whichever cameras draw motion vectors this frame
+		VelocityInUse = false;
 		// Only moves here, so everything recorded between this and EndFrame
 		// counts as the same frame and is safe from eviction
 		FrameIndex++;
@@ -106,6 +108,11 @@ namespace gargantuan {
 	}
 
 	void RenderProvider::EndFrame() {
+		// Every camera has had its turn, so this frame's positions are now the
+		// previous ones. Doing it here rather than as each camera draws is what
+		// makes them all measure motion against the same frame.
+		StampPreviousTransforms();
+
 		if (!FrameFences.empty()) {
 			FramesInFlight.push_back(std::move(FrameFences));
 			FrameFences.clear();
@@ -146,6 +153,7 @@ namespace gargantuan {
 			if (target.ColorTexture) SDL_ReleaseGPUTexture(Gpu, target.ColorTexture);
 			if (target.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, target.ScratchTexture);
 			if (target.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.HistoryTexture);
+			if (target.VelocityTexture) SDL_ReleaseGPUTexture(Gpu, target.VelocityTexture);
 			if (target.CacheTexture) SDL_ReleaseGPUTexture(Gpu, target.CacheTexture);
 			if (target.DepthTexture) SDL_ReleaseGPUTexture(Gpu, target.DepthTexture);
 		}
@@ -188,6 +196,11 @@ namespace gargantuan {
 			PartSurfaceSampler = nullptr;
 		}
 
+		if (PointSampler) {
+			SDL_ReleaseGPUSampler(Gpu, PointSampler);
+			PointSampler = nullptr;
+		}
+
 		if (DepthTexture != nullptr) {
 			SDL_ReleaseGPUTexture(Gpu, DepthTexture);
 			DepthTexture = nullptr;
@@ -206,6 +219,10 @@ namespace gargantuan {
 		ShadowPass->Destroy(Gpu);
 		OpaquePass->Destroy(Gpu);
 		OffscreenOpaquePass->Destroy(Gpu);
+		// Only ever built if a camera asked for motion vectors
+		if (VelocityPass) {
+			VelocityPass->Destroy(Gpu);
+		}
 
 		if (CURRENT_PROVIDER == this) {
 			CURRENT_PROVIDER = nullptr;
@@ -221,6 +238,7 @@ namespace gargantuan {
 		if (it->second.ColorTexture) SDL_ReleaseGPUTexture(Gpu, it->second.ColorTexture);
 		if (it->second.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, it->second.ScratchTexture);
 		if (it->second.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, it->second.HistoryTexture);
+		if (it->second.VelocityTexture) SDL_ReleaseGPUTexture(Gpu, it->second.VelocityTexture);
 		if (it->second.CacheTexture) SDL_ReleaseGPUTexture(Gpu, it->second.CacheTexture);
 		if (it->second.DepthTexture) SDL_ReleaseGPUTexture(Gpu, it->second.DepthTexture);
 		NeedsHistory.erase(it->first);
@@ -276,10 +294,12 @@ namespace gargantuan {
 		if (target.ColorTexture) SDL_ReleaseGPUTexture(Gpu, target.ColorTexture);
 		if (target.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, target.ScratchTexture);
 		if (target.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.HistoryTexture);
+		if (target.VelocityTexture) SDL_ReleaseGPUTexture(Gpu, target.VelocityTexture);
 		// A resize invalidates the cached image along with everything else
 		if (target.CacheTexture) SDL_ReleaseGPUTexture(Gpu, target.CacheTexture);
 		target.ScratchTexture = nullptr;
 		target.HistoryTexture = nullptr;
+		target.VelocityTexture = nullptr;
 		target.CacheTexture = nullptr;
 		if (target.DepthTexture) SDL_ReleaseGPUTexture(Gpu, target.DepthTexture);
 
@@ -336,13 +356,209 @@ namespace gargantuan {
 			return it->second.ColorTexture;
 		}
 
+		// One of the reader's own buffers. No camera is named because none can
+		// be: the antialias pass is a single script shared by every camera, so
+		// the only camera it can mean is whichever one it is running on.
+		if (source.Render != Enums::RenderTexture::None) {
+			auto it = CameraTargets.find(reader);
+			if (it == CameraTargets.end()) {
+				return nullptr;
+			}
+
+			switch (source.Render) {
+			case Enums::RenderTexture::History:
+				return it->second.HistoryTexture;
+			case Enums::RenderTexture::Velocity:
+				return it->second.VelocityTexture;
+			default:
+				return nullptr;
+			}
+		}
+
 		return nullptr;
+	}
+
+	void RenderProvider::EnsurePointSampler() {
+		if (PointSampler) {
+			return;
+		}
+
+		SDL_GPUSamplerCreateInfo samplerInfo{
+			.min_filter = SDL_GPU_FILTER_NEAREST,
+			.mag_filter = SDL_GPU_FILTER_NEAREST,
+			.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
+			.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+			.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+			.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+		};
+		PointSampler = SDL_CreateGPUSampler(Gpu, &samplerInfo);
+	}
+
+	SDL_GPUSampler *RenderProvider::GetSourceSampler(const ShaderScript::TextureSource &source) {
+		// Blending two neighbouring motion vectors produces a step neither
+		// surface took, and a pass reprojecting by it samples between the two.
+		// Everything else is a picture, where smoothing is what is wanted.
+		if (source.Render == Enums::RenderTexture::Velocity) {
+			EnsurePointSampler();
+			if (PointSampler) {
+				return PointSampler;
+			}
+		}
+		return ShaderSampler;
+	}
+
+	RenderProvider::TemporalNeeds RenderProvider::GetTemporalNeeds(Camera *camera) {
+		TemporalNeeds needs;
+		if (!camera) {
+			return needs;
+		}
+
+		auto consider = [&needs](const std::shared_ptr<ShaderScript> &shader) {
+			if (!shader) {
+				return;
+			}
+
+			if (shader->NeedsJitteredProjection()) {
+				needs.Jitter = true;
+			}
+
+			for (const auto &source : shader->GetTextureSources()) {
+				if (source.Render == Enums::RenderTexture::History) {
+					needs.History = true;
+				} else if (source.Render == Enums::RenderTexture::Velocity) {
+					needs.Velocity = true;
+				}
+			}
+		};
+
+		// The antialias pass is in here, which is the whole point: swapping in a
+		// temporal one through RenderSettings is what turns these on
+		for (const auto &shader : BuildShaderChain(camera)) {
+			consider(shader);
+		}
+		// A surface shader can ask too. It shades during the opaque pass, which
+		// is why the velocity pass is recorded ahead of that one rather than
+		// after it -- otherwise the vectors it read would be a frame old.
+		consider(camera->SurfaceShader);
+
+		return needs;
+	}
+
+	void RenderProvider::EnsureTemporalTargets(
+		SDL_GPUCommandBuffer *commands, Camera *camera, CameraTarget &target, const TemporalNeeds &needs
+	) {
+		if (!camera || target.Width == 0 || target.Height == 0) {
+			return;
+		}
+
+		if (needs.History) {
+			// RecordHistoryCopy is what keeps it current; this is only about it
+			// existing before the chain first samples it
+			if (!target.HistoryTexture) {
+				SDL_GPUTextureCreateInfo info{
+					.type = SDL_GPU_TEXTURETYPE_2D,
+					.format = OFFSCREEN_FORMAT,
+					.usage = CAMERA_TARGET_USAGE,
+					.width = target.Width,
+					.height = target.Height,
+					.layer_count_or_depth = 1,
+					.num_levels = 1,
+				};
+				target.HistoryTexture = SDL_CreateGPUTexture(Gpu, &info);
+
+				// Cleared, because a pass is about to read it a moment before
+				// the frame that fills it. Whatever the driver handed back is
+				// not a picture and blending against it shows; black is at
+				// least defined, and a pass rejecting history on how far it
+				// sits from its surroundings throws it out on the first frame
+				// anyway, which is exactly what should happen to a history that
+				// does not exist yet.
+				if (target.HistoryTexture && commands) {
+					SDL_GPUColorTargetInfo clear{
+						.texture = target.HistoryTexture,
+						.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f},
+						.load_op = SDL_GPU_LOADOP_CLEAR,
+						.store_op = SDL_GPU_STOREOP_STORE,
+					};
+					SDL_EndGPURenderPass(SDL_BeginGPURenderPass(commands, &clear, 1, nullptr));
+				}
+			}
+		}
+
+		if (needs.Velocity && !target.VelocityTexture) {
+			SDL_GPUTextureCreateInfo info{
+				.type = SDL_GPU_TEXTURETYPE_2D,
+				.format = VELOCITY_FORMAT,
+				.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
+				.width = target.Width,
+				.height = target.Height,
+				.layer_count_or_depth = 1,
+				.num_levels = 1,
+			};
+			target.VelocityTexture = SDL_CreateGPUTexture(Gpu, &info);
+			if (!target.VelocityTexture) {
+				SDL_Log(
+					"Failed to create a %ux%u motion vector target: %s", target.Width, target.Height, SDL_GetError()
+				);
+			}
+		}
+	}
+
+	RenderPass *RenderProvider::GetVelocityPass() {
+		if (!VelocityPass) {
+			SDL_Log("Creating velocity pass");
+			VelocityPass = CreateVelocityPass(Gpu);
+		}
+		return VelocityPass.get();
+	}
+
+	void RenderProvider::StampPreviousTransforms() {
+		if (!Scene.WorldRoot) {
+			return;
+		}
+
+		if (!VelocityInUse) {
+			// Nothing wanted motion vectors this frame. What is being carried
+			// belongs to whenever the last camera stopped asking, so drop it:
+			// a camera that starts asking again should read no motion for a
+			// frame rather than the distance everything moved in between.
+			if (!TransformsStamped) {
+				return;
+			}
+
+			for (const auto &part : Scene.WorldRoot->Parts) {
+				if (part) {
+					part->HasPreviousModelMatrix = false;
+				}
+			}
+			TransformsStamped = false;
+			return;
+		}
+
+		for (const auto &part : Scene.WorldRoot->Parts) {
+			if (!part) {
+				continue;
+			}
+			part->PreviousModelMatrix = part->GetModelMatrix();
+			part->HasPreviousModelMatrix = true;
+		}
+		TransformsStamped = true;
 	}
 
 	void RenderProvider::RecordHistoryCopy(
 		SDL_GPUCommandBuffer *commands, Camera *camera, const CameraTarget &target
 	) {
-		if (!camera || !NeedsHistory.count(camera) || !target.ColorTexture) {
+		if (!camera || !target.ColorTexture) {
+			return;
+		}
+
+		// Two reasons to keep one, and they expire differently. Being part of a
+		// camera loop is remembered in NeedsHistory, which is only cleared when
+		// the camera goes away. A pass asking for Enum.RenderTexture.History is
+		// asked about again every frame, so putting the engine's own antialias
+		// pass back stops the copy the same frame rather than leaving the camera
+		// paying for one nothing reads.
+		if (!NeedsHistory.count(camera) && !GetTemporalNeeds(camera).History) {
 			return;
 		}
 
@@ -1016,6 +1232,7 @@ namespace gargantuan {
 		BuiltinUniforms builtin{
 			.Resolution = glm::vec4(target.Width, target.Height, 1.0f / target.Width, 1.0f / target.Height),
 			.Time = glm::vec4((float)Scene.Time, 0.0f, 0.0f, 0.0f),
+			.Jitter = glm::vec4(camera->Jitter, camera->PreviousJitter),
 		};
 
 		// The chain bounces between the two textures; `source` always holds
@@ -1071,7 +1288,7 @@ namespace gargantuan {
 					if (!texture || bindingCount > ShaderScript::MAXIMUM_IMAGES) {
 						continue;
 					}
-					bindings[bindingCount++] = {.texture = texture, .sampler = ShaderSampler};
+					bindings[bindingCount++] = {.texture = texture, .sampler = GetSourceSampler(bound)};
 				}
 
 				// The shader declared how many samplers it wants; anything else
@@ -1167,6 +1384,21 @@ namespace gargantuan {
 			parameterStorage.resize(sizeof(glm::vec4), 0);
 		}
 
+		// Before the bindings are built rather than after: they are what needs
+		// it, and creating it below meant the first surface shader to bind an
+		// image bound it with no sampler at all
+		if (!ShaderSampler) {
+			SDL_GPUSamplerCreateInfo samplerInfo{
+				.min_filter = SDL_GPU_FILTER_LINEAR,
+				.mag_filter = SDL_GPU_FILTER_LINEAR,
+				.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR,
+				.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+				.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+				.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+			};
+			ShaderSampler = SDL_CreateGPUSampler(Gpu, &samplerInfo);
+		}
+
 		// Slot 0 is always the shadow map the engine's vertex stage set up
 		samplerStorage.clear();
 		samplerStorage.push_back({.texture = frameContext.ShadowMapTexture, .sampler = ShadowSampler});
@@ -1176,7 +1408,7 @@ namespace gargantuan {
 			if (!texture) {
 				continue;
 			}
-			samplerStorage.push_back({.texture = texture, .sampler = ShaderSampler});
+			samplerStorage.push_back({.texture = texture, .sampler = GetSourceSampler(source)});
 		}
 
 		uint32_t declared = surface->Resources.Found ? surface->Resources.SampledImages : 1;
@@ -1188,18 +1420,6 @@ namespace gargantuan {
 				samplerStorage.size()
 			);
 			return false;
-		}
-
-		if (!ShaderSampler) {
-			SDL_GPUSamplerCreateInfo samplerInfo{
-				.min_filter = SDL_GPU_FILTER_LINEAR,
-				.mag_filter = SDL_GPU_FILTER_LINEAR,
-				.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR,
-				.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-				.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-				.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-			};
-			ShaderSampler = SDL_CreateGPUSampler(Gpu, &samplerInfo);
 		}
 
 		frameContext.SurfacePipeline = surface->GraphicsPipeline;
@@ -1217,6 +1437,16 @@ namespace gargantuan {
 			return false;
 		}
 
+		Camera *camera = drawContext.Camera.get();
+		TemporalNeeds needs = GetTemporalNeeds(camera);
+		if (camera) {
+			EnsureTemporalTargets(commands, camera, CameraTargets[camera], needs);
+			// Only here, where the world is about to be drawn again. A camera
+			// the engine skipped keeps the offset its picture was drawn with,
+			// so the offset and the pixels always describe each other.
+			camera->AdvanceJitter(needs.Jitter);
+		}
+
 		FrameContext frameContext;
 		frameContext.Commands = commands;
 		frameContext.WorldRoot = drawContext.WorldRoot;
@@ -1226,6 +1456,7 @@ namespace gargantuan {
 		frameContext.ShadowSampler = ShadowSampler;
 		frameContext.ColorTarget = target.ColorTexture;
 		frameContext.DepthTexture = target.DepthTexture;
+		frameContext.VelocityTarget = needs.Velocity ? target.VelocityTexture : nullptr;
 		EnsureWhiteTexture();
 		ResolvePartTextures(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
@@ -1253,7 +1484,28 @@ namespace gargantuan {
 		// The shadow map only depends on the light, but it has to be recorded
 		// into this command buffer for the opaque pass to sample it
 		SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
+
+		// Ahead of the opaque pass, so a SurfaceShader that binds the motion
+		// vectors reads this frame's rather than the last one's. It clears the
+		// depth buffer and throws it away again, which costs nothing the opaque
+		// pass was going to keep -- that one clears depth for itself.
+		if (frameContext.VelocityTarget) {
+			if (RenderPass *velocity = GetVelocityPass()) {
+				SDL_EndGPURenderPass(velocity->Draw(Gpu, frameContext));
+				VelocityInUse = true;
+			}
+		}
+
 		SDL_EndGPURenderPass(OffscreenOpaquePass->Draw(Gpu, frameContext));
+
+		// What this camera drew through, for the next frame's motion vectors to
+		// measure against. Unjittered: the offset describes the sampling, not
+		// where the camera is.
+		if (camera && needs.Velocity) {
+			camera->PreviousViewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+			camera->HasPreviousViewProjection = true;
+		}
+
 		return true;
 	}
 
@@ -1725,6 +1977,9 @@ namespace gargantuan {
 				MixPointer(hash, bound.Image.get());
 				MixBits(hash, bound.Image ? bound.Image->GetRevision() : 0);
 				MixPointer(hash, bound.Camera.get());
+				// Rebinding a slot from an image to the camera's own history
+				// changes what the pass reads without changing anything above
+				MixBits(hash, (uint64_t)bound.Render);
 			}
 		};
 
@@ -1773,6 +2028,15 @@ namespace gargantuan {
 		// A camera reading its own previous frame is animated by construction,
 		// and one whose input redrew has to follow it
 		if (NeedsHistory.count(camera)) {
+			sceneMatches = false;
+		}
+
+		// So is one whose projection moves inside the pixel every frame, or
+		// whose passes read a picture of last frame: both paint something
+		// different from a scene that has not moved, which is exactly the case
+		// the cache would otherwise answer out of what it kept. A temporal pass
+		// converges by being run, so freezing it would freeze it half-resolved.
+		if (GetTemporalNeeds(camera).Any()) {
 			sceneMatches = false;
 		}
 		for (Camera *sampled : GetSampledCameras(camera)) {
@@ -2135,6 +2399,15 @@ namespace gargantuan {
 			SDL_BlitGPUTexture(commands, &blit);
 			SubmitTracked(commands);
 			return;
+		}
+
+		// No offscreen target on this path, so there is nowhere to keep a
+		// history or motion vectors -- but a SurfaceShader can still ask to
+		// jitter, and a camera that was jittering and then had its whole chain
+		// taken away has to be told to stop, or it keeps the last offset for
+		// good.
+		if (camera) {
+			camera->AdvanceJitter(GetTemporalNeeds(camera).Jitter);
 		}
 
 		FrameContext frameContext;

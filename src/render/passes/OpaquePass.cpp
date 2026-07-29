@@ -110,7 +110,14 @@ namespace gargantuan {
 
 			WorldUniforms worldUniforms{
 				.ViewMatrix = context.Camera->GetViewMatrix(),
-				.ProjectionMatrix = context.Camera->GetProjectionMatrix(),
+				// Jittered, when a pass in this camera's chain asked for it: the
+				// world is drawn through a projection nudged a fraction of a
+				// pixel sideways, a different fraction every frame, so that a
+				// pass blending frames together is averaging the coverage of the
+				// pixel rather than the same sample over and over. It is the
+				// projection on a camera with no such pass, which is nearly all
+				// of them.
+				.ProjectionMatrix = context.Camera->GetJitteredProjectionMatrix(),
 				.ShadowBiasMatrix = SHADOW_BIAS_MATRIX * context.ShadowMatrix,
 				.LightDirection = glm::vec4(context.LightDirection, 0.0f),
 			};

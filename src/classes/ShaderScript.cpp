@@ -41,6 +41,7 @@ namespace gargantuan {
 					},
 				},
 				G_UD_READWRITE_PROP(ShaderScript, RedrawEveryFrame, bool),
+				G_UD_READWRITE_PROP(ShaderScript, JitterProjection, bool),
 				{
 					"Preset",
 					{
@@ -99,6 +100,12 @@ namespace gargantuan {
 			 {&ShaderScript::LSetCameraTexture, []() -> std::string { return SET_SIGNATURE("Camera"); }}},
 			{"GetCameraTexture",
 			 {&ShaderScript::LGetCameraTexture, []() -> std::string { return GET_SIGNATURE("Camera?"); }}},
+			{"SetRenderTexture",
+			 {&ShaderScript::LSetRenderTexture, []() -> std::string { return SET_SIGNATURE("Enum.RenderTexture"); }}},
+			{"GetRenderTexture",
+			 {&ShaderScript::LGetRenderTexture, []() -> std::string {
+				  return GET_SIGNATURE("Enum.RenderTexture");
+			  }}},
 			{"ListImages", Method::Wrap<&ShaderScript::ListImages>()},
 			{"ClearImages", Method::Wrap<&ShaderScript::ClearImages>()},
 			{"GetExpectedParameters", Method::Wrap<&ShaderScript::GetExpectedParameters>()},
@@ -126,6 +133,7 @@ namespace gargantuan {
 		DeclaredParameters = {};
 		BuiltinsChecked = false;
 		ReadsTime = false;
+		ReadsJitter = false;
 		// The old bytecode no longer matches the source, so drop it and make
 		// the renderer notice
 		Bytecode.clear();
@@ -142,6 +150,7 @@ namespace gargantuan {
 			Revision++;
 			BuiltinsChecked = false;
 			ReadsTime = false;
+			ReadsJitter = false;
 			return false;
 		}
 
@@ -150,6 +159,7 @@ namespace gargantuan {
 		Reflected = false;
 		BuiltinsChecked = false;
 		ReadsTime = false;
+		ReadsJitter = false;
 		Reflect();
 		return true;
 	}
@@ -309,6 +319,23 @@ namespace gargantuan {
 		return 0;
 	}
 
+	int ShaderScript::LSetRenderTexture(lua_State *L, Instance *instance) {
+		std::string name = CheckShaderPropertyArgument(L, 2);
+		auto texture = CheckStackValue<Enums::RenderTexture>(L, 3);
+		if (auto *shader = CheckShader(L, instance)) {
+			shader->SetRenderTexture(std::move(name), texture);
+		}
+		return 0;
+	}
+
+	int ShaderScript::LGetRenderTexture(lua_State *L, Instance *instance) {
+		std::string name = CheckShaderPropertyArgument(L, 2);
+		if (auto *shader = CheckShader(L, instance)) {
+			return StackValue<Enums::RenderTexture>::Push(L, shader->GetRenderTexture(std::move(name)));
+		}
+		return 0;
+	}
+
 	bool ShaderScript::Reflect() {
 		if (Reflected) {
 			return DeclaredParameters.Found;
@@ -362,6 +389,7 @@ namespace gargantuan {
 		// set, so the reflection matches on storage class as well.
 		auto usage = ShaderReflection::ReflectBlockUsage(spirv, bytes, 0);
 		ReadsTime = usage.Reads("Time");
+		ReadsJitter = usage.Reads("Jitter");
 		BuiltinsChecked = true;
 	}
 
@@ -372,10 +400,23 @@ namespace gargantuan {
 		return ReadsTime;
 	}
 
+	bool ShaderScript::ReadsBuiltinJitter() {
+		if (!BuiltinsChecked) {
+			Reflect();
+		}
+		return ReadsJitter;
+	}
+
 	bool ShaderScript::NeedsRedrawEveryFrame() {
 		// The script's flag only ever forces it on, so a shader found to read
 		// Time animates whatever the script says
 		return RedrawEveryFrame || ReadsBuiltinTime();
+	}
+
+	bool ShaderScript::NeedsJitteredProjection() {
+		// Same rule as RedrawEveryFrame: the flag forces it on, and a shader
+		// found to read the offset gets it whether or not a script asked
+		return JitterProjection || ReadsBuiltinJitter();
 	}
 
 	bool ShaderScript::IsReflected() const {
@@ -478,6 +519,15 @@ namespace gargantuan {
 	std::shared_ptr<Camera> ShaderScript::GetCameraTexture(std::string name) const {
 		auto it = Images.find(name);
 		return it == Images.end() ? nullptr : it->second.Camera;
+	}
+
+	void ShaderScript::SetRenderTexture(std::string name, Enums::RenderTexture texture) {
+		AssignTextureSource(ImageOrder, Images, name, TextureSource{nullptr, nullptr, texture}, MAXIMUM_IMAGES);
+	}
+
+	Enums::RenderTexture ShaderScript::GetRenderTexture(std::string name) const {
+		auto it = Images.find(name);
+		return it == Images.end() ? Enums::RenderTexture::None : it->second.Render;
 	}
 
 	std::vector<ShaderScript::TextureSource> ShaderScript::GetTextureSources() const {

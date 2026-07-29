@@ -6,6 +6,7 @@
 #include "gargantuan/datatypes/Vector2.hpp"
 #include "gargantuan/datatypes/Vector3.hpp"
 #include "gargantuan/render/ShaderCompiler.hpp"
+#include "gargantuan/render/ShaderPresets.hpp"
 #include "gargantuan/render/ShaderReflection.hpp"
 
 #include <cstdint>
@@ -67,6 +68,27 @@ namespace gargantuan {
 		// the whole of it -- so this is about the members actually loaded.
 		bool ReadsBuiltinTime();
 
+		// Forces the camera running this pass to offset its projection by a
+		// sub-pixel amount each frame, a different offset every time.
+		//
+		// That is what turns a temporal pass into antialiasing rather than a
+		// blur: each frame samples the scene at a slightly different point
+		// inside the pixel, so a pass blending frames together averages real
+		// coverage instead of the same aliased sample over and over. On its own
+		// it only makes the picture shimmer, which is why a camera jitters for a
+		// pass that asks and for no other.
+		//
+		// Rarely needed by hand, for the same reason RedrawEveryFrame is not: a
+		// pass that reads builtin.Jitter is detected from its own SPIR-V. It is
+		// here for a pass that wants the offset without reading the value.
+		//
+		// NeedsJitteredProjection is the answer the renderer acts on.
+		bool JitterProjection = false;
+
+		bool NeedsJitteredProjection();
+		// Whether the shader reads builtin.Jitter, read out of its SPIR-V
+		bool ReadsBuiltinJitter();
+
 		// GLSL source compiled at runtime. Setting it marks the script dirty;
 		// Compile() then turns it into bytecode, or fills CompileError.
 		std::string GetCode() const;
@@ -117,12 +139,25 @@ namespace gargantuan {
 		// frame, which offscreen cameras do before the window one.
 		void SetCameraTexture(std::string name, std::shared_ptr<Camera> camera);
 		std::shared_ptr<Camera> GetCameraTexture(std::string name) const;
+		// Binds one of the buffers the renderer keeps for whichever camera is
+		// running this pass -- its own last frame, or its motion vectors --
+		// rather than a texture the script names.
+		//
+		// The camera is not named because it cannot be: the antialias pass is
+		// one shared script that runs on every camera with Antialiasing on, so
+		// "my own history" is the only way it can say what it means. Asking is
+		// also what makes the engine produce the buffer at all; a camera nothing
+		// asks pays for neither.
+		void SetRenderTexture(std::string name, Enums::RenderTexture texture);
+		Enums::RenderTexture GetRenderTexture(std::string name) const;
 		std::vector<std::string> ListImages();
 		void ClearImages();
-		// One bound texture, which is either an image or a camera's output
+		// One bound texture: an image, another camera's output, or one of the
+		// reader camera's own buffers
 		struct TextureSource {
 			std::shared_ptr<EditableImage> Image;
 			std::shared_ptr<Camera> Camera;
+			Enums::RenderTexture Render = Enums::RenderTexture::None;
 		};
 
 		// In binding order, for the renderer
@@ -154,6 +189,8 @@ namespace gargantuan {
 		static int LGetImage(lua_State *L, Instance *instance);
 		static int LSetCameraTexture(lua_State *L, Instance *instance);
 		static int LGetCameraTexture(lua_State *L, Instance *instance);
+		static int LSetRenderTexture(lua_State *L, Instance *instance);
+		static int LGetRenderTexture(lua_State *L, Instance *instance);
 
 		// Packed slots, ready to push as uniform data. Only used when a shader's
 		// layout could not be reflected.
@@ -179,6 +216,7 @@ namespace gargantuan {
 		// bytecode changes under it. Checked separately from Reflected because
 		// a shader with no parameter block at all still has to be answered for.
 		bool ReadsTime = false;
+		bool ReadsJitter = false;
 		bool BuiltinsChecked = false;
 		// Reads the builtin block's usage out of `spirv`, and records that the
 		// question has now been asked

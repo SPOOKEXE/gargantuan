@@ -316,6 +316,59 @@ namespace gargantuan {
 		return glm::lookAt(position, position + CFrame.GetLookVector(), CFrame.GetUpVector());
 	}
 
+	namespace {
+		// The van der Corput radical inverse: write the index in `base`, mirror
+		// its digits about the point. Halton is that in a different base per
+		// axis, which is what keeps the offsets from lining up into a grid the
+		// way a random pair eventually does -- every new sample lands in the
+		// largest gap the ones before it left.
+		float RadicalInverse(uint32_t index, uint32_t base) {
+			float result = 0.0f;
+			float fraction = 1.0f / (float)base;
+			while (index > 0) {
+				result += (float)(index % base) * fraction;
+				index /= base;
+				fraction /= (float)base;
+			}
+			return result;
+		}
+	} // namespace
+
+	void Camera::AdvanceJitter(bool jittering) {
+		PreviousJitter = Jitter;
+
+		if (!jittering) {
+			Jitter = glm::vec2(0.0f);
+			JitterIndex = 0;
+			return;
+		}
+
+		// One-based, because Halton at zero is the pixel centre and would waste
+		// a frame of the sequence sampling exactly where an unjittered camera
+		// already does
+		JitterIndex = JitterIndex % JITTER_SEQUENCE_LENGTH + 1;
+		Jitter = glm::vec2(RadicalInverse(JitterIndex, 2) - 0.5f, RadicalInverse(JitterIndex, 3) - 0.5f);
+	}
+
+	glm::mat4 Camera::GetJitteredProjectionMatrix() {
+		glm::mat4 projection = GetProjectionMatrix();
+
+		float width = ViewportSize.GetX();
+		float height = ViewportSize.GetY();
+		if (width <= 0.0f || height <= 0.0f || (Jitter.x == 0.0f && Jitter.y == 0.0f)) {
+			return projection;
+		}
+
+		// A slide along clip x and y, scaled by w so it comes out the same
+		// sub-pixel step however far away the geometry is. Two pixels span the
+		// whole of clip space, hence the factor of two; y is subtracted because
+		// SDL flips the viewport to put the origin at the top left, so clip y
+		// runs opposite to the row an offset in pixels is counted down.
+		projection[2][0] += 2.0f * Jitter.x / width;
+		projection[2][1] -= 2.0f * Jitter.y / height;
+		return projection;
+	}
+
 	void Camera::OnEvent(SDL_Window *window, SDL_Event &event) {
 		if (CameraType != Enums::CameraType::Freecam) {
 			return;

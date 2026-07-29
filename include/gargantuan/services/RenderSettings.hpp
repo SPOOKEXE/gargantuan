@@ -53,11 +53,30 @@ namespace gargantuan {
 		// shared pass, so replacing it is one decision rather than one per
 		// camera. A camera wanting something of its own already has Shaders.
 		//
-		// A pass that wants last frame's picture can bind its own camera with
-		// SetCameraTexture: a camera reading itself is a cycle, and the engine
-		// resolves a cycle by handing over the previous frame's copy. That is
-		// the input a reprojecting pass needs, without the engine keeping a
-		// history for cameras that never ask for one.
+		// A pass here runs on every camera at once, so it cannot name the camera
+		// it wants anything from. SetRenderTexture is how it asks for one of the
+		// reader's own buffers instead:
+		//
+		//   Enum.RenderTexture.History   that camera's finished picture, last
+		//                                frame, which is also what makes the
+		//                                engine keep the copy
+		//   Enum.RenderTexture.Velocity  where each of its pixels was on that
+		//                                frame, which makes the engine draw the
+		//                                scene a second time to work them out
+		//
+		// and reading builtin.Jitter in the shader is what puts that camera's
+		// projection on a sub-pixel wander, so successive frames have something
+		// new to average rather than the same sample over again. Nothing is
+		// produced for a camera whose passes ask for none of it.
+		//
+		// Those three are what separate a real temporal pass from a blur, and
+		// assets/shaders/taa.frag is the one the engine ships built on them --
+		// Enum.PresetShaders.TemporalAntialias, with examples/
+		// TemporalAntialiasing.luau showing the swap.
+		//
+		// A pass wanting some other camera's previous frame can still bind that
+		// camera with SetCameraTexture: a camera reading itself is a cycle, and
+		// the engine resolves a cycle by handing over the previous frame's copy.
 		std::shared_ptr<ShaderScript> GetAntialiasShader() const;
 		void SetAntialiasShader(std::shared_ptr<ShaderScript> shader);
 
