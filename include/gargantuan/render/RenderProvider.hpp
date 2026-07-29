@@ -249,6 +249,16 @@ namespace gargantuan {
 		// it per part
 		mutable bool WorldHasSurfaces = false;
 
+		// Hash of just the things the part->texture map is built from, taken
+		// during the scene signature walk because that already reads them.
+		// ResolvePartTextures rebuilds only when it moves.
+		mutable uint64_t SurfaceSignature = 0;
+		uint64_t ResolvedSurfaceSignature = 0;
+		bool PartTexturesResolved = false;
+		// Bumped when a camera target is created or resized, so a stale
+		// texture pointer in the map cannot outlive the texture
+		uint64_t TargetGeneration = 1;
+
 		// One chunk's worth of cull answers, kept between frames so the walk
 		// allocates nothing
 		struct CullResult {

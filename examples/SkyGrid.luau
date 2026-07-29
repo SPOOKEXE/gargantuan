@@ -200,11 +200,15 @@ local angle = 0.0
 local SETTLE = 2.0
 local MEASURE = 5.0
 
+-- os.clock, not the deltaTime handed in: the engine clamps that to a tenth of
+-- a second so a stall cannot teleport the simulation, which also means it
+-- cannot report anything below ten frames a second
 local elapsed = 0.0
 local measured = 0.0
 local frames = 0
 local slowest = 0.0
 local reported = false
+local lastClock = os.clock()
 
 RunService.PreRender:Connect(function(deltaTime)
 	local now = Workspace.DistributedGameTime
@@ -226,14 +230,18 @@ RunService.PreRender:Connect(function(deltaTime)
 		orbitCentre
 	)
 
-	elapsed += deltaTime
+	local nowClock = os.clock()
+	local realDelta = nowClock - lastClock
+	lastClock = nowClock
+
+	elapsed += realDelta
 	if elapsed < SETTLE or reported then
 		return
 	end
 
-	measured += deltaTime
+	measured += realDelta
 	frames += 1
-	slowest = math.max(slowest, deltaTime)
+	slowest = math.max(slowest, realDelta)
 
 	if measured >= MEASURE then
 		reported = true

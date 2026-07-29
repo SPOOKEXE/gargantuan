@@ -297,6 +297,7 @@ namespace gargantuan {
 
 		// The scratch half is only paid for once a camera actually has shaders
 		if (sized) {
+			TargetGeneration++;
 			target.ScratchTexture = SDL_CreateGPUTexture(Gpu, &colorInfo);
 			if (!target.ScratchTexture) {
 				SDL_Log("Failed to create a %ux%u shader scratch target: %s", width, height, SDL_GetError());
@@ -321,6 +322,7 @@ namespace gargantuan {
 		target.CacheTexture = nullptr;
 		if (target.DepthTexture) SDL_ReleaseGPUTexture(Gpu, target.DepthTexture);
 
+		TargetGeneration++;
 		target.ColorTexture = SDL_CreateGPUTexture(Gpu, &colorInfo);
 		if (withScratch) {
 			target.ScratchTexture = SDL_CreateGPUTexture(Gpu, &colorInfo);
@@ -884,7 +886,18 @@ namespace gargantuan {
 
 	void RenderProvider::ResolvePartTextures(const std::shared_ptr<WorldRoot> &worldRoot) {
 		G_PROFILE("Part Textures");
+
+		// The map is the same for every camera and the same between frames
+		// until something it is built from changes. It was being rebuilt once
+		// per camera pass regardless.
+		if (PartTexturesResolved && ResolvedSurfaceSignature == SurfaceSignature) {
+			return;
+		}
+
 		PartTextures.clear();
+		ResolvedSurfaceSignature = SurfaceSignature;
+		PartTexturesResolved = true;
+
 		// Nothing is showing anything, so nothing to walk for
 		if (!worldRoot || !WorldHasSurfaces) {
 			return;
@@ -2083,6 +2096,10 @@ namespace gargantuan {
 		WorldHasSurfaceCameras = false;
 		WorldHasSurfaces = false;
 
+		uint64_t surfaces = 0x9E3779B97F4A7C15ull;
+		MixBits(surfaces, TargetGeneration);
+		MixBits(surfaces, world->Parts.size());
+
 		for (const auto &part : world->Parts) {
 			if (!part) {
 				MixBits(hash, 0);
@@ -2117,6 +2134,7 @@ namespace gargantuan {
 			}
 		}
 
+		SurfaceSignature = surfaces;
 		return hash;
 	}
 
