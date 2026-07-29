@@ -96,6 +96,7 @@ endif()
 
 add_subdirectory(vendor/box3d)
 add_subdirectory(vendor/glm)
+add_subdirectory(vendor/json)
 add_subdirectory(vendor/luau)
 add_subdirectory(vendor/sdl)
 add_subdirectory(vendor/spdlog)
@@ -140,6 +141,7 @@ target_link_libraries(gargantuan
 		SDL3::SDL3
 		box3d
 		glm
+		nlohmann_json
 		spdlog::spdlog
 		Luau.Compiler
 		Luau.CodeGen

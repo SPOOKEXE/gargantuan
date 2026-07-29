@@ -16,3 +16,6 @@
 [submodule "vendor/magicenum"]
 	path = vendor/magicenum
 	url = https://github.com/Neargye/magic_enum.git
+[submodule "vendor/json"]
+	path = vendor/json
+	url = https://github.com/nlohmann/json.git
