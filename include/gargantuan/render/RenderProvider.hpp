@@ -284,7 +284,7 @@ namespace gargantuan {
 		// Point-sample motion; interpolation invents invalid vectors at edges.
 		SDL_GPUSampler *PointSampler = nullptr;
 		void EnsurePointSampler();
-		SDL_GPUSampler *GetSourceSampler(const ShaderScript::TextureSource &source);
+		SDL_GPUSampler *GetSourceSampler(const ShaderProperties::TextureSource &source);
 
 		// Null for empty viewports; withScratch guarantees both ping-pong targets.
 		CameraTarget *AcquireCameraTarget(Camera *camera, bool withScratch);
@@ -309,7 +309,7 @@ namespace gargantuan {
 
 		SDL_GPUTexture *AcquireImageTexture(EditableImage *image);
 		// Resolve image/camera input; cycle-closing readers use the prior frame.
-		SDL_GPUTexture *ResolveTextureSource(Camera *reader, const ShaderScript::TextureSource &source);
+		SDL_GPUTexture *ResolveTextureSource(Camera *reader, const ShaderProperties::TextureSource &source);
 		void RecordHistoryCopy(SDL_GPUCommandBuffer *commands, Camera *camera, const CameraTarget &target);
 
 		// Optional temporal outputs requested by this camera's shaders.

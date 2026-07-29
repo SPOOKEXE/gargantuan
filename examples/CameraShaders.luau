@@ -47,13 +47,13 @@ securityCamera.Parent = Workspace
 local grayscale = Instance.new("ComputeShader")
 grayscale.Name = "Grayscale"
 grayscale.Source = Enum.PresetShaders.BlackWhite
-grayscale:SetNumber(Enum.ShaderProperty.Strength, 1)
+grayscale.Properties:SetNumber(Enum.ShaderProperty.Strength, 1)
 
 local vignette = Instance.new("PostProcessShader")
 vignette.Name = "Vignette"
 vignette.Source = Enum.PresetShaders.Vignette
-vignette:SetNumber(Enum.ShaderProperty.Intensity, 0.9)
-vignette:SetColor3(Enum.ShaderProperty.Tint, Color3.new(0.8, 1, 0.8))
+vignette.Properties:SetNumber(Enum.ShaderProperty.Intensity, 0.9)
+vignette.Properties:SetColor3(Enum.ShaderProperty.Tint, Color3.new(0.8, 1, 0.8))
 
 securityCamera:AddShader(grayscale)
 securityCamera:AddShader(vignette)
@@ -78,7 +78,7 @@ scanlines.Code = [[
 		OutputColor = vec4(source.rgb * line, source.a);
 	}
 ]]
-scanlines:SetNumber("Darkness", 0.5)
+scanlines.Properties:SetNumber("Darkness", 0.5)
 
 if scanlines:Compile() then
 	securityCamera:AddShader(scanlines)
@@ -117,9 +117,9 @@ end
 local overlay = Instance.new("PostProcessShader")
 overlay.Name = "PictureInPicture"
 overlay.Source = Enum.PresetShaders.Overlay
-overlay:SetCameraTexture(Enum.ShaderProperty.OverlayTexture, securityCamera)
-overlay:SetNumber(Enum.ShaderProperty.Opacity, 0.75)
-overlay:SetVector2(Enum.ShaderProperty.Position, Vector2.new(4, 4))
+overlay.Properties:SetCameraTexture(Enum.ShaderProperty.OverlayTexture, securityCamera)
+overlay.Properties:SetNumber(Enum.ShaderProperty.Opacity, 0.75)
+overlay.Properties:SetVector2(Enum.ShaderProperty.Position, Vector2.new(4, 4))
 
 local windowCamera = Workspace.CurrentCamera
 windowCamera:AddShader(overlay)

@@ -92,7 +92,8 @@ namespace gargantuan {
 		Tracking,
 		Vignette,
 
-		// Texture bindings, for SetImage, SetCameraTexture and SetRenderTexture
+		// Texture bindings, for a ShaderProperties SetImage, SetCameraTexture
+		// and SetRenderTexture
 		DepthHistoryTexture,
 		DepthTexture,
 		FirstTexture,

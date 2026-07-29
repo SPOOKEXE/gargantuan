@@ -1,34 +1,23 @@
 #pragma once
 
-#include "gargantuan/datatypes/Color3.hpp"
-#include "gargantuan/classes/EditableImage.hpp"
+#include "gargantuan/classes/ShaderProperties.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
-#include "gargantuan/datatypes/Vector2.hpp"
-#include "gargantuan/datatypes/Vector3.hpp"
 #include "gargantuan/render/ShaderCompiler.hpp"
 #include "gargantuan/render/ShaderPresets.hpp"
 #include "gargantuan/render/ShaderReflection.hpp"
 
 #include <cstdint>
 #include <lua.h>
-#include <glm/glm.hpp>
 #include <memory>
-#include <utility>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace gargantuan {
-	class Camera;
-
 	// Camera shader base. Source names a build-time asset without its extension.
 	// Runtime GLSL must be compiled to bytecode before SDL can use it.
 	class ShaderScript : public Instance {
 	  public:
 		static const ClassDefinition DEFINITION;
-
-		// Maximum parameter slots in one uniform buffer.
-		static constexpr size_t MAXIMUM_PARAMETERS = 64;
 
 		// Asset name without directory or extension; compiled Code takes precedence.
 		std::string Source;
@@ -70,36 +59,11 @@ namespace gargantuan {
 		// Which stage this kind of shader compiles as
 		virtual ShaderCompiler::Stage GetStage() const = 0;
 
-		// Parameters use 16-byte std140 slots in first-set order.
-		void SetNumber(std::string name, float value);
-		void SetVector2(std::string name, Vector2 value);
-		void SetVector3(std::string name, glm::vec3 value);
-		void SetColor3(std::string name, Color3 value);
-		void SetBool(std::string name, bool value);
-		// Images bind in first-set order after SourceTexture at sampler slot 0.
-		static constexpr size_t MAXIMUM_IMAGES = 8;
-
-		void SetImage(std::string name, std::shared_ptr<EditableImage> image);
-		std::shared_ptr<EditableImage> GetImage(std::string name) const;
-		// Binds another camera's GPU output; that camera must render first.
-		void SetCameraTexture(std::string name, std::shared_ptr<Camera> camera);
-		std::shared_ptr<Camera> GetCameraTexture(std::string name) const;
-		// Binds a buffer owned by the camera running the pass; requesting it enables production.
-		void SetRenderTexture(std::string name, Enums::RenderTexture texture);
-		Enums::RenderTexture GetRenderTexture(std::string name) const;
-		std::vector<std::string> ListImages();
-		void ClearImages();
-		// One bound texture: an image, another camera's output, or one of the
-		// reader camera's own buffers
-		struct TextureSource {
-			std::shared_ptr<EditableImage> Image;
-			std::shared_ptr<Camera> Camera;
-			Enums::RenderTexture Render = Enums::RenderTexture::None;
-		};
-
-		// In binding order, for the renderer
-		std::vector<std::shared_ptr<EditableImage>> GetImages() const;
-		std::vector<TextureSource> GetTextureSources() const;
+		// Parameter values and texture bindings. Never null; reading it also
+		// makes this shader the one its parameter names are checked against.
+		const std::shared_ptr<ShaderProperties> &GetProperties();
+		// A null set is replaced with a fresh empty one rather than stored.
+		void SetProperties(std::shared_ptr<ShaderProperties> properties);
 
 		// SPIR-V names. Compile/Validate reflect runtime code; assets reflect lazily.
 		std::vector<std::string> GetExpectedParameters();
@@ -109,38 +73,10 @@ namespace gargantuan {
 		// True when a parameter of this name can be set
 		bool IsParameterExpected(const std::string &name) const;
 
-		std::vector<std::string> ListParameters();
-		void ClearParameters();
-
-		// Manual bindings validate names against reflection.
-		static int LSetNumber(lua_State *L, Instance *instance);
-		static int LSetVector2(lua_State *L, Instance *instance);
-		static int LSetVector3(lua_State *L, Instance *instance);
-		static int LSetColor3(lua_State *L, Instance *instance);
-		static int LSetBool(lua_State *L, Instance *instance);
-		// Bound by hand too, so a binding's name can be an Enum.ShaderProperty
-		static int LSetImage(lua_State *L, Instance *instance);
-		static int LGetImage(lua_State *L, Instance *instance);
-		static int LSetCameraTexture(lua_State *L, Instance *instance);
-		static int LGetCameraTexture(lua_State *L, Instance *instance);
-		static int LSetRenderTexture(lua_State *L, Instance *instance);
-		static int LGetRenderTexture(lua_State *L, Instance *instance);
-
-		// Packed slots, ready to push as uniform data. Only used when a shader's
-		// layout could not be reflected.
-		const std::vector<glm::vec4> &GetPackedParameters() const;
-		size_t GetPackedParameterBytes() const;
-
-		// Name and value of every parameter, in the order they were first set
-		std::vector<std::pair<std::string, glm::vec4>> GetParameters() const;
-
-	  protected:
-		void SetParameter(const std::string &name, glm::vec4 value);
-
 	  private:
-		std::vector<std::string> ParameterOrder;
-		std::unordered_map<std::string, size_t> ParameterIndices;
-		std::vector<glm::vec4> ParameterValues;
+		// Built on first use, because a shader constructed by the class
+		// registry is not yet shared-owned and so cannot claim ownership.
+		std::shared_ptr<ShaderProperties> Properties;
 
 		ShaderReflection::BlockLayout DeclaredParameters;
 		bool Reflected = false;
@@ -153,8 +89,6 @@ namespace gargantuan {
 		// question has now been asked
 		void CheckBuiltins(const void *spirv, size_t bytes);
 
-		std::vector<std::string> ImageOrder;
-		std::unordered_map<std::string, TextureSource> Images;
 		std::string Code;
 		std::string CompileError;
 		std::vector<unsigned char> Bytecode;

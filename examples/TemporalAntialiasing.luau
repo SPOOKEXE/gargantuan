@@ -155,17 +155,19 @@ print(`built-in antialias: {string.format("%.3f", builtinError)} mean error from
 local taa = Instance.new("PostProcessShader")
 taa.Name = "TemporalAntialias"
 taa.Preset = Enum.PresetShaders.TemporalAntialias
-taa:SetRenderTexture(Enum.ShaderProperty.HistoryTexture, Enum.RenderTexture.History)
-taa:SetRenderTexture(Enum.ShaderProperty.VelocityTexture, Enum.RenderTexture.Velocity)
-taa:SetRenderTexture(Enum.ShaderProperty.DepthTexture, Enum.RenderTexture.Depth)
-taa:SetRenderTexture(Enum.ShaderProperty.DepthHistoryTexture, Enum.RenderTexture.DepthHistory)
+
+local bindings = taa.Properties
+bindings:SetRenderTexture(Enum.ShaderProperty.HistoryTexture, Enum.RenderTexture.History)
+bindings:SetRenderTexture(Enum.ShaderProperty.VelocityTexture, Enum.RenderTexture.Velocity)
+bindings:SetRenderTexture(Enum.ShaderProperty.DepthTexture, Enum.RenderTexture.Depth)
+bindings:SetRenderTexture(Enum.ShaderProperty.DepthHistoryTexture, Enum.RenderTexture.DepthHistory)
 -- All optional; these are the defaults the shader falls back to
-taa:SetNumber(Enum.ShaderProperty.Feedback, 0.92)
-taa:SetNumber(Enum.ShaderProperty.Clamping, 1.25)
-taa:SetNumber(Enum.ShaderProperty.Disocclusion, 0.02)
+bindings:SetNumber(Enum.ShaderProperty.Feedback, 0.92)
+bindings:SetNumber(Enum.ShaderProperty.Clamping, 1.25)
+bindings:SetNumber(Enum.ShaderProperty.Disocclusion, 0.02)
 
 RenderSettings.AntialiasShader = taa
-print(`swapped in {taa.Name}, which reads {#taa:ListImages()} engine textures`)
+print(`swapped in {taa.Name}, which reads {#taa.Properties:ListImages()} engine textures`)
 
 -- The curve is not a straight climb. Frame one has no history and ties the
 -- built-in; frame two is the worst of all, being a sub-pixel-shifted copy of

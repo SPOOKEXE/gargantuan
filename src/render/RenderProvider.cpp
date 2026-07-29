@@ -340,7 +340,7 @@ namespace gargantuan {
 	}
 
 	SDL_GPUTexture *RenderProvider::ResolveTextureSource(
-		Camera *reader, const ShaderScript::TextureSource &source
+		Camera *reader, const ShaderProperties::TextureSource &source
 	) {
 		if (source.Image) {
 			return AcquireImageTexture(source.Image.get());
@@ -551,7 +551,7 @@ namespace gargantuan {
 		PointSampler = SDL_CreateGPUSampler(Gpu, &samplerInfo);
 	}
 
-	SDL_GPUSampler *RenderProvider::GetSourceSampler(const ShaderScript::TextureSource &source) {
+	SDL_GPUSampler *RenderProvider::GetSourceSampler(const ShaderProperties::TextureSource &source) {
 		// Point-sample measurements; only pictures may interpolate.
 		switch (source.Render) {
 		case Enums::RenderTexture::Velocity:
@@ -583,7 +583,7 @@ namespace gargantuan {
 				needs.Jitter = true;
 			}
 
-			for (const auto &source : shader->GetTextureSources()) {
+			for (const auto &source : shader->GetProperties()->GetTextureSources()) {
 				switch (source.Render) {
 				case Enums::RenderTexture::History:
 					needs.History = true;
@@ -972,7 +972,7 @@ namespace gargantuan {
 
 		if (!layout.Found) {
 			// Without reflection, pack one slot per parameter in set order.
-			const auto &slots = shader->GetPackedParameters();
+			const auto &slots = shader->GetProperties()->GetPackedParameters();
 			std::vector<uint8_t> packed(slots.size() * sizeof(glm::vec4));
 			if (!slots.empty()) {
 				std::memcpy(packed.data(), slots.data(), packed.size());
@@ -981,7 +981,7 @@ namespace gargantuan {
 		}
 
 		std::vector<uint8_t> packed(layout.Size, 0);
-		for (const auto &[name, value] : shader->GetParameters()) {
+		for (const auto &[name, value] : shader->GetProperties()->GetParameters()) {
 			const auto *member = layout.Find(name);
 			if (!member || member->Offset >= packed.size()) {
 				continue;
@@ -1454,13 +1454,13 @@ namespace gargantuan {
 					.store_op = SDL_GPU_STOREOP_STORE,
 				};
 				// Slot 0 is camera output; script images follow set order.
-				SDL_GPUTextureSamplerBinding bindings[1 + ShaderScript::MAXIMUM_IMAGES];
+				SDL_GPUTextureSamplerBinding bindings[1 + ShaderProperties::MAXIMUM_IMAGES];
 				bindings[0] = {.texture = source, .sampler = ShaderSampler};
 				uint32_t bindingCount = 1;
 
-				for (auto &bound : post->GetTextureSources()) {
+				for (auto &bound : post->GetProperties()->GetTextureSources()) {
 					SDL_GPUTexture *texture = ResolveTextureSource(camera, bound);
-					if (!texture || bindingCount > ShaderScript::MAXIMUM_IMAGES) {
+					if (!texture || bindingCount > ShaderProperties::MAXIMUM_IMAGES) {
 						continue;
 					}
 					bindings[bindingCount++] = {.texture = texture, .sampler = GetSourceSampler(bound)};
@@ -1470,7 +1470,8 @@ namespace gargantuan {
 				uint32_t declared = compiled->Resources.Found ? compiled->Resources.SampledImages : 1;
 				if (bindingCount != declared) {
 					SDL_Log(
-						"Shader '%s' declares %u sampler(s) but %u were supplied; give it %u image(s) with SetImage",
+						"Shader '%s' declares %u sampler(s) but %u were supplied; give it %u image(s) with "
+					"Properties:SetImage",
 						post->Source.empty() ? "<code>" : post->Source.c_str(),
 						declared,
 						bindingCount,
@@ -1571,7 +1572,7 @@ namespace gargantuan {
 		samplerStorage.clear();
 		samplerStorage.push_back({.texture = frameContext.ShadowMapTexture, .sampler = ShadowSampler});
 
-		for (auto &source : camera->SurfaceShader->GetTextureSources()) {
+		for (auto &source : camera->SurfaceShader->GetProperties()->GetTextureSources()) {
 			SDL_GPUTexture *texture = ResolveTextureSource(camera, source);
 			if (!texture) {
 				continue;
@@ -1693,7 +1694,7 @@ namespace gargantuan {
 			AntialiasShader->Name = "Antialias";
 			AntialiasShader->Source = "antialias";
 			// Preserve pixels below this local-contrast threshold.
-			AntialiasShader->SetNumber("Threshold", 0.0625f);
+			AntialiasShader->GetProperties()->SetNumber("Threshold", 0.0625f);
 		}
 		return AntialiasShader;
 	}
@@ -1708,7 +1709,7 @@ namespace gargantuan {
 			if (!shader) {
 				return;
 			}
-			for (const auto &source : shader->GetTextureSources()) {
+			for (const auto &source : shader->GetProperties()->GetTextureSources()) {
 				if (source.Camera) {
 					sampled.push_back(source.Camera.get());
 				}
@@ -1994,20 +1995,27 @@ namespace gargantuan {
 			// Pointer catches replacement; QuickHash catches property writes.
 			MixPointer(hash, part.get());
 			MixBits(hash, part->QuickHash);
-			// Pointer identifies the source; revision/count identifies its content.
-			if (hadSurfaces) {
-				MixPointer(hash, part->SurfaceCamera.get());
-				MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
-				MixPointer(hash, part->SurfaceImage.get());
-				MixBits(hash, part->SurfaceImage ? part->SurfaceImage->GetRevision() : 0);
-			}
+
+			// Read once: every shared_ptr deref is a call here.
+			Camera *surfaceCamera = part->SurfaceCamera.get();
+			EditableImage *surfaceImage = part->SurfaceImage.get();
 
 			// Detect here so later walks skip absent surface sources.
-			if (part->SurfaceCamera) {
+			if (surfaceCamera) {
 				WorldHasSurfaceCameras = true;
 				WorldHasSurfaces = true;
-			} else if (part->SurfaceImage) {
+			} else if (surfaceImage) {
 				WorldHasSurfaces = true;
+			}
+
+			// Pointer identifies the source; revision/count identifies its
+			// content. Only the parts carrying one: a part gaining a surface
+			// bumps its QuickHash, which is mixed above.
+			if (hadSurfaces && (surfaceCamera || surfaceImage)) {
+				MixPointer(hash, surfaceCamera);
+				MixBits(hash, GetCameraDrawCount(surfaceCamera));
+				MixPointer(hash, surfaceImage);
+				MixBits(hash, surfaceImage ? surfaceImage->GetRevision() : 0);
 			}
 		}
 
@@ -2210,7 +2218,7 @@ namespace gargantuan {
 			MixPointer(hash, shader.get());
 			MixBits(hash, shader->GetRevision());
 			MixBits(hash, shader->NeedsRedrawEveryFrame() ? 1 : 0);
-			for (const auto &[name, value] : shader->GetParameters()) {
+			for (const auto &[name, value] : shader->GetProperties()->GetParameters()) {
 				MixBits(hash, std::hash<std::string>{}(name));
 				MixFloat(hash, value.x);
 				MixFloat(hash, value.y);
@@ -2219,7 +2227,7 @@ namespace gargantuan {
 			}
 
 			// Include image revisions and camera draw counts.
-			for (const auto &bound : shader->GetTextureSources()) {
+			for (const auto &bound : shader->GetProperties()->GetTextureSources()) {
 				MixPointer(hash, bound.Image.get());
 				MixBits(hash, bound.Image ? bound.Image->GetRevision() : 0);
 				MixPointer(hash, bound.Camera.get());

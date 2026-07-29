@@ -9,7 +9,7 @@ namespace gargantuan {
 	//   set 0, binding 0  readonly  image2D SourceTexture   the image so far
 	//   set 1, binding 0  writeonly image2D OutputTexture   where to write
 	//   set 2, binding 0  Builtin { Resolution, Time }
-	//   set 2, binding 1  Params  { your parameters, in ListParameters order }
+	//   set 2, binding 1  Params  { your parameters, in Properties:ListParameters order }
 	// ThreadGroupSize must equal local_size_x/y/z for SDL pipeline creation.
 	class ComputeShader : public ShaderScript {
 	  public:

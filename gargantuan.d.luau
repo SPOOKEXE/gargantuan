@@ -784,23 +784,14 @@ declare class ServiceProvider extends Instance
 	function GetServices(self): { Instance? }
 end
 
-declare class ShaderScript extends Instance
-	Code: string
-	CompileError: string
-	JitterProjection: boolean
-	Preset: Enum_PresetShaders
-	RedrawEveryFrame: boolean
-	Source: string | Enum_PresetShaders
+declare class ShaderProperties extends Instance
 	function ClearImages(self): ()
 	function ClearParameters(self): ()
-	function Compile(self): boolean
 	function GetCameraTexture(self, name: string | Enum_ShaderProperty): Camera?
-	function GetExpectedParameters(self): { string }
 	function GetImage(self, name: string | Enum_ShaderProperty): EditableImage?
 	function GetRenderTexture(self, name: string | Enum_ShaderProperty): Enum_RenderTexture
 	function ListImages(self): { string }
 	function ListParameters(self): { string }
-	function Reflect(self): boolean
 	function SetBool(self, name: string | Enum_ShaderProperty, value: boolean): ()
 	function SetCameraTexture(self, name: string | Enum_ShaderProperty, value: Camera): ()
 	function SetColor3(self, name: string | Enum_ShaderProperty, value: Color3): ()
@@ -809,6 +800,19 @@ declare class ShaderScript extends Instance
 	function SetRenderTexture(self, name: string | Enum_ShaderProperty, value: Enum_RenderTexture): ()
 	function SetVector2(self, name: string | Enum_ShaderProperty, value: Vector2): ()
 	function SetVector3(self, name: string | Enum_ShaderProperty, value: Vector3): ()
+end
+
+declare class ShaderScript extends Instance
+	Code: string
+	CompileError: string
+	JitterProjection: boolean
+	Preset: Enum_PresetShaders
+	Properties: ShaderProperties?
+	RedrawEveryFrame: boolean
+	Source: string | Enum_PresetShaders
+	function Compile(self): boolean
+	function GetExpectedParameters(self): { string }
+	function Reflect(self): boolean
 	function Validate(self): boolean
 end
 

@@ -5,6 +5,7 @@
 #include "gargantuan/classes/ComputeShader.hpp"
 #include "gargantuan/classes/EditableImage.hpp"
 #include "gargantuan/classes/PostProcessShader.hpp"
+#include "gargantuan/classes/ShaderProperties.hpp"
 #include "gargantuan/classes/ShaderScript.hpp"
 #include "gargantuan/classes/SurfaceShader.hpp"
 #include "gargantuan/classes/InputObject.hpp"
@@ -47,6 +48,7 @@ namespace gargantuan::ClassRegistry {
 			USE_INSTANCE_DEFINITION(RenderSettings),
 			USE_INSTANCE_DEFINITION(RunService),
 			USE_INSTANCE_DEFINITION(ServiceProvider),
+			USE_INSTANCE_DEFINITION(ShaderProperties),
 			USE_INSTANCE_DEFINITION(ShaderScript),
 			USE_INSTANCE_DEFINITION(SurfaceShader),
 			USE_INSTANCE_DEFINITION(Tween),

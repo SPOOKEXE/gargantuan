@@ -65,12 +65,15 @@ for index, entry in layout do
 	-- Interlacing and sensor noise are driven by builtin.Time, so this pass
 	-- has to keep running once the room stops moving
 	shader.RedrawEveryFrame = true
-	shader:SetNumber(Enum.ShaderProperty.Distortion, entry.night and 0.5 or 0.32)
-	shader:SetNumber(Enum.ShaderProperty.Scanlines, 1)
-	shader:SetNumber(Enum.ShaderProperty.Noise, entry.night and 0.10 or 0.05)
-	shader:SetNumber(Enum.ShaderProperty.NightVision, entry.night and 1 or 0)
-	shader:SetNumber(Enum.ShaderProperty.Contrast, entry.night and 1.05 or 1.12)
-	shader:SetNumber(Enum.ShaderProperty.Gain, entry.night and 1 or 1.55)
+
+	local look = shader.Properties
+	look:SetNumber(Enum.ShaderProperty.Distortion, entry.night and 0.5 or 0.32)
+	look:SetNumber(Enum.ShaderProperty.Scanlines, 1)
+	look:SetNumber(Enum.ShaderProperty.Noise, entry.night and 0.10 or 0.05)
+	look:SetNumber(Enum.ShaderProperty.NightVision, entry.night and 1 or 0)
+	look:SetNumber(Enum.ShaderProperty.Contrast, entry.night and 1.05 or 1.12)
+	look:SetNumber(Enum.ShaderProperty.Gain, entry.night and 1 or 1.55)
+
 	camera:AddShader(shader)
 
 	feeds[index] = { camera = camera, entry = entry }

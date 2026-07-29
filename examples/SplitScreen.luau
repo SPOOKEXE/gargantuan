@@ -40,7 +40,7 @@ right.Parent = Workspace
 
 local grayscale = Instance.new("ComputeShader")
 grayscale.Source = Enum.PresetShaders.BlackWhite
-grayscale:SetNumber(Enum.ShaderProperty.Strength, 1)
+grayscale.Properties:SetNumber(Enum.ShaderProperty.Strength, 1)
 right:AddShader(grayscale)
 
 print(`split screen: left {tostring(left.WindowSize)}, right {tostring(right.WindowSize)}`)
@@ -81,8 +81,8 @@ inset.Code = [[
 ]]
 
 if inset:Compile() then
-	inset:SetCameraTexture("Mirror", mirror)
-	inset:SetNumber("InsetSize", 0.28)
+	inset.Properties:SetCameraTexture("Mirror", mirror)
+	inset.Properties:SetNumber("InsetSize", 0.28)
 	left:AddShader(inset)
 	print("rear-view mirror sampling the third camera")
 else

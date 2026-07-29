@@ -54,8 +54,8 @@ namespace gargantuan {
 		// camera. A camera wanting something of its own already has Shaders.
 		//
 		// A pass here runs on every camera at once, so it cannot name the camera
-		// it wants anything from. SetRenderTexture is how it asks for one of the
-		// reader's own buffers instead:
+		// it wants anything from. Properties:SetRenderTexture is how it asks
+		// for one of the reader's own buffers instead:
 		//
 		//   Enum.RenderTexture.History   that camera's finished picture, last
 		//                                frame, which is also what makes the
@@ -81,8 +81,9 @@ namespace gargantuan {
 		// TemporalAntialiasing.luau showing the swap.
 		//
 		// A pass wanting some other camera's previous frame can still bind that
-		// camera with SetCameraTexture: a camera reading itself is a cycle, and
-		// the engine resolves a cycle by handing over the previous frame's copy.
+		// camera with Properties:SetCameraTexture: a camera reading itself is a
+		// cycle, and the engine resolves a cycle by handing over the previous
+		// frame's copy.
 		std::shared_ptr<ShaderScript> GetAntialiasShader() const;
 		void SetAntialiasShader(std::shared_ptr<ShaderScript> shader);
 
