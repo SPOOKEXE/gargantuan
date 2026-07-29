@@ -58,8 +58,6 @@ eyes. What is missing is the runtime that drives them.
 
 ## Shaders
 
-- [ ] Let the built-in antialias pass be swapped for a better one, eg. TAA using
-      the previous-frame copies cameras already keep
 - [ ] Vertex stage overrides, so a shader can move geometry and not only shade it
 - [ ] Reflect vertex inputs, to reject a surface shader whose layout does not
       match what opaque.vert emits

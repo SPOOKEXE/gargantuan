@@ -2,7 +2,11 @@
 
 #include "gargantuan/datatypes/Instance.hpp"
 
+#include <memory>
+
 namespace gargantuan {
+	class ShaderScript;
+
 	// Knobs that belong to the renderer rather than to the place. Roblox keeps
 	// its RenderSettings in Studio, where a game cannot reach it; a standalone
 	// engine has nowhere else to put them, so this is a service like any other.
@@ -43,8 +47,23 @@ namespace gargantuan {
 		float GetMaxCameraFPS() const;
 		void SetMaxCameraFPS(float framesPerSecond);
 
+		// What Camera.Antialiasing runs. Null is the engine's own edge-softening
+		// pass; setting one puts that shader in its place for every camera with
+		// Antialiasing on, which is the whole point -- the built-in is one
+		// shared pass, so replacing it is one decision rather than one per
+		// camera. A camera wanting something of its own already has Shaders.
+		//
+		// A pass that wants last frame's picture can bind its own camera with
+		// SetCameraTexture: a camera reading itself is a cycle, and the engine
+		// resolves a cycle by handing over the previous frame's copy. That is
+		// the input a reprojecting pass needs, without the engine keeping a
+		// history for cameras that never ask for one.
+		std::shared_ptr<ShaderScript> GetAntialiasShader() const;
+		void SetAntialiasShader(std::shared_ptr<ShaderScript> shader);
+
 	  private:
 		int FramesInFlight = DEFAULT_FRAMES_IN_FLIGHT;
 		float MaxCameraFPS = DEFAULT_MAX_CAMERA_FPS;
+		std::shared_ptr<ShaderScript> AntialiasShader;
 	};
 } // namespace gargantuan

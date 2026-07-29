@@ -736,6 +736,7 @@ declare class Lighting extends Instance
 end
 
 declare class RenderSettings extends Instance
+	AntialiasShader: ShaderScript?
 	FramesInFlight: number
 	MaxCameraFPS: number
 end

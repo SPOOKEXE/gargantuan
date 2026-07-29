@@ -134,8 +134,12 @@ namespace gargantuan {
 		// blitted into place.
 		void DrawComposite(const std::vector<DrawContext> &cameras);
 
-		// Cameras a camera samples through its shaders, directly
-		static std::vector<Camera *> GetSampledCameras(Camera *camera);
+		// Cameras a camera samples through its shaders, directly. Walks the
+		// chain the camera actually runs, antialias pass included, rather than
+		// only the passes a script added: a swapped-in pass that binds a camera
+		// is a dependency like any other, and one that binds its own camera is
+		// the cycle that earns it a previous-frame copy.
+		std::vector<Camera *> GetSampledCameras(Camera *camera);
 
 		// Orders cameras so that anything sampled by another is drawn before
 		// it, pulling in dependencies the caller did not list. Without this a
@@ -161,6 +165,11 @@ namespace gargantuan {
 		bool RequestRender(DrawContext drawContext, lua_State *thread, ThreadEngine *threadEngine);
 		// Resumes any threads whose downloads have finished
 		void PollRenders(ThreadEngine *threadEngine);
+
+		// Hands over what RenderSettings.AntialiasShader currently holds. The
+		// engine pushes it rather than the renderer reaching for the service,
+		// which is how the rest of RenderSettings already travels.
+		void SetAntialiasOverride(std::shared_ptr<ShaderScript> shader);
 
 		void Resize(int width, int height);
 		void Destroy();
@@ -389,8 +398,11 @@ namespace gargantuan {
 		void ResolvePartTextures(const std::shared_ptr<WorldRoot> &worldRoot);
 		void EnsureWhiteTexture();
 		// The one shared instance of the built-in antialias pass
-		std::shared_ptr<PostProcessShader> GetAntialiasShader();
+		// What Camera.Antialiasing actually runs: whatever RenderSettings was
+		// given, or the engine's own pass when it was given nothing
+		std::shared_ptr<ShaderScript> GetAntialiasShader();
 		std::shared_ptr<PostProcessShader> AntialiasShader;
+		std::shared_ptr<ShaderScript> AntialiasOverride;
 
 		// Both prefer the script's runtime-compiled bytecode and fall back to
 		// its named build-time asset

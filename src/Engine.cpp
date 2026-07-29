@@ -138,6 +138,9 @@ namespace gargantuan {
 		// Nothing else in a frame waits, so without this the backlog of
 		// submitted-but-unfinished work grows without bound.
 		RenderProvider->BeginFrame(RenderSettings->GetFramesInFlight());
+		// Read every frame, so swapping the pass takes effect on the next one
+		// rather than needing the renderer restarted
+		RenderProvider->SetAntialiasOverride(RenderSettings->GetAntialiasShader());
 
 		auto worldRoot = std::static_pointer_cast<WorldRoot>(Workspace);
 		auto lightDirection = Lighting->GetSunDirection();

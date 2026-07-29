@@ -1257,7 +1257,18 @@ namespace gargantuan {
 		return true;
 	}
 
-	std::shared_ptr<PostProcessShader> RenderProvider::GetAntialiasShader() {
+	void RenderProvider::SetAntialiasOverride(std::shared_ptr<ShaderScript> shader) {
+		AntialiasOverride = std::move(shader);
+	}
+
+	std::shared_ptr<ShaderScript> RenderProvider::GetAntialiasShader() {
+		// A swapped-in pass stands in for the built-in entirely. The built-in
+		// is kept rather than dropped, so turning the swap off again does not
+		// have to rebuild it.
+		if (AntialiasOverride) {
+			return AntialiasOverride;
+		}
+
 		if (!AntialiasShader) {
 			AntialiasShader = std::make_shared<PostProcessShader>();
 			AntialiasShader->Name = "Antialias";
@@ -1285,7 +1296,7 @@ namespace gargantuan {
 			}
 		};
 
-		for (const auto &shader : camera->Shaders) {
+		for (const auto &shader : BuildShaderChain(camera)) {
 			collect(shader);
 		}
 		collect(camera->SurfaceShader);

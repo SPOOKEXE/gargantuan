@@ -1,4 +1,5 @@
 #include "gargantuan/services/RenderSettings.hpp"
+#include "gargantuan/classes/ShaderScript.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 
 #include <glm/common.hpp>
@@ -39,6 +40,28 @@ namespace gargantuan {
 						G_UD_REFLECT_TYPE(float),
 					},
 				},
+				{
+					"AntialiasShader",
+					{
+						[](lua_State *L, Instance *instance) -> int {
+							StackValue<std::shared_ptr<ShaderScript>>::Push(
+								L, instance->Cast<RenderSettings>()->GetAntialiasShader()
+							);
+							return 1;
+						},
+						[](lua_State *L, Instance *instance) -> int {
+							auto *settings = instance->Cast<RenderSettings>();
+							if (lua_isnoneornil(L, -1)) {
+								settings->SetAntialiasShader(nullptr);
+								return 0;
+							}
+
+							settings->SetAntialiasShader(CheckStackValue<std::shared_ptr<ShaderScript>>(L, -1));
+							return 0;
+						},
+						G_UD_REFLECT_TYPE(std::shared_ptr<ShaderScript>),
+					},
+				},
 			},
 	};
 
@@ -48,6 +71,14 @@ namespace gargantuan {
 
 	void RenderSettings::SetFramesInFlight(int frames) {
 		FramesInFlight = glm::clamp(frames, MINIMUM_FRAMES_IN_FLIGHT, MAXIMUM_FRAMES_IN_FLIGHT);
+	}
+
+	std::shared_ptr<ShaderScript> RenderSettings::GetAntialiasShader() const {
+		return AntialiasShader;
+	}
+
+	void RenderSettings::SetAntialiasShader(std::shared_ptr<ShaderScript> shader) {
+		AntialiasShader = std::move(shader);
 	}
 
 	float RenderSettings::GetMaxCameraFPS() const {
