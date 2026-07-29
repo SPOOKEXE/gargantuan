@@ -11,15 +11,10 @@
 namespace gargantuan::ClassRegistry {
 	std::unordered_map<std::type_index, Instance::ClassDefinition> &GetDefinitionsMap();
 
+	Instance::ClassDefinition *GetDefinitionByType(std::type_index type);
+
 	template <typename T> Instance::ClassDefinition *GetDefinition() {
-		// NOTE: a reference -- copying the map would hand back a pointer into a
-		// temporary that dies with this call
-		auto &map = GetDefinitionsMap();
-		auto it = map.find(std::type_index(typeid(T)));
-		if (it != map.end()) {
-			return &it->second;
-		}
-		return nullptr;
+		return GetDefinitionByType(std::type_index(typeid(T)));
 	}
 
 	Instance::ClassDefinition *GetDefinition(Instance *instance);

@@ -60,24 +60,65 @@ namespace gargantuan::ClassRegistry {
 		return *CLASS_DEFINITIONS;
 	}
 
+	namespace {
+		std::unordered_map<std::string_view, Instance::ClassDefinition *> &GetNameIndex() {
+			static auto *NAME_INDEX = [] {
+				auto *index = new std::unordered_map<std::string_view, Instance::ClassDefinition *>();
+				for (auto &entry : GetDefinitionsMap()) {
+					index->emplace(entry.second.Name, &entry.second);
+				}
+				return index;
+			}();
+			return *NAME_INDEX;
+		}
+
+		void Flatten(Instance::ClassDefinition *definition) {
+			for (Instance::ClassDefinition *current = definition; current;) {
+				for (auto &[name, property] : current->Properties) {
+					definition->AllProperties.emplace(name, &property);
+				}
+				for (auto &[name, method] : current->Methods) {
+					definition->AllMethods.emplace(name, &method);
+				}
+
+				if (!current->Superclass.has_value()) {
+					break;
+				}
+				current = GetDefinitionByName(current->Superclass.value());
+			}
+
+			definition->Flattened = true;
+		}
+	} // namespace
+
+	Instance::ClassDefinition *GetDefinitionByType(std::type_index type) {
+		auto &map = GetDefinitionsMap();
+		auto it = map.find(type);
+		if (it == map.end()) {
+			return nullptr;
+		}
+
+		Instance::ClassDefinition *definition = &it->second;
+		if (!definition->Flattened) {
+			Flatten(definition);
+		}
+		return definition;
+	}
+
 	Instance::ClassDefinition *GetDefinition(Instance *instance) {
 		if (!instance) return nullptr;
-		auto &map = GetDefinitionsMap();
-		auto it = map.find(std::type_index(typeid(*instance)));
-		if (it != map.end()) {
-			return &it->second;
+		if (instance->CachedDefinition) {
+			return instance->CachedDefinition;
 		}
-		return nullptr;
+
+		instance->CachedDefinition = GetDefinitionByType(std::type_index(typeid(*instance)));
+		return instance->CachedDefinition;
 	};
 
 	Instance::ClassDefinition *GetDefinitionByName(std::string_view name) {
-		auto &map = GetDefinitionsMap();
-		for (auto &definition : map) {
-			if (definition.second.Name == name) {
-				return &definition.second;
-			}
-		}
-		return nullptr;
+		auto &index = GetNameIndex();
+		auto it = index.find(name);
+		return it != index.end() ? it->second : nullptr;
 	}
 
 	std::vector<std::string_view> GetClassNames() {

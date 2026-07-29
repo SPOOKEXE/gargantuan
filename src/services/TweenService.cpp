@@ -71,7 +71,7 @@ namespace gargantuan {
 			const char *rawName = lua_tolstring(L, -2, &length);
 			std::string propertyName(rawName, length);
 
-			if (!target->FindProperty(propertyName).has_value()) {
+			if (!target->FindProperty(propertyName)) {
 				luaL_error(L, "%s is not a valid property of %s", propertyName.c_str(), target->GetFullName().c_str());
 			}
 

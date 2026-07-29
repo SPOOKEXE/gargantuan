@@ -83,7 +83,7 @@ namespace gargantuan {
 
 		for (auto &[name, goalValue] : GoalProperties) {
 			auto property = Target->FindProperty(name);
-			if (!property.has_value() || !property->Read) {
+			if (!property || !property->Read) {
 				continue;
 			}
 
@@ -119,7 +119,7 @@ namespace gargantuan {
 			}
 
 			auto property = Target->FindProperty(name);
-			if (!property.has_value() || !property->Write) {
+			if (!property || !property->Write) {
 				continue;
 			}
 

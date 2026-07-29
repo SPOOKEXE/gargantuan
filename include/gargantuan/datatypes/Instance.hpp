@@ -40,6 +40,9 @@ namespace gargantuan {
 
 			std::unordered_map<std::string_view, This::Property> Properties = {};
 			std::unordered_map<std::string_view, This::Method> Methods = {};
+			bool Flattened = false;
+			std::unordered_map<std::string_view, const This::Property *> AllProperties = {};
+			std::unordered_map<std::string_view, const This::Method *> AllMethods = {};
 		};
 
 		static const ClassDefinition DEFINITION;
@@ -48,6 +51,8 @@ namespace gargantuan {
 
 		std::string_view Name = DEFINITION.Name;
 		bool Archivable = true;
+
+		ClassDefinition *CachedDefinition = nullptr;
 
 		// Stands in for the whole instance when all you need to know is "has
 		// this changed since I last looked". Keep the value you saw and compare
@@ -120,8 +125,8 @@ namespace gargantuan {
 			return dynamic_cast<const T *>(this);
 		}
 
-		std::optional<This::Property> FindProperty(std::string_view name);
-		std::optional<This::Method> FindMethod(std::string_view name);
+		const This::Property *FindProperty(std::string_view name);
+		const This::Method *FindMethod(std::string_view name);
 
 		static int UserdataIndex(lua_State *L);
 		static int UserdataNewIndex(lua_State *L);
