@@ -2,6 +2,7 @@
 
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/classes/WorldRoot.hpp"
+#include "gargantuan/render/InstanceData.hpp"
 #include "gargantuan/render/Shader.hpp"
 
 #include <SDL3/SDL.h>
@@ -23,6 +24,18 @@ namespace gargantuan {
 	};
 
 	// One camera's cached frustum result. Shadows include offscreen casters.
+	// the same numbers to reject casters that could never land in it, so they
+	// live here rather than inside the pass.
+	inline constexpr float SHADOW_ORTHO_EXTENT = 30.0f;
+	inline constexpr float SHADOW_ORTHO_NEAR = -50.0f;
+	inline constexpr float SHADOW_ORTHO_FAR = 150.0f;
+	inline constexpr float SHADOW_EYE_DISTANCE = 40.0f;
+	// Bounds that box from the origin: eye distance plus its own half diagonal,
+	// 40 + sqrt(30^2 + 30^2 + 150^2). Loose is the safe way round.
+	inline constexpr float SHADOW_VOLUME_RADIUS = 196.0f;
+
+	// Slot 0 is no picture. A world with more distinct pictures than this keeps
+	// working: the pass falls back to the map, which has no cap.
 	inline constexpr uint32_t MAX_SURFACE_SLOTS = 256;
 	inline constexpr uint32_t MAX_MESH_IDS = 32;
 
@@ -54,6 +67,9 @@ namespace gargantuan {
 		// Lists serve passes; sets serve per-part redraw checks.
 		std::vector<BasePart *> InViewList;
 		std::vector<BasePart *> ShadowList;
+		// Where each InViewList entry sits in the world, so the opaque pass
+		// reaches its built instance without asking the part anything
+		std::vector<uint32_t> InViewIndexList;
 		size_t InViewCount = 0;
 		size_t ShadowCount = 0;
 
@@ -98,6 +114,8 @@ namespace gargantuan {
 
 		// Resolved once per frame; missing parts use WhiteTexture.
 		const std::unordered_map<const BasePart *, SDL_GPUTexture *> *PartTextures = nullptr;
+		// Built instances in world order, or null to build them per part
+		const std::vector<InstanceData> *PartInstances = nullptr;
 		const std::vector<SDL_GPUTexture *> *SurfaceTextures = nullptr;
 		bool SurfaceSlotsComplete = false;
 		SDL_GPUTexture *WhiteTexture = nullptr;

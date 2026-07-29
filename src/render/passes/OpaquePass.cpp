@@ -159,6 +159,57 @@ namespace gargantuan {
 			return InstanceCapacity > 0;
 		}
 
+		// Only for a draw with no row table behind it: same arithmetic, built
+		// on the spot. See SyncPartRows for the comments.
+		static void BuildInstanceFallback(BasePart *part, InstanceData &instance) {
+			const float *rotation = reinterpret_cast<const float *>(&part->CFrame.Rotation);
+			const glm::vec3 &size = part->Size;
+			const glm::vec3 &position = part->CFrame.Position;
+			float *model = reinterpret_cast<float *>(instance.ModelRows);
+
+			model[0] = rotation[0] * size.x;
+			model[1] = rotation[3] * size.y;
+			model[2] = rotation[6] * size.z;
+			model[3] = position.x;
+			model[4] = rotation[1] * size.x;
+			model[5] = rotation[4] * size.y;
+			model[6] = rotation[7] * size.z;
+			model[7] = position.y;
+			model[8] = rotation[2] * size.x;
+			model[9] = rotation[5] * size.y;
+			model[10] = rotation[8] * size.z;
+			model[11] = position.z;
+
+			const Color3 &colour = part->Color;
+			instance.Color.x = colour.R;
+			instance.Color.y = colour.G;
+			instance.Color.z = colour.B;
+			instance.Color.w = 1.0f - part->Transparency;
+
+			glm::vec4 match = part->GetSurfaceMatch();
+			float nx = match.x, ny = match.y, nz = match.z;
+			if (nx * nx + ny * ny + nz * nz > 0.0f) {
+				float wx = rotation[0] * nx + rotation[3] * ny + rotation[6] * nz;
+				float wy = rotation[1] * nx + rotation[4] * ny + rotation[7] * nz;
+				float wz = rotation[2] * nx + rotation[5] * ny + rotation[8] * nz;
+				float length = std::sqrt(wx * wx + wy * wy + wz * wz);
+				if (length > 0.0f) {
+					nx = wx / length;
+					ny = wy / length;
+					nz = wz / length;
+				}
+			}
+
+			instance.SurfaceNormal.x = nx;
+			instance.SurfaceNormal.y = ny;
+			instance.SurfaceNormal.z = nz;
+			instance.SurfaceNormal.w = match.w;
+			instance.SurfaceTransform.x = part->SurfaceTiling.Value.x;
+			instance.SurfaceTransform.y = part->SurfaceTiling.Value.y;
+			instance.SurfaceTransform.z = part->SurfaceOffset.Value.x;
+			instance.SurfaceTransform.w = part->SurfaceOffset.Value.y;
+		}
+
 		// Returns false for no work or allocation failure.
 		bool PrepareInstances(
 			SDL_GPUDevice *gpu,
@@ -285,79 +336,35 @@ namespace gargantuan {
 			uint32_t *cursors = Cursors.data();
 			InstanceData *scratch = InstanceScratch.data();
 
-			for (size_t index = 0; index < count; index++) {
-				uint32_t bucket = partBatchOut[index];
-				if (bucket == SKIPPED) {
-					continue;
-				}
+			// Built once a frame for the whole world, in world order, by the
+			// pass that already visits every part. The visible list is in that
+			// same order, so this reads forward through it.
+			const InstanceData *rows = nullptr;
+			const uint32_t *worldIndices = nullptr;
+			if (context.PartInstances && context.Visible &&
+				context.Visible->InViewIndexList.size() >= count &&
+				context.PartInstances->size() >= context.WorldRoot->RawParts.size()) {
+				rows = context.PartInstances->data();
+				worldIndices = context.Visible->InViewIndexList.data();
+			}
 
-				BasePart *part = partList[index];
-				InstanceData &instance = scratch[cursors[bucket]++];
-
-				//   T * R * S  =  [ r0*sx  r1*sy  r2*sz  position ]
-				//
-				// Plain floats through raw pointers: every glm operator[] and
-				// every accessor is a call at -O0, including the two that
-				// reaching &mat3[0][0] costs, and this runs 370k times a pass.
-				// mat3 columns are contiguous, so mat3[c][r] is rot[c * 3 + r].
-				const float *rotation = reinterpret_cast<const float *>(&part->CFrame.Rotation);
-				const glm::vec3 &size = part->Size;
-				const glm::vec3 &position = part->CFrame.Position;
-				float *model = reinterpret_cast<float *>(&instance.ModelMatrix);
-
-				model[0] = rotation[0] * size.x;
-				model[1] = rotation[1] * size.x;
-				model[2] = rotation[2] * size.x;
-				model[3] = 0.0f;
-				model[4] = rotation[3] * size.y;
-				model[5] = rotation[4] * size.y;
-				model[6] = rotation[5] * size.y;
-				model[7] = 0.0f;
-				model[8] = rotation[6] * size.z;
-				model[9] = rotation[7] * size.z;
-				model[10] = rotation[8] * size.z;
-				model[11] = 0.0f;
-				model[12] = position.x;
-				model[13] = position.y;
-				model[14] = position.z;
-				model[15] = 1.0f;
-
-				const Color3 &colour = part->Color;
-				instance.Color.x = colour.R;
-				instance.Color.y = colour.G;
-				instance.Color.z = colour.B;
-				instance.Color.w = 1.0f - part->Transparency;
-
-				// Skip unused surface transforms when the shader flag is off.
-				if (batches[bucket].Texture == White) {
-					continue;
-				}
-
-				// The transform the vertex stage puts the mesh's normals
-				// through, not the correct inverse transpose. Wrong the same
-				// way on both sides, which is all a match needs.
-				glm::vec4 match = part->GetSurfaceMatch();
-				float nx = match.x, ny = match.y, nz = match.z;
-				if (nx * nx + ny * ny + nz * nz > 0.0f) {
-					float wx = rotation[0] * nx + rotation[3] * ny + rotation[6] * nz;
-					float wy = rotation[1] * nx + rotation[4] * ny + rotation[7] * nz;
-					float wz = rotation[2] * nx + rotation[5] * ny + rotation[8] * nz;
-					float length = std::sqrt(wx * wx + wy * wy + wz * wz);
-					if (length > 0.0f) {
-						nx = wx / length;
-						ny = wy / length;
-						nz = wz / length;
+			if (rows) {
+				for (size_t index = 0; index < count; index++) {
+					uint32_t bucket = partBatchOut[index];
+					if (bucket == SKIPPED) {
+						continue;
 					}
+					scratch[cursors[bucket]++] = rows[worldIndices[index]];
 				}
-
-				instance.SurfaceNormal.x = nx;
-				instance.SurfaceNormal.y = ny;
-				instance.SurfaceNormal.z = nz;
-				instance.SurfaceNormal.w = match.w;
-				instance.SurfaceTransform.x = part->SurfaceTiling.Value.x;
-				instance.SurfaceTransform.y = part->SurfaceTiling.Value.y;
-				instance.SurfaceTransform.z = part->SurfaceOffset.Value.x;
-				instance.SurfaceTransform.w = part->SurfaceOffset.Value.y;
+			} else {
+				// No row table, so build each one here the way it used to be
+				for (size_t index = 0; index < count; index++) {
+					uint32_t bucket = partBatchOut[index];
+					if (bucket == SKIPPED) {
+						continue;
+					}
+					BuildInstanceFallback(partList[index], scratch[cursors[bucket]++]);
+				}
 			}
 
 			InstanceFillNanoseconds = SDL_GetTicksNS() - fillStarted;

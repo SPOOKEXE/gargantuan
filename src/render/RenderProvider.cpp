@@ -1654,6 +1654,7 @@ namespace gargantuan {
 		EnsureWhiteTexture();
 		ResolvePartTextures(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
+		frameContext.PartInstances = &PartInstances;
 		frameContext.SurfaceTextures = &SurfaceTextures;
 		frameContext.SurfaceSlotsComplete = SurfaceSlotsComplete;
 		frameContext.WhiteTexture = WhiteTexture;
@@ -1986,6 +1987,116 @@ namespace gargantuan {
 		constexpr float SHADOW_CAST_REACH = 200.0f;
 	} // namespace
 
+	namespace {
+		// Everything an instance holds is a function of the part alone, which
+		// is what lets one built row serve every camera.
+		//
+		//   T * R * S  =  [ r0*sx  r1*sy  r2*sz  position ], stored transposed
+		//   so the constant bottom row is the one left out
+		//
+		// Plain floats through raw pointers: every glm operator[] and every
+		// accessor is a call at -O0, including the two that reaching
+		// &mat3[0][0] costs. mat3 columns are contiguous, so mat3[c][r] is
+		// rotation[c * 3 + r].
+		void BuildInstance(BasePart *part, InstanceData &instance) {
+			const float *rotation = reinterpret_cast<const float *>(&part->CFrame.Rotation);
+			const glm::vec3 &size = part->Size;
+			const glm::vec3 &position = part->CFrame.Position;
+			float *model = reinterpret_cast<float *>(instance.ModelRows);
+
+			model[0] = rotation[0] * size.x;
+			model[1] = rotation[3] * size.y;
+			model[2] = rotation[6] * size.z;
+			model[3] = position.x;
+			model[4] = rotation[1] * size.x;
+			model[5] = rotation[4] * size.y;
+			model[6] = rotation[7] * size.z;
+			model[7] = position.y;
+			model[8] = rotation[2] * size.x;
+			model[9] = rotation[5] * size.y;
+			model[10] = rotation[8] * size.z;
+			model[11] = position.z;
+
+			const Color3 &colour = part->Color;
+			instance.Color.x = colour.R;
+			instance.Color.y = colour.G;
+			instance.Color.z = colour.B;
+			instance.Color.w = 1.0f - part->Transparency;
+
+			// The transform the vertex stage puts the mesh's normals through,
+			// not the correct inverse transpose. Wrong the same way on both
+			// sides, which is all a match needs.
+			glm::vec4 match = part->GetSurfaceMatch();
+			float nx = match.x, ny = match.y, nz = match.z;
+			if (nx * nx + ny * ny + nz * nz > 0.0f) {
+				float wx = rotation[0] * nx + rotation[3] * ny + rotation[6] * nz;
+				float wy = rotation[1] * nx + rotation[4] * ny + rotation[7] * nz;
+				float wz = rotation[2] * nx + rotation[5] * ny + rotation[8] * nz;
+				float length = std::sqrt(wx * wx + wy * wy + wz * wz);
+				if (length > 0.0f) {
+					nx = wx / length;
+					ny = wy / length;
+					nz = wz / length;
+				}
+			}
+
+			instance.SurfaceNormal.x = nx;
+			instance.SurfaceNormal.y = ny;
+			instance.SurfaceNormal.z = nz;
+			instance.SurfaceNormal.w = match.w;
+			instance.SurfaceTransform.x = part->SurfaceTiling.Value.x;
+			instance.SurfaceTransform.y = part->SurfaceTiling.Value.y;
+			instance.SurfaceTransform.z = part->SurfaceOffset.Value.x;
+			instance.SurfaceTransform.w = part->SurfaceOffset.Value.y;
+		}
+	} // namespace
+
+	void RenderProvider::SyncPartRows(const std::shared_ptr<WorldRoot> &world) const {
+		const size_t count = world ? world->RawParts.size() : 0;
+		if (PartRows.size() != count) {
+			PartRows.resize(count);
+			PartInstances.resize(count);
+			// Zero is a real QuickHash, so a resized row has to look stale.
+			PartRowHash.assign(count, 0xFFFFu);
+		}
+		if (count == 0) {
+			return;
+		}
+
+		BasePart *const *rawParts = world->RawParts.data();
+		PartRow *rows = PartRows.data();
+		InstanceData *instances = PartInstances.data();
+		uint16_t *hashes = PartRowHash.data();
+
+		for (size_t index = 0; index < count; index++) {
+			BasePart *part = rawParts[index];
+			if (hashes[index] == part->QuickHash) {
+				continue;
+			}
+
+			PartRow &row = rows[index];
+
+			// Half-diagonal bounds every box rotation conservatively.
+			const glm::vec3 &size = part->Size;
+			row.Centre = part->CFrame.Position;
+			row.Radius = std::sqrt(size.x * size.x + size.y * size.y + size.z * size.z) * 0.5f;
+			row.CastShadow = part->CastShadow;
+
+			row.SurfaceCamera = part->SurfaceCamera.get();
+			row.SurfaceImage = part->SurfaceImage.get();
+			row.HasSurfaceCamera = row.SurfaceCamera != nullptr;
+			row.HasSurface = row.HasSurfaceCamera || row.SurfaceImage != nullptr;
+
+			// Pointer catches replacement; QuickHash catches property writes.
+			row.StaticMix = 0xCBF29CE484222325ull;
+			MixPointer(row.StaticMix, part);
+			MixBits(row.StaticMix, part->QuickHash);
+
+			BuildInstance(part, instances[index]);
+			hashes[index] = part->QuickHash;
+		}
+	}
+
 	uint64_t RenderProvider::ComputeSceneSignature(
 		const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection
 	) const {
@@ -2011,45 +2122,39 @@ namespace gargantuan {
 		MixBits(surfaces, TargetGeneration);
 		MixBits(surfaces, world->RawParts.size());
 
-		BasePart *const *rawParts = world->RawParts.data();
+		SyncPartRows(world);
+
 		const size_t partCount = world->RawParts.size();
+		const PartRow *rows = PartRows.data();
+
 		for (size_t index = 0; index < partCount; index++) {
-			BasePart *part = rawParts[index];
+			const PartRow &row = rows[index];
+			MixBits(hash, row.StaticMix);
 
-			// Pointer catches replacement; QuickHash catches property writes.
-			MixPointer(hash, part);
-			MixBits(hash, part->QuickHash);
-
-			// Read once: every shared_ptr deref is a call here.
-			Camera *surfaceCamera = part->SurfaceCamera.get();
-			EditableImage *surfaceImage = part->SurfaceImage.get();
+			if (!row.HasSurface) {
+				continue;
+			}
 
 			// Detect here so later walks skip absent surface sources.
-			if (surfaceCamera) {
-				WorldHasSurfaceCameras = true;
-				WorldHasSurfaces = true;
-			} else if (surfaceImage) {
-				WorldHasSurfaces = true;
-			}
+			WorldHasSurfaces = true;
+			WorldHasSurfaceCameras = WorldHasSurfaceCameras || row.HasSurfaceCamera;
 
-			// Pointer identifies the source; revision/count identifies its
-			// content. Only the parts carrying one: a part gaining a surface
-			// bumps its QuickHash, which is mixed above.
-			if (surfaceCamera || surfaceImage) {
-				MixPointer(surfaces, part);
-				MixPointer(surfaces, surfaceCamera);
-				MixPointer(surfaces, surfaceImage);
-			}
+			// The source is fixed until the part changes, but what it holds is
+			// not, so this part cannot be cached with the rest of the row.
+			MixPointer(surfaces, rows + index);
+			MixPointer(surfaces, row.SurfaceCamera);
+			MixPointer(surfaces, row.SurfaceImage);
 
-			if (hadSurfaces && (surfaceCamera || surfaceImage)) {
-				MixPointer(hash, surfaceCamera);
-				MixBits(hash, GetCameraDrawCount(surfaceCamera));
-				MixPointer(hash, surfaceImage);
-				MixBits(hash, surfaceImage ? surfaceImage->GetRevision() : 0);
+			if (hadSurfaces) {
+				MixPointer(hash, row.SurfaceCamera);
+				MixBits(hash, GetCameraDrawCount(row.SurfaceCamera));
+				MixPointer(hash, row.SurfaceImage);
+				MixBits(hash, row.SurfaceImage ? row.SurfaceImage->GetRevision() : 0);
 			}
 		}
 
 		SurfaceSignature = surfaces;
+		SyncPartRows(world);
 		return hash;
 	}
 
@@ -2091,6 +2196,7 @@ namespace gargantuan {
 			if (out.InViewList.size() < world->RawParts.size()) {
 				out.InViewList.resize(world->RawParts.size());
 				out.ShadowList.resize(world->RawParts.size());
+				out.InViewIndexList.resize(world->RawParts.size());
 			}
 		}
 
@@ -2120,8 +2226,15 @@ namespace gargantuan {
 		CullScratch.resize(CHUNK);
 
 		const size_t total = world->RawParts.size();
+		// A world mutated since the signature pass, or one drawn without one.
+		if (PartRows.size() != total) {
+			SyncPartRows(world);
+		}
+
 		BasePart *const *rawParts = world->RawParts.data();
+		const PartRow *bounds = PartRows.data();
 		BasePart **inViewOut = out.InViewList.data();
+		uint32_t *inViewIndexOut = out.InViewIndexList.data();
 		BasePart **shadowOut = out.ShadowList.data();
 		size_t inViewCount = 0;
 		size_t shadowCount = 0;
@@ -2131,18 +2244,25 @@ namespace gargantuan {
 
 			uint64_t cullStart = measuring ? SDL_GetTicksNS() : 0;
 			for (size_t index = start; index < stop; index++) {
-				BasePart *part = rawParts[index];
+				const PartRow &bound = bounds[index];
 				CullResult &result = CullScratch[index - start];
 
-				// Half-diagonal bounds every box rotation conservatively.
-				const glm::vec3 &size = part->Size;
-				float radius = std::sqrt(size.x * size.x + size.y * size.y + size.z * size.z) * 0.5f;
-				const glm::vec3 &centre = part->CFrame.Position;
+				const glm::vec3 &centre = bound.Centre;
+				const float radius = bound.Radius;
 
 				result.InView = SphereInside(planes, centre, radius);
+
+				// A caster outside the shadow map's own box cannot appear in
+				// it however far its shadow reaches, and the box is small next
+				// to a large world. Cheap sphere test, deliberately loose.
+				float reach = SHADOW_VOLUME_RADIUS + radius;
+				bool inShadowVolume = bound.CastShadow &&
+					centre.x * centre.x + centre.y * centre.y + centre.z * centre.z <= reach * reach;
+
 				// Sweep only offscreen casters along their shadow reach.
-				result.ShadowReaches = !result.InView && part->CastShadow &&
+				result.ShadowReaches = !result.InView && inShadowVolume &&
 					CapsuleInside(planes, centre, centre + shadowStep, radius);
+				result.CastsShadow = inShadowVolume && (result.InView || result.ShadowReaches);
 			}
 			if (measuring) {
 				cullNanoseconds += SDL_GetTicksNS() - cullStart;
@@ -2156,10 +2276,11 @@ namespace gargantuan {
 					if (needSets) {
 						out.InView.insert(part);
 					}
+					inViewIndexOut[inViewCount] = (uint32_t)index;
 					inViewOut[inViewCount++] = part;
 				}
 				// ShadowList is a superset of visible shadow casters.
-				if (part->CastShadow && (result.InView || result.ShadowReaches)) {
+				if (result.CastsShadow) {
 					if (needSets) {
 						out.ShadowsIntoView.insert(part);
 					}
@@ -2696,6 +2817,7 @@ namespace gargantuan {
 		EnsureWhiteTexture();
 		ResolvePartTextures(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
+		frameContext.PartInstances = &PartInstances;
 		frameContext.SurfaceTextures = &SurfaceTextures;
 		frameContext.SurfaceSlotsComplete = SurfaceSlotsComplete;
 		frameContext.WhiteTexture = WhiteTexture;

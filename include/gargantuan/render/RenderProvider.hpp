@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gargantuan/render/InstanceData.hpp"
 #include "gargantuan/render/RenderPass.hpp"
 #include "gargantuan/classes/ShaderScript.hpp"
 #include "gargantuan/render/ShaderReflection.hpp"
@@ -142,10 +143,29 @@ namespace gargantuan {
 		// Invalidates stale texture pointers.
 		uint64_t TargetGeneration = 1;
 
+		struct PartRow {
+			glm::vec3 Centre{0.0f};
+			float Radius = 0.0f;
+			bool CastShadow = false;
+			// Present-and-what, so the frame's surface work skips the rest
+			bool HasSurface = false;
+			bool HasSurfaceCamera = false;
+			Camera *SurfaceCamera = nullptr;
+			EditableImage *SurfaceImage = nullptr;
+			// The part's fixed contribution to the scene hash
+			uint64_t StaticMix = 0;
+		};
+		mutable std::vector<PartRow> PartRows;
+		mutable std::vector<uint16_t> PartRowHash;
+		// The built instance, so the opaque pass copies rather than computes
+		mutable std::vector<InstanceData> PartInstances;
+		void SyncPartRows(const std::shared_ptr<WorldRoot> &world) const;
+
 		// Reused culling chunk storage.
 		struct CullResult {
 			bool InView = false;
 			bool ShadowReaches = false;
+			bool CastsShadow = false;
 		};
 		std::vector<CullResult> CullScratch;
 

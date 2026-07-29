@@ -40,8 +40,11 @@ namespace gargantuan {
 		};
 
 		SDL_GPURenderPass *Draw(SDL_GPUDevice *gpu, FrameContext &context) override {
-			glm::mat4 shadowProjection = glm::ortho<float>(-30.0f, 30.0f, -30.0f, 30.0f, -50.0f, 150.0f);
-			glm::vec3 lightPosition = glm::normalize(context.LightDirection) * 40.0f;
+			glm::mat4 shadowProjection = glm::ortho<float>(
+				-SHADOW_ORTHO_EXTENT, SHADOW_ORTHO_EXTENT, -SHADOW_ORTHO_EXTENT, SHADOW_ORTHO_EXTENT,
+				SHADOW_ORTHO_NEAR, SHADOW_ORTHO_FAR
+			);
+			glm::vec3 lightPosition = glm::normalize(context.LightDirection) * SHADOW_EYE_DISTANCE;
 			glm::mat4 shadowView = glm::lookAt(lightPosition, glm::vec3(0), glm::vec3(0, 1, 0));
 			glm::mat4 shadowMatrix = shadowProjection * shadowView;
 			context.ShadowMatrix = shadowMatrix;
