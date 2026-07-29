@@ -861,6 +861,8 @@ namespace gargantuan {
 		// Slot 0 is no picture, which the pass draws with its white texture.
 		SurfaceTextures.assign(1, nullptr);
 		SurfaceSlotsComplete = true;
+		// Every slot below is about to be reassigned, and keys hold slots
+		DrawKeysStale = true;
 		ResolvedSurfaceSignature = SurfaceSignature;
 		PartTexturesResolved = true;
 
@@ -1653,8 +1655,10 @@ namespace gargantuan {
 		frameContext.ViewDepthTarget = motion ? target.ViewDepthTexture : nullptr;
 		EnsureWhiteTexture();
 		ResolvePartTextures(drawContext.WorldRoot);
+		EnsureDrawKeys(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
 		frameContext.PartInstances = &DrawInstances;
+		frameContext.DrawKeys = &DrawKeys;
 		frameContext.SurfaceTextures = &SurfaceTextures;
 		frameContext.SurfaceSlotsComplete = SurfaceSlotsComplete;
 		frameContext.WhiteTexture = WhiteTexture;
@@ -1827,22 +1831,25 @@ namespace gargantuan {
 		}
 
 		// Draw panes in sampling-dependency order.
-		std::vector<Camera *> roots;
-		roots.reserve(cameras.size());
-		for (const auto &drawContext : cameras) {
-			roots.push_back(drawContext.Camera.get());
-		}
-
-		std::unordered_map<Camera *, const DrawContext *> byCamera;
-		for (const auto &drawContext : cameras) {
-			byCamera[drawContext.Camera.get()] = &drawContext;
-		}
-
 		std::vector<DrawContext> ordered;
-		for (Camera *camera : GetRenderOrder(roots)) {
-			auto it = byCamera.find(camera);
-			if (it != byCamera.end()) {
-				ordered.push_back(*it->second);
+		{
+			G_PROFILE("Pane Order");
+			std::vector<Camera *> roots;
+			roots.reserve(cameras.size());
+			for (const auto &drawContext : cameras) {
+				roots.push_back(drawContext.Camera.get());
+			}
+
+			std::unordered_map<Camera *, const DrawContext *> byCamera;
+			for (const auto &drawContext : cameras) {
+				byCamera[drawContext.Camera.get()] = &drawContext;
+			}
+
+			for (Camera *camera : GetRenderOrder(roots)) {
+				auto it = byCamera.find(camera);
+				if (it != byCamera.end()) {
+					ordered.push_back(*it->second);
+				}
 			}
 		}
 
@@ -1854,27 +1861,35 @@ namespace gargantuan {
 
 		// Draw offscreen because swapchain textures cannot be sampled or blitted from.
 		std::vector<std::pair<const CameraTarget *, const Camera *>> ready;
-		for (const auto &drawContext : ordered) {
-			auto *camera = drawContext.Camera.get();
+		{
+			G_PROFILE("Record Panes");
+			for (const auto &drawContext : ordered) {
+				auto *camera = drawContext.Camera.get();
 
-			// Reuse a still pane's prior target.
-			DrawContext copy = drawContext;
-			bool recorded = false;
-			CameraTarget *target = RecordCamera(commands, copy, recorded);
-			if (!target) {
-				continue;
+				// Reuse a still pane's prior target.
+				DrawContext copy = drawContext;
+				bool recorded = false;
+				CameraTarget *target = RecordCamera(commands, copy, recorded);
+				if (!target) {
+					continue;
+				}
+				ready.emplace_back(target, camera);
 			}
-			ready.emplace_back(target, camera);
 		}
 
 		SDL_GPUTexture *swapchainTexture = nullptr;
 		uint32_t windowWidth = 0, windowHeight = 0;
-		if (!SDL_AcquireGPUSwapchainTexture(commands, Window, &swapchainTexture, &windowWidth, &windowHeight) ||
-			!swapchainTexture) {
-			SDL_CancelGPUCommandBuffer(commands);
-			return;
+		{
+			// Blocks until the compositor hands a buffer back
+			G_PROFILE("Swapchain");
+			if (!SDL_AcquireGPUSwapchainTexture(commands, Window, &swapchainTexture, &windowWidth, &windowHeight) ||
+				!swapchainTexture) {
+				SDL_CancelGPUCommandBuffer(commands);
+				return;
+			}
 		}
 
+		G_PROFILE("Present");
 		bool first = true;
 		for (const auto &[target, camera] : ready) {
 			WindowRegion region = ComputeWindowRegion(*camera, (int)windowWidth, (int)windowHeight);
@@ -2067,6 +2082,16 @@ namespace gargantuan {
 	} // namespace
 
 	namespace {
+		// Zero means there is no key and the pass must ask the part itself,
+		// which a real mesh id can never produce since those start at one
+		uint16_t DrawKeyOf(const BasePart *part) {
+			uint32_t meshId = part->MeshId;
+			if (meshId == 0 || meshId >= MAX_MESH_IDS) {
+				return 0;
+			}
+			return (uint16_t)(meshId * MAX_SURFACE_SLOTS + part->SurfaceTextureSlot);
+		}
+
 		uint32_t GridCellOf(const RenderProvider::PartGrid &grid, glm::vec3 point) {
 			glm::vec3 local = (point - grid.Origin) / grid.CellSize;
 			int32_t x = std::clamp((int32_t)local.x, 0, grid.Counts[0] - 1);
@@ -2147,7 +2172,9 @@ namespace gargantuan {
 
 			BuildInstance(part, instances[index]);
 			if (!GridStale) {
-				DrawInstances[RowPositions[index]] = instances[index];
+				uint32_t position = RowPositions[index];
+				DrawInstances[position] = instances[index];
+				DrawKeys[position] = DrawKeyOf(part);
 			}
 		}
 
@@ -2236,12 +2263,15 @@ namespace gargantuan {
 		RowPositions.resize(count);
 		DrawInstances.resize(count);
 		DrawParts.resize(count);
+		DrawKeys.resize(count);
+		DrawKeysStale = false;
 		BasePart *const *sorted = world ? world->RawParts.data() : nullptr;
 		for (size_t at = 0; at < count; at++) {
 			uint32_t index = Grid.Rows[at];
 			RowPositions[index] = (uint32_t)at;
 			DrawInstances[at] = PartInstances[index];
 			DrawParts[at] = sorted ? sorted[index] : nullptr;
+			DrawKeys[at] = DrawParts[at] ? DrawKeyOf(DrawParts[at]) : 0;
 		}
 
 		Grid.Starts.reserve(used + 1);
@@ -2276,6 +2306,27 @@ namespace gargantuan {
 			Grid.Largest = std::max(Grid.Largest, (size_t)(stop - start));
 		}
 		Grid.Starts.push_back((uint32_t)count);
+	}
+
+	void RenderProvider::EnsureDrawKeys(const std::shared_ptr<WorldRoot> &world) const {
+		if (world && (PartRows.size() != world->RawParts.size() || !world->DirtyParts.empty())) {
+			SyncPartRows(world);
+		}
+		if (GridStale) {
+			RebuildGrid(world);
+			return;
+		}
+		if (!DrawKeysStale) {
+			return;
+		}
+
+		G_PROFILE("Draw Keys");
+		const size_t count = DrawParts.size();
+		DrawKeys.resize(count);
+		for (size_t at = 0; at < count; at++) {
+			DrawKeys[at] = DrawParts[at] ? DrawKeyOf(DrawParts[at]) : 0;
+		}
+		DrawKeysStale = false;
 	}
 
 	void RenderProvider::RebuildSurfaceRows() const {
@@ -2733,7 +2784,11 @@ namespace gargantuan {
 		outRecorded = false;
 
 		auto *camera = drawContext.Camera.get();
-		CameraTarget *target = AcquireCameraTarget(camera, camera && (!camera->Shaders.empty() || camera->Antialiasing));
+		CameraTarget *target = nullptr;
+		{
+			G_PROFILE("Camera Target");
+			target = AcquireCameraTarget(camera, camera && (!camera->Shaders.empty() || camera->Antialiasing));
+		}
 		if (!target) {
 			return nullptr;
 		}
@@ -2743,7 +2798,11 @@ namespace gargantuan {
 			return target;
 		}
 
-		RedrawPlan plan = PlanRedraw(drawContext, *target);
+		RedrawPlan plan;
+		{
+			G_PROFILE("Plan Redraw");
+			plan = PlanRedraw(drawContext, *target);
+		}
 		if (plan.Skip) {
 			// Return the complete cached target without recording work.
 			return target;
@@ -2776,7 +2835,10 @@ namespace gargantuan {
 		}
 
 		RecordShaderChain(commands, camera, *target, plan.FirstShader, plan.WriteCache);
-		RecordHistoryCopy(commands, camera, *target);
+		{
+			G_PROFILE("History Copy");
+			RecordHistoryCopy(commands, camera, *target);
+		}
 		// Skipped targets do not advance their draw revision.
 		CountCameraDraw(camera);
 		outRecorded = true;
@@ -3008,14 +3070,19 @@ namespace gargantuan {
 
 			SDL_GPUTexture *swapchainTexture = nullptr;
 			uint32_t swapchainWidth = 0, swapchainHeight = 0;
-			if (!SDL_AcquireGPUSwapchainTexture(
-					commands, Window, &swapchainTexture, &swapchainWidth, &swapchainHeight
-				) ||
-				!swapchainTexture) {
-				SDL_CancelGPUCommandBuffer(commands);
-				return;
+			{
+				// Blocks until the compositor hands a buffer back
+				G_PROFILE("Swapchain");
+				if (!SDL_AcquireGPUSwapchainTexture(
+						commands, Window, &swapchainTexture, &swapchainWidth, &swapchainHeight
+					) ||
+					!swapchainTexture) {
+					SDL_CancelGPUCommandBuffer(commands);
+					return;
+				}
 			}
 
+			G_PROFILE("Present");
 			SDL_GPUBlitInfo blit{
 				.source = {.texture = target->ColorTexture, .w = target->Width, .h = target->Height},
 				.destination = {.texture = swapchainTexture, .w = swapchainWidth, .h = swapchainHeight},
@@ -3043,8 +3110,10 @@ namespace gargantuan {
 		frameContext.LightDirection = glm::normalize(drawContext.LightDirection);
 		EnsureWhiteTexture();
 		ResolvePartTextures(drawContext.WorldRoot);
+		EnsureDrawKeys(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
 		frameContext.PartInstances = &DrawInstances;
+		frameContext.DrawKeys = &DrawKeys;
 		frameContext.SurfaceTextures = &SurfaceTextures;
 		frameContext.SurfaceSlotsComplete = SurfaceSlotsComplete;
 		frameContext.WhiteTexture = WhiteTexture;

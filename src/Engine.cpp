@@ -411,6 +411,9 @@ namespace gargantuan {
 		// Anything that draws into the window, CurrentCamera first so it takes
 		// the whole thing when nothing else asks for a share
 		std::vector<DrawContext> windowCameras;
+		std::vector<DrawContext> offscreenCameras;
+		{
+		G_PROFILE("Camera Lists");
 		if (currentCamera && currentCamera->Enabled) {
 			windowCameras.push_back({
 				.WorldRoot = worldRoot,
@@ -452,11 +455,8 @@ namespace gargantuan {
 			}
 		}
 
-		// So must any camera being shown on a part's surface
-		for (const auto &part : worldRoot->Parts) {
-			if (part && part->SurfaceCamera) {
-				offscreenRoots.push_back(part->SurfaceCamera.get());
-			}
+		for (Camera *camera : RenderProvider->SurfaceCameras) {
+			offscreenRoots.push_back(camera);
 		}
 
 		// Sorted so a camera reading another's target sees this frame's picture.
@@ -469,7 +469,6 @@ namespace gargantuan {
 		double now = Workspace->DistributedGameTime;
 		float maximumCameraFps = RenderSettings->GetMaxCameraFPS();
 
-		std::vector<DrawContext> offscreenCameras;
 		for (Camera *camera : RenderProvider->GetRenderOrder(offscreenRoots)) {
 			auto owned = camera->weak_from_this().lock();
 			if (!owned) {
@@ -497,6 +496,7 @@ namespace gargantuan {
 				.Camera = std::static_pointer_cast<Camera>(owned),
 				.LightDirection = lightDirection,
 			});
+		}
 		}
 		{
 			// One command buffer for the lot, still in dependency order

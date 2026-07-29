@@ -201,6 +201,12 @@ namespace gargantuan {
 		// than as a hundred jumps through the world-ordered set
 		mutable std::vector<InstanceData> DrawInstances;
 		mutable std::vector<BasePart *> DrawParts;
+		// Mesh and surface slot folded into the one number the opaque pass
+		// buckets on, so bucketing reads two bytes in order instead of two
+		// bytes out of a 456-byte part
+		mutable std::vector<uint16_t> DrawKeys;
+		mutable bool DrawKeysStale = true;
+		void EnsureDrawKeys(const std::shared_ptr<WorldRoot> &world) const;
 		// Where a row sits in that order, so a row rebuilt on its own can put
 		// itself in both
 		mutable std::vector<uint32_t> RowPositions;

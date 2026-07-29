@@ -246,6 +246,19 @@ namespace gargantuan {
 			Batch *batches = Batches.data();
 			const size_t count = parts.size();
 
+			const InstanceData *rows = nullptr;
+			const uint32_t *drawIndices = nullptr;
+			const uint16_t *keys = nullptr;
+			if (context.PartInstances && context.Visible &&
+				context.Visible->InViewIndexList.size() >= count &&
+				context.PartInstances->size() >= context.WorldRoot->RawParts.size()) {
+				rows = context.PartInstances->data();
+				drawIndices = context.Visible->InViewIndexList.data();
+				if (context.DrawKeys && context.DrawKeys->size() == context.PartInstances->size()) {
+					keys = context.DrawKeys->data();
+				}
+			}
+
 			auto openBatch = [&](BasePart *part, SDL_GPUTexture *texture) -> uint32_t {
 				auto &mesh = part->GetMesh();
 				if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
@@ -261,15 +274,26 @@ namespace gargantuan {
 			};
 
 			for (size_t index = 0; index < count; index++) {
-				BasePart *part = partList[index];
-				uint32_t meshId = part->MeshId;
-				uint32_t bucket = SKIPPED;
+				// Zero is no key, and sends this part round the long way
+				uint32_t key = 0;
+				if (useSlots) {
+					if (keys) {
+						key = keys[drawIndices[index]];
+					} else {
+						BasePart *part = partList[index];
+						uint32_t meshId = part->MeshId;
+						if (meshId != 0 && meshId < MAX_MESH_IDS) {
+							key = meshId * MAX_SURFACE_SLOTS + part->SurfaceTextureSlot;
+						}
+					}
+				}
 
-				if (useSlots && meshId != 0 && meshId < MAX_MESH_IDS) {
-					uint32_t key = meshId * MAX_SURFACE_SLOTS + part->SurfaceTextureSlot;
+				uint32_t bucket = SKIPPED;
+				if (key != 0) {
 					bucket = KeyToBatch[key];
 					if (bucket == SKIPPED) {
-						uint32_t slot = part->SurfaceTextureSlot;
+						BasePart *part = partList[index];
+						uint32_t slot = key % MAX_SURFACE_SLOTS;
 						SDL_GPUTexture *texture = slot != 0 && slot < surfaceTextureCount
 							? surfaceTextures[slot]
 							: context.WhiteTexture;
@@ -281,6 +305,7 @@ namespace gargantuan {
 						}
 					}
 				} else {
+					BasePart *part = partList[index];
 					SDL_GPUTexture *texture = context.WhiteTexture;
 					if (anyPartTextures && (part->SurfaceCamera || part->SurfaceImage)) {
 						auto found = context.PartTextures->find(part);
@@ -336,25 +361,13 @@ namespace gargantuan {
 			uint32_t *cursors = Cursors.data();
 			InstanceData *scratch = InstanceScratch.data();
 
-			// Built once a frame for the whole world, in world order, by the
-			// pass that already visits every part. The visible list is in that
-			// same order, so this reads forward through it.
-			const InstanceData *rows = nullptr;
-			const uint32_t *worldIndices = nullptr;
-			if (context.PartInstances && context.Visible &&
-				context.Visible->InViewIndexList.size() >= count &&
-				context.PartInstances->size() >= context.WorldRoot->RawParts.size()) {
-				rows = context.PartInstances->data();
-				worldIndices = context.Visible->InViewIndexList.data();
-			}
-
 			if (rows) {
 				for (size_t index = 0; index < count; index++) {
 					uint32_t bucket = partBatchOut[index];
 					if (bucket == SKIPPED) {
 						continue;
 					}
-					scratch[cursors[bucket]++] = rows[worldIndices[index]];
+					scratch[cursors[bucket]++] = rows[drawIndices[index]];
 				}
 			} else {
 				// No row table, so build each one here the way it used to be
@@ -546,6 +559,8 @@ namespace gargantuan {
 					profiler->AddZoneTime("Bucket", InstanceBucketNanoseconds, 1);
 					profiler->AddZoneTime("Fill Instances", InstanceFillNanoseconds, (uint64_t)drawList.size());
 					profiler->AddZoneTime("Upload", InstanceUploadNanoseconds, 1);
+					profiler->AddZoneTime("Batch Submit", submitNanoseconds, (uint64_t)Batches.size());
+					submitNanoseconds = 0;
 					for (const Batch &batch : Batches) {
 						auto index = magic_enum::enum_index(batch.Shape);
 						if (index && *index < shapeDraws.size()) {

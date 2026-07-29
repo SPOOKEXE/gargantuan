@@ -114,8 +114,10 @@ namespace gargantuan {
 
 		// Resolved once per frame; missing parts use WhiteTexture.
 		const std::unordered_map<const BasePart *, SDL_GPUTexture *> *PartTextures = nullptr;
-		// Built instances in world order, or null to build them per part
+		// Built instances in draw order, or null to build them per part
 		const std::vector<InstanceData> *PartInstances = nullptr;
+		// Mesh and surface slot in one number, same order as PartInstances
+		const std::vector<uint16_t> *DrawKeys = nullptr;
 		const std::vector<SDL_GPUTexture *> *SurfaceTextures = nullptr;
 		bool SurfaceSlotsComplete = false;
 		SDL_GPUTexture *WhiteTexture = nullptr;
