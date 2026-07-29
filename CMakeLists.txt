@@ -12,6 +12,41 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # wanted; measured on examples/SkyGrid.luau the difference is roughly tenfold on
 # the opaque pass, so the two are not comparable and are not meant to be.
 
+# Build output.
+#
+# The engine finds its shaders relative to itself: Paths.cpp asks
+# SDL_GetBasePath() and Shader.cpp turns that into <base>/shaders/<name>, so
+# binary and shaders have to share a directory. Visual Studio and Xcode append
+# Debug/ or Release/ to every output directory, which used to put the exe in
+# build/Debug/ and the shaders in build/shaders/ -- a Windows build that could
+# not load a single shader. Naming the directory here settles it for every
+# generator; multi-config still appends the configuration, so Debug and Release
+# each get a complete tree instead of overwriting each other.
+#
+# The vendored dependencies inherit these too, which is what puts SDL3.dll /
+# libSDL3.so beside the binary rather than in build/vendor/sdl/.
+if(ANDROID)
+	# The NDK toolchain sets ANDROID_ABI; CMake's own Android support sets
+	# CMAKE_ANDROID_ARCH_ABI instead. Either way we need the name.
+	if(NOT ANDROID_ABI)
+		set(ANDROID_ABI "${CMAKE_ANDROID_ARCH_ABI}")
+	endif()
+
+	# An APK has no bin/. The packager takes shared libraries from lib/<abi>/
+	# and everything else from assets/, so building straight into that shape
+	# means a Gradle project can point jniLibs.srcDirs and assets.srcDirs at
+	# this build tree without an intermediate copy.
+	set(GARGANTUAN_OUTPUT_DIR "${CMAKE_BINARY_DIR}/lib/${ANDROID_ABI}")
+else()
+	set(GARGANTUAN_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin")
+endif()
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${GARGANTUAN_OUTPUT_DIR}")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${GARGANTUAN_OUTPUT_DIR}")
+# Import libraries and the static halves of the vendored dependencies are not
+# runtime files and only clutter the directory that is meant to be runnable.
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+
 # Shaders
 
 find_program(GLSL_COMPILER glslc REQUIRED)
@@ -30,12 +65,19 @@ file(GLOB_RECURSE SHADER_SOURCES CONFIGURE_DEPENDS
 	"assets/shaders/*.comp"
 )
 
+# Staged here rather than written straight next to the binary:
+# add_custom_command(OUTPUT) needs a path fixed at configure time, and under a
+# multi-config generator the binary's directory is not known until build time.
+# A POST_BUILD copy further down bridges the two, and compiling once here means
+# every configuration and the Android assets/ tree share the result.
+set(GARGANTUAN_SHADER_STAGE "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+
 set(SHADER_OUTPUTS "")
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+file(MAKE_DIRECTORY "${GARGANTUAN_SHADER_STAGE}")
 foreach(SHADER IN LISTS SHADER_SOURCES)
 	get_filename_component(SHADER_NAME ${SHADER} NAME)
 
-	set(SPIRV_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/shaders/${SHADER_NAME}.spv")
+	set(SPIRV_OUTPUT "${GARGANTUAN_SHADER_STAGE}/${SHADER_NAME}.spv")
 	add_custom_command(
 		OUTPUT ${SPIRV_OUTPUT}
 		COMMAND ${GLSL_COMPILER} ${SHADER} -o ${SPIRV_OUTPUT}
@@ -45,9 +87,9 @@ foreach(SHADER IN LISTS SHADER_SOURCES)
 	list(APPEND SHADER_OUTPUTS ${SPIRV_OUTPUT})
 
 	if(APPLE AND SPIRV_CROSS AND XCRUN)
-		set(METAL_SRC "${CMAKE_CURRENT_BINARY_DIR}/shaders/${SHADER_NAME}.metal")
-		set(METAL_AIR "${CMAKE_CURRENT_BINARY_DIR}/shaders/${SHADER_NAME}.air")
-		set(METALLIB_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/shaders/${SHADER_NAME}.metallib")
+		set(METAL_SRC "${GARGANTUAN_SHADER_STAGE}/${SHADER_NAME}.metal")
+		set(METAL_AIR "${GARGANTUAN_SHADER_STAGE}/${SHADER_NAME}.air")
+		set(METALLIB_OUTPUT "${GARGANTUAN_SHADER_STAGE}/${SHADER_NAME}.metallib")
 
 		# SPIR-V -> MSL
 		add_custom_command(
@@ -128,7 +170,13 @@ foreach(GARGANTUAN_DEPENDENCY IN LISTS GARGANTUAN_VENDORED)
 	endif()
 endforeach()
 
-add_subdirectory(vendor/box3d)
+# EXCLUDE_FROM_ALL because box3d installs libbox3d.a, its headers and a CMake
+# package config unconditionally, none of which belongs in a distribution of
+# the engine. SDL, glm, json and spdlog gate their install rules on being the
+# top-level project and need no such treatment; box3d and tracy do not gate
+# theirs. Excluding the directory drops its install rules with it, and the
+# library is still built because gargantuan links it.
+add_subdirectory(vendor/box3d EXCLUDE_FROM_ALL)
 add_subdirectory(vendor/glm)
 add_subdirectory(vendor/json)
 add_subdirectory(vendor/luau)
@@ -147,7 +195,10 @@ set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
 # Traces leave the process over a socket. Refusing anything off this machine is
 # the right default for a profiler that is on in ordinary builds.
 set(TRACY_ONLY_LOCALHOST ON CACHE BOOL "" FORCE)
-add_subdirectory(vendor/tracy)
+# EXCLUDE_FROM_ALL for the same reason as box3d above: tracy's install rules
+# are unconditional and would otherwise put libTracyClient.a, the Tracy headers
+# and TracyConfig.cmake into the distribution.
+add_subdirectory(vendor/tracy EXCLUDE_FROM_ALL)
 
 # The viewer and the headless capture tool. Off by default because they are
 # their own programs with their own dependencies, and configuring them reaches
@@ -206,7 +257,17 @@ file(GLOB_RECURSE GARGANTUAN_SOURCES CONFIGURE_DEPENDS
 	"src/*.hpp"
 )
 
-add_executable(gargantuan ${GARGANTUAN_SOURCES} ${SHADER_OUTPUTS})
+if(ANDROID)
+	# Android has no executables in the ordinary sense. The process is started
+	# by the Java activity, which does System.loadLibrary("main") and then
+	# dlsym()s SDL_main out of it, so the entry point has to be a shared library
+	# with exactly that name. SDL3/SDL_main.h in Main.cpp is what renames main
+	# to SDL_main and keeps that symbol exported.
+	add_library(gargantuan SHARED ${GARGANTUAN_SOURCES} ${SHADER_OUTPUTS})
+	set_target_properties(gargantuan PROPERTIES OUTPUT_NAME "main")
+else()
+	add_executable(gargantuan ${GARGANTUAN_SOURCES} ${SHADER_OUTPUTS})
+endif()
 
 # Members named after their own type (RenderProvider *RenderProvider) keep the
 # Luau-facing API familiar, but GCC 13+ rejects them by default. Clang does not
@@ -258,22 +319,127 @@ if(GARGANTUAN_SHADERC)
 	target_link_libraries(gargantuan PRIVATE ${SHADERC_LIBRARY})
 endif()
 
-if(WIN32)
+# Put the compiled shaders where the binary will look for them.
+#
+# On Android that is the APK's assets/, which is a fixed directory. Everywhere
+# else it is whatever directory the binary actually landed in, which is only
+# known at build time -- hence the generator expression rather than a path.
+if(ANDROID)
+	# Note for whoever wires up Gradle: getting the shaders into the APK is only
+	# half of it. SDL_GetBasePath() returns NULL on Android because an APK has
+	# no base directory, so Paths.cpp falls back to the working directory and
+	# Shader.cpp then looks somewhere meaningless. Reading these back out needs
+	# SDL_IOFromFile, which knows how to open an asset, rather than the
+	# std::filesystem calls used everywhere else.
+	set(GARGANTUAN_DATA_DIR "${CMAKE_BINARY_DIR}/assets")
+else()
+	set(GARGANTUAN_DATA_DIR "$<TARGET_FILE_DIR:gargantuan>")
+endif()
+
+add_custom_command(TARGET gargantuan POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_directory
+		"${GARGANTUAN_SHADER_STAGE}"
+		"${GARGANTUAN_DATA_DIR}/shaders"
+	COMMENT "Staging shaders into ${GARGANTUAN_DATA_DIR}/shaders"
+	VERBATIM
+)
+
+# SDL3 is built shared and lands beside the binary, so the loader has to be
+# told to look next to the binary rather than only in the system directories.
+# Windows already searches the executable's own directory and needs nothing.
+if(APPLE)
+	set_target_properties(gargantuan PROPERTIES
+		BUILD_RPATH "@executable_path"
+		INSTALL_RPATH "@executable_path;@executable_path/../Frameworks"
+	)
+elseif(UNIX AND NOT ANDROID)
+	set_target_properties(gargantuan PROPERTIES
+		BUILD_RPATH "$ORIGIN"
+		INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib"
+	)
+endif()
+
+# SDL3.dll needs no copying: CMAKE_RUNTIME_OUTPUT_DIRECTORY above already puts
+# it in the same directory as gargantuan.exe. shaderc is a system library found
+# with find_file rather than something we build, so it still has to be fetched.
+if(WIN32 AND GARGANTUAN_SHADERC AND SHADERC_DLL)
 	add_custom_command(TARGET gargantuan POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
-			"$<TARGET_FILE:SDL3::SDL3>"
+			"${SHADERC_DLL}"
 			"$<TARGET_FILE_DIR:gargantuan>"
-		COMMENT "Copying SDL3.dll next to gargantuan.exe"
+		COMMENT "Copying shaderc_shared.dll next to gargantuan.exe"
 	)
+endif()
 
-	# shaderc is linked as a shared library, so Windows needs its DLL beside the
-	# executable the same way SDL3 does
-	if(GARGANTUAN_SHADERC AND SHADERC_DLL)
-		add_custom_command(TARGET gargantuan POST_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different
-				"${SHADERC_DLL}"
-				"$<TARGET_FILE_DIR:gargantuan>"
-			COMMENT "Copying shaderc_shared.dll next to gargantuan.exe"
-		)
+# Installation.
+#
+# `cmake --install build --prefix dist` produces a tree that can be handed to
+# someone without the source. Nothing vendored contributes to it -- see the
+# EXCLUDE_FROM_ALL notes above for the two that had to be silenced -- so the
+# prefix contains only what is listed below.
+#
+# The shaders sit beside the binary in every layout rather than somewhere
+# tidier like share/. That is not a stylistic choice -- Shader.cpp resolves
+# them from SDL_GetBasePath(), and moving them would mean the installed build
+# finds nothing.
+
+if(ANDROID)
+	# Included for completeness; on Android the real packaging step is Gradle,
+	# which reads the build tree directly.
+	install(TARGETS gargantuan LIBRARY DESTINATION "lib/${ANDROID_ABI}")
+	if(TARGET SDL3-shared)
+		install(TARGETS SDL3-shared LIBRARY DESTINATION "lib/${ANDROID_ABI}")
 	endif()
+	install(DIRECTORY "${GARGANTUAN_SHADER_STAGE}/" DESTINATION "assets/shaders")
+elseif(WIN32)
+	# Flat, because that is what an unpacked zip is expected to look like.
+	install(TARGETS gargantuan RUNTIME DESTINATION ".")
+	if(TARGET SDL3-shared)
+		install(TARGETS SDL3-shared RUNTIME DESTINATION ".")
+	endif()
+	if(GARGANTUAN_SHADERC AND SHADERC_DLL)
+		install(FILES "${SHADERC_DLL}" DESTINATION ".")
+	endif()
+	install(DIRECTORY "${GARGANTUAN_SHADER_STAGE}/" DESTINATION "shaders")
+elseif(APPLE)
+	# SDL_GetBasePath() is NSBundle's resourcePath, so inside a bundle it
+	# returns Contents/Resources and outside one it returns the executable's own
+	# directory. Both are handled without a line of engine code changing: the
+	# build tree stays a loose binary with shaders beside it, and only the
+	# installed copy becomes an .app.
+	set(GARGANTUAN_BUNDLE "Gargantuan.app")
+
+	file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
+"<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+<plist version=\"1.0\">
+<dict>
+	<key>CFBundleExecutable</key><string>gargantuan</string>
+	<key>CFBundleIdentifier</key><string>com.teamfireworks.gargantuan</string>
+	<key>CFBundleName</key><string>Gargantuan</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>0.1.0</string>
+	<key>CFBundleVersion</key><string>0.1.0</string>
+	<key>NSHighResolutionCapable</key><true/>
+	<key>LSMinimumSystemVersion</key><string>11.0</string>
+</dict>
+</plist>
+")
+
+	install(TARGETS gargantuan RUNTIME DESTINATION "${GARGANTUAN_BUNDLE}/Contents/MacOS")
+	if(TARGET SDL3-shared)
+		install(TARGETS SDL3-shared LIBRARY DESTINATION "${GARGANTUAN_BUNDLE}/Contents/Frameworks")
+	endif()
+	install(FILES "${CMAKE_CURRENT_BINARY_DIR}/Info.plist" DESTINATION "${GARGANTUAN_BUNDLE}/Contents")
+	# .air files are the intermediate step between the MSL source and the
+	# metallib and are of no use at runtime. The .metal sources are kept: they
+	# are what SDL falls back to on a driver that reports MSL but not METALLIB.
+	install(DIRECTORY "${GARGANTUAN_SHADER_STAGE}/" DESTINATION "${GARGANTUAN_BUNDLE}/Contents/Resources/shaders"
+		PATTERN "*.air" EXCLUDE)
+else()
+	install(TARGETS gargantuan RUNTIME DESTINATION "bin")
+	if(TARGET SDL3-shared)
+		install(TARGETS SDL3-shared LIBRARY DESTINATION "lib")
+	endif()
+	install(DIRECTORY "${GARGANTUAN_SHADER_STAGE}/" DESTINATION "bin/shaders")
 endif()
