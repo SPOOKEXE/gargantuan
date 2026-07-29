@@ -130,11 +130,15 @@ namespace gargantuan {
 		// a pass needs.
 		bool Antialiasing = true;
 
-		// How often this camera redraws its own offscreen target. A camera
-		// drawing to the window ignores it and draws every frame; this is for
-		// the ones feeding textures -- security monitors, mirrors, the picture
-		// on a part's surface -- which rarely need to be as current as the view
-		// the player is looking at.
+		// How often this camera redraws. This is for the ones that do not need
+		// to be as current as the view the player is looking through: security
+		// monitors, mirrors, the picture on a part's surface, and a pane in a
+		// corner of the window showing the scene from somewhere else.
+		//
+		// It applies to a camera drawing into the window as well as to one
+		// feeding a texture. Between redraws the pane is still put on the
+		// window every frame -- it is the same picture, blitted again, which
+		// costs a copy rather than a pass over the world.
 		//
 		//   -1  on demand: the engine never draws it, only Camera:Render()
 		//    0  no limit, every frame, as it behaved before this existed

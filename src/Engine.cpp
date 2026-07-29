@@ -404,6 +404,31 @@ namespace gargantuan {
 			}
 		}
 
+		double windowNow = Workspace->DistributedGameTime;
+		float windowMaximumFps = RenderSettings->GetMaxCameraFPS();
+
+		// Whether a camera drawn into the window is due to redraw. It used to
+		// be that only offscreen cameras had a rate and a window one always
+		// drew; a pane showing a corner of the world does not need to be as
+		// current as the view the player is looking through, and at a large
+		// scene four of them at full rate is four more passes over everything.
+		auto isDue = [&](const std::shared_ptr<Camera> &camera) {
+			double interval = camera->GetRenderInterval(windowMaximumFps);
+			// On demand still means the engine never draws it, but a pane that
+			// has never drawn has nothing to show, so it gets its first frame
+			if (interval <= 0.0 || camera->LastOffscreenDraw < 0.0) {
+				camera->LastOffscreenDraw = windowNow;
+				return true;
+			}
+
+			if (windowNow - camera->LastOffscreenDraw < interval) {
+				return false;
+			}
+
+			camera->LastOffscreenDraw = windowNow;
+			return true;
+		};
+
 		// Anything that draws into the window, CurrentCamera first so it takes
 		// the whole thing when nothing else asks for a share
 		std::vector<DrawContext> windowCameras;
@@ -412,6 +437,7 @@ namespace gargantuan {
 				.WorldRoot = worldRoot,
 				.Camera = currentCamera,
 				.LightDirection = lightDirection,
+				.NotDueYet = !isDue(currentCamera),
 			});
 		}
 
@@ -426,10 +452,12 @@ namespace gargantuan {
 				// A Camera that is not owned by a shared_ptr cannot be handed
 				// to the renderer, so skip it rather than throwing bad_weak_ptr
 				if (auto owned = camera->weak_from_this().lock()) {
+					auto shared = std::static_pointer_cast<Camera>(owned);
 					windowCameras.push_back({
 						.WorldRoot = worldRoot,
-						.Camera = std::static_pointer_cast<Camera>(owned),
+						.Camera = shared,
 						.LightDirection = lightDirection,
+						.NotDueYet = !isDue(shared),
 					});
 				}
 			} else {

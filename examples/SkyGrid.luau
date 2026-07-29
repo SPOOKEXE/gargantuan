@@ -159,14 +159,21 @@ print(
 -- a real camera rendering the same world from its own corner, so the strip is
 -- four more full passes over the scene: the point is to see what that costs on
 -- the chart, not only to look at it.
+-- Opposite corners, so the two panes are looking at the grid down the same
+-- diagonal from either end and never see the same thing
 local SIDES = {
-	{ Name = "North", Offset = Vector3.new(0, 0, -1) },
-	{ Name = "East", Offset = Vector3.new(1, 0, 0) },
-	{ Name = "South", Offset = Vector3.new(0, 0, 1) },
-	{ Name = "West", Offset = Vector3.new(-1, 0, 0) },
+	{ Name = "NorthEast", Offset = Vector3.new(1, 0, -1).Unit },
+	{ Name = "SouthWest", Offset = Vector3.new(-1, 0, 1).Unit },
 }
 
 local watchCentre = Vector3.new(0, (LAYERS_ABOVE - LAYERS_BELOW - 1) * LAYER_HEIGHT / 2, 0)
+
+-- How far off centre each pane drifts, and how fast. A cone rather than a full
+-- orbit: enough that the pane is plainly alive and its frustum keeps changing,
+-- little enough that it stays pointed at the grid.
+local CONE = half * 0.35
+local watchers = {}
+
 for index, side in SIDES do
 	local watcher = Instance.new("Camera")
 	watcher.Name = side.Name
@@ -175,15 +182,22 @@ for index, side in SIDES do
 	-- Drawn into the window alongside the main view rather than into a target
 	-- of its own, each in its own quarter of a strip along the top
 	watcher.DrawToWindow = true
-	watcher.WindowPosition = UDim2.new((index - 1) * 0.25, 0, 0, 0)
-	watcher.WindowSize = UDim2.new(0.25, 0, 0.24, 0)
-	watcher.CFrame = CFrame.lookAt(
-		watchCentre + side.Offset * (half * 1.25) + Vector3.new(0, layers * LAYER_HEIGHT * 0.3, 0),
-		watchCentre
-	)
+	watcher.WindowPosition = UDim2.new((index - 1) * 0.5, 0, 0, 0)
+	watcher.WindowSize = UDim2.new(0.5, 0, 0.28, 0)
+	-- Its own rate. A pane is redrawn this often and blitted onto the window
+	-- every frame regardless, so between redraws it costs a copy rather than a
+	-- pass over the world.
+	watcher.FPS = 30
 	watcher.Parent = Workspace
+
+	watchers[index] = {
+		Camera = watcher,
+		Position = watchCentre + side.Offset * (half * 1.25) + Vector3.new(0, layers * LAYER_HEIGHT * 0.3, 0),
+		-- Started apart so the four are never sweeping in step
+		Phase = (index - 1) * (math.pi / 2),
+	}
 end
-print(`skygrid: {#SIDES} side cameras across the top of the window`)
+print(`skygrid: {#SIDES} diagonal cameras across the top, {watchers[1].Camera.FPS} fps each`)
 
 -- Flown round the grid on its own, which is a measurement decision as much as a
 -- presentation one: a camera that never moves lets the engine notice nothing
@@ -217,6 +231,20 @@ local slowest = 0.0
 local reported = false
 
 RunService.PreRender:Connect(function(deltaTime)
+	local now = Workspace.DistributedGameTime
+
+	-- The panes sweep a small cone by moving what they look at rather than
+	-- where they are. Aiming a fixed camera somewhere slightly different is a
+	-- rotation; moving the camera would be an orbit and would leave the grid.
+	for _, watcher in watchers do
+		local wobble = Vector3.new(
+			math.cos(now * 0.6 + watcher.Phase) * CONE,
+			math.sin(now * 0.8 + watcher.Phase) * CONE * 0.4,
+			math.sin(now * 0.5 + watcher.Phase) * CONE
+		)
+		watcher.Camera.CFrame = CFrame.lookAt(watcher.Position, watchCentre + wobble)
+	end
+
 	angle += deltaTime * (math.pi * 2 / ORBIT_SECONDS)
 	camera.CFrame = CFrame.lookAt(
 		orbitCentre + Vector3.new(math.cos(angle) * orbitRadius, orbitHeight, math.sin(angle) * orbitRadius),

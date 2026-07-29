@@ -376,6 +376,9 @@ namespace gargantuan {
 			uint64_t transformNanoseconds = 0;
 			uint64_t submitNanoseconds = 0;
 			uint64_t partsDrawn = 0;
+			// The ones that went through one at a time, counted apart from the
+			// batched ones so the chart can price them separately
+			uint64_t individualParts = 0;
 
 			// Tallied here and handed over once at the end. Calling the
 			// profiler per part meant a linear scan of the counter list with a
@@ -670,18 +673,20 @@ namespace gargantuan {
 					submitNanoseconds += partEnd - partSubmit;
 				}
 				partsDrawn++;
+				individualParts++;
 			}
 
 			if (measuring) {
 				// Handed over once, rather than opened and closed per part.
 				// Calls is the part count, so the chart can report a per-part
 				// cost rather than only a total.
-				// Only the path that was actually taken. The other one's rows
-				// would sit at zero forever, which reads as "free" rather than
-				// "not used".
-				if (!instanced) {
-					profiler->AddZoneTime("Transforms", transformNanoseconds, partsDrawn);
-					profiler->AddZoneTime("Submit", submitNanoseconds, partsDrawn);
+				// Whatever the per-part loop actually did, which in a scene that
+				// mixes the two paths is the textured minority rather than
+				// nothing. Suppressing these whenever a batch ran left the
+				// larger half of this pass off its own chart.
+				if (individualParts > 0) {
+					profiler->AddZoneTime("Individual Transforms", transformNanoseconds, individualParts);
+					profiler->AddZoneTime("Individual Submit", submitNanoseconds, individualParts);
 				}
 			}
 			if (measuring) {

@@ -2523,6 +2523,15 @@ namespace gargantuan {
 			return nullptr;
 		}
 
+		// Its own frame rate says it is not due. Nothing is recorded and the
+		// target it drew last time is handed back, which is exactly what the
+		// cache path below does when the world has not moved -- the difference
+		// is only that this one is a decision about time rather than about
+		// whether anything changed.
+		if (drawContext.NotDueYet && camera->HasDrawn) {
+			return target;
+		}
+
 		RedrawPlan plan = PlanRedraw(drawContext, *target);
 		if (plan.Skip) {
 			// Its target already holds the finished picture, so there is

@@ -18,6 +18,12 @@ namespace gargantuan {
 		// Direction TOWARDS the light. Defaults to a fixed afternoon sun so a
 		// draw without a Lighting service still shades sensibly.
 		glm::vec3 LightDirection = glm::normalize(glm::vec3(0.75f, 1.0f, 0.5f));
+
+		// Set when this camera's own frame rate says it is not due yet. Its
+		// target already holds a picture and that picture is what gets shown,
+		// so a pane can be drawn at one frame a second and still be on the
+		// window sixty times a second.
+		bool NotDueYet = false;
 	};
 
 	// What one camera's frustum walk found. The walk happens because the
