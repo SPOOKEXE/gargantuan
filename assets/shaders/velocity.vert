@@ -1,9 +1,16 @@
 #version 450
 
-// Motion vectors: where the point under each pixel was on the previous frame.
-// The camera only draws this when a pass in its chain asked for
-// Enum.RenderTexture.Velocity, which in practice means a temporal pass that
-// has to find the same surface again in last frame's picture.
+// Motion vectors and view depth: where the point under each pixel was on the
+// previous frame, and how far away it is on this one. The camera only draws
+// this when a pass in its chain asked for Enum.RenderTexture.Velocity or
+// .Depth, which in practice means a temporal pass that has to find the same
+// surface again in last frame's picture and tell whether it really is the same
+// surface.
+//
+// The depth rides along because it is already here: a perspective projection
+// puts the distance from the camera in w, so the fragment stage has it without
+// being asked. Drawing the scene a third time to arrive at the same number
+// would be the only alternative.
 //
 // Both positions come from unjittered projections. The sub-pixel offset a
 // jittering camera adds is a property of the sampling, not of the scene, and

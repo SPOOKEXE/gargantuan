@@ -308,7 +308,7 @@ namespace gargantuan {
 	}
 
 	glm::mat4 Camera::GetProjectionMatrix() {
-		return glm::perspective(glm::radians(FieldOfView), GetAspectRatio(), 0.1f, 100000.0f);
+		return glm::perspective(glm::radians(FieldOfView), GetAspectRatio(), NEAR_PLANE, FAR_PLANE);
 	}
 
 	glm::mat4 Camera::GetViewMatrix() {

@@ -66,19 +66,14 @@ eyes. What is missing is the runtime that drives them.
 
 - [ ] Occlusion, so a part hidden behind a wall stops costing a redraw. The
       frustum test cannot see it; something depth-aware has to
-- [x] A real TAA to ship as the swapped-in antialias pass. assets/shaders/
-      taa.frag, as Enum.PresetShaders.TemporalAntialias; examples/
-      TemporalAntialiasing.luau does the swap and measures it. A pass reaches
-      the camera it is running on through SetRenderTexture, which a shared
-      pass could not do by naming one: Enum.RenderTexture.History is that
-      camera's last frame, Enum.RenderTexture.Velocity its motion vectors,
-      and reading builtin.Jitter puts its projection on a sub-pixel wander.
-      Each is produced only for a camera whose passes ask, so an ordinary one
-      pays for none of it
-- [ ] Depth as a bindable render texture. TAA rejects stale history on colour
-      alone, which is enough at contrast but thin where a surface slides out
-      from behind another in much the same shade. The camera's depth buffer is
-      D16_UNORM and not created sampleable, so both would have to change
+- [x] Depth as a bindable render texture. Enum.RenderTexture.Depth and
+      .DepthHistory, and taa.frag now rejects a history that was nearer than
+      what stands there now, which is the disocclusion colour cannot see.
+      Not the camera's own depth buffer in the end: the motion vector pass
+      already produces the distance as the w a perspective projection divides
+      by, so it writes it to a second attachment. That gives it linear and in
+      studs, needing no clip planes to interpret, and as an ordinary picture,
+      so the copy kept for the next frame is the same blit as everything else
 - [ ] Textures
 - [ ] Lighting service
 - [ ] PBR

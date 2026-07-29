@@ -60,11 +60,13 @@ namespace gargantuan {
 		SDL_GPUSampler *ShadowSampler;
 		glm::mat4 ShadowMatrix;
 
-		// Where motion vectors go. Null on every camera but the ones whose
-		// shader chain bound Enum.RenderTexture.Velocity, and the velocity pass
-		// is only recorded when it is set -- drawing the scene a second time is
-		// not worth doing for a buffer nothing reads.
+		// Where motion vectors and view distances go. Null on every camera but
+		// the ones whose shader chain asked for one of them, and the velocity
+		// pass is only recorded when they are set -- drawing the scene a second
+		// time is not worth doing for buffers nothing reads. Set together,
+		// because one pass writes both.
 		SDL_GPUTexture *VelocityTarget = nullptr;
+		SDL_GPUTexture *ViewDepthTarget = nullptr;
 
 		uint32_t Width;
 		uint32_t Height;

@@ -1,28 +1,31 @@
 -- Swaps the engine's edge-blur antialiasing for a real temporal one, then
--- measures the difference on the thing that shows it worst: a long shallow
--- diagonal, where a hard edge has to be described by whole pixels.
+-- measures how it improves as it is given more frames to work with.
 --
 -- RenderSettings.AntialiasShader is the socket. A pass put in it runs on every
 -- camera with Antialiasing on, and what it can ask the engine for is what makes
 -- a temporal pass possible:
 --
---   Enum.RenderTexture.History   this camera's own finished picture, last frame
---   Enum.RenderTexture.Velocity  where each pixel was on that frame
---   builtin.Jitter               read by the shader, which puts the camera's
---                                projection on a sub-pixel wander
+--   Enum.RenderTexture.History       this camera's finished picture, last frame
+--   Enum.RenderTexture.Velocity      where each pixel was on that frame
+--   Enum.RenderTexture.Depth         how far away each one is now, in studs
+--   Enum.RenderTexture.DepthHistory  how far away whatever was there was then
+--   builtin.Jitter                   read by the shader, which puts the
+--                                    camera's projection on a sub-pixel wander
 --
--- Without the last two a pass can only decide whether to trust its history by
--- comparing colours, which drags a smear behind anything that moves; without
--- the jitter it has nothing new to average and is merely a blur.
+-- Without velocity a pass can only decide whether to trust its history by
+-- comparing colours, which drags a smear behind anything that moves. Without
+-- the depths it is still blind to one case colour cannot reach: a surface
+-- coming out from behind another of much the same shade, where the motion is
+-- honest and the history belongs to whatever was covering it. And without the
+-- jitter there is nothing new to average and the whole thing is merely a blur.
 
 local RenderSettings = game:GetService("RenderSettings")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local VIEWPORT = Vector2.new(256, 256)
--- Long enough for the accumulation to settle. Each frame adds one more
--- sub-pixel sample, and the sequence repeats every eight.
-local SETTLE_FRAMES = 24
+-- Far enough back to see the whole wall and the block crossing it
+local VIEW = CFrame.lookAt(Vector3.new(0, 12, 42), Vector3.new(0, 11, 0))
 
 local baseplate = Instance.new("Part")
 baseplate.Name = "Baseplate"
@@ -34,14 +37,15 @@ baseplate.Parent = Workspace
 
 -- Turned a few degrees off square, so its edges cross the pixel grid at a
 -- shallow angle. That is where aliasing is worst and where antialiasing has
--- something to prove.
+-- something to prove. Raised until its low corner clears the ground, so the
+-- edge being measured is the wall's own and not where it enters the floor.
 local wall = Instance.new("Part")
 wall.Name = "Wall"
 wall.Anchored = true
 wall.Color = Color3.fromRGB(240, 240, 240)
-wall.Size = Vector3.new(30, 30, 1)
-wall.Position = Vector3.new(0, 8, 0)
+wall.Size = Vector3.new(30, 20, 1)
 wall.Orientation = Vector3.new(0, 0, 8)
+wall.Position = Vector3.new(0, 13, 0)
 wall.Parent = Workspace
 
 -- Something that actually moves, which is the case colour rejection alone
@@ -51,110 +55,185 @@ mover.Name = "Mover"
 mover.Anchored = true
 mover.Color = Color3.fromRGB(255, 60, 60)
 mover.Size = Vector3.new(4, 4, 4)
-mover.Position = Vector3.new(-12, 8, 6)
+mover.Position = Vector3.new(-12, 9, 6)
 mover.Parent = Workspace
 
-local camera = Instance.new("Camera")
-camera.Name = "Subject"
-camera.CameraType = Enum.CameraType.Scriptable
-camera.ViewportSize = VIEWPORT
-camera.CFrame = CFrame.lookAt(Vector3.new(0, 10, 34), Vector3.new(0, 8, 0))
-camera.Parent = Workspace
+-- The window looks down -Z from an unrotated camera, so putting it back along
+-- +Z frames the wall without touching Pitch or Yaw -- which the freecam rebuilds
+-- its rotation from the moment the mouse moves, and which would snap the view
+-- away from anything set here as a CFrame alone.
+Workspace.CurrentCamera.CFrame = CFrame.new(Vector3.new(0, 12, 46))
 
--- Counts pixels sitting partway between the two sides of an edge.
+-- What the picture would look like if every pixel really had been sampled all
+-- over rather than once: rendered at four times the width and height with no
+-- antialiasing at all, then averaged sixteen-to-one back down.
 --
--- An aliased edge is every pixel wholly one side or the other, because one
--- sample per pixel can only answer which side its centre fell on. A pixel the
--- edge cuts in half should be half each, and the only way to arrive at that is
--- to sample it in more than one place -- which across frames is exactly what
--- the jitter is for. So counting the in-between pixels counts how much of the
--- edge's real shape the picture managed to keep.
-local function countPartialCoverage(image)
+-- This is the thing to measure against. Counting how many pixels came out
+-- part-way between their neighbours sounds like it measures antialiasing and
+-- does not -- a half-resolved edge scores higher than a correctly resolved one,
+-- because the correct one is a smooth ramp and its neighbours are close
+-- together. Distance from the truth has no such blind spot: there is one right
+-- answer per pixel and every kind of wrongness, aliased or blurred or ghosted,
+-- shows up as distance from it.
+local SUPERSAMPLE = 4
+
+local function groundTruth()
+	local probe = Instance.new("Camera")
+	probe.Name = "GroundTruth"
+	probe.CameraType = Enum.CameraType.Scriptable
+	probe.FPS = -1
+	-- Raw samples, so nothing has softened them before the averaging does
+	probe.Antialiasing = false
+	probe.ViewportSize = VIEWPORT * SUPERSAMPLE
+	probe.CFrame = VIEW
+	probe.Parent = Workspace
+
+	local large = probe:Render()
+	probe:Destroy()
+
+	local pixels = large:ReadPixelsBuffer(Vector2.zero, large.Size)
+	local wide = math.floor(large.Size.X)
+	local width = math.floor(VIEWPORT.X)
+	local height = math.floor(VIEWPORT.Y)
+
+	local truth = table.create(width * height)
+	for y = 0, height - 1 do
+		for x = 0, width - 1 do
+			local total = 0
+			for sy = 0, SUPERSAMPLE - 1 do
+				local row = (y * SUPERSAMPLE + sy) * wide
+				for sx = 0, SUPERSAMPLE - 1 do
+					total += buffer.readu8(pixels, (row + x * SUPERSAMPLE + sx) * 4)
+				end
+			end
+			truth[y * width + x + 1] = total / (SUPERSAMPLE * SUPERSAMPLE)
+		end
+	end
+
+	return truth
+end
+
+local function errorAgainst(image, truth)
 	local pixels = image:ReadPixelsBuffer(Vector2.zero, image.Size)
 	local width = math.floor(image.Size.X)
 	local height = math.floor(image.Size.Y)
 
-	local function red(x, y)
-		return buffer.readu8(pixels, (y * width + x) * 4)
+	local total = 0
+	for i = 0, width * height - 1 do
+		total += math.abs(buffer.readu8(pixels, i * 4) - truth[i + 1])
 	end
 
-	local partial = 0
-	for y = 1, height - 2 do
-		for x = 1, width - 2 do
-			local left, here, right = red(x - 1, y), red(x, y), red(x + 1, y)
-			local low, high = math.min(left, right), math.max(left, right)
-			-- A real edge either side of it, and this pixel somewhere between
-			-- the two rather than committed to one
-			if high - low > 40 and here > low + 8 and here < high - 8 then
-				partial += 1
-			end
-		end
-	end
-
-	return partial
+	return total / (width * height)
 end
 
-local function render(frames)
+-- A camera of its own for every measurement, because the accumulation lives on
+-- the camera's target: asking what one frame of this looks like has to start
+-- from no frames at all, and a camera that has been running has a history.
+--
+-- FPS is set to on demand so that nothing but the Render() calls below draws
+-- it. Left at the default the engine would also be drawing it in between, and
+-- the answer to "how good is this after eight frames" would depend on how many
+-- frames the engine happened to slip in.
+local function resolve(frames)
+	local probe = Instance.new("Camera")
+	probe.Name = "Probe"
+	probe.CameraType = Enum.CameraType.Scriptable
+	probe.FPS = -1
+	probe.ViewportSize = VIEWPORT
+	probe.CFrame = VIEW
+	probe.Parent = Workspace
+
 	local capture
 	for _ = 1, frames do
-		capture = camera:Render()
+		capture = probe:Render()
 	end
+
+	probe:Destroy()
 	return capture
 end
 
--- The built-in pass first, for something to compare against. It softens edges
--- by looking at one frame, so a single render is all it ever has.
-local builtin = render(1)
-local builtinPartial = countPartialCoverage(builtin)
-print(`built-in antialias: {builtinPartial} pixels of partial coverage`)
-builtin:Save("captures/taa_builtin.png")
+local truth = groundTruth()
+print(`ground truth: {VIEWPORT.X * SUPERSAMPLE}x{VIEWPORT.Y * SUPERSAMPLE} averaged down to {VIEWPORT.X}x{VIEWPORT.Y}`)
 
--- The swap. Both bindings are needed and the order matters: samplers are bound
+-- The built-in pass first, for something to compare against. It works from one
+-- frame, so more of them change nothing.
+RenderSettings.AntialiasShader = nil
+local builtin = resolve(1)
+local builtinError = errorAgainst(builtin, truth)
+builtin:Save("captures/taa_builtin.png")
+print(`built-in antialias: {string.format("%.3f", builtinError)} mean error from the truth`)
+
+-- The swap. Every binding is needed and the order matters: samplers are bound
 -- in the order they were first set, after the camera's own output at slot 0,
--- and taa.frag declares History at binding 1 and Velocity at binding 2.
+-- and taa.frag declares them from binding 1 in exactly this order.
 local taa = Instance.new("PostProcessShader")
 taa.Name = "TemporalAntialias"
 taa.Preset = Enum.PresetShaders.TemporalAntialias
 taa:SetRenderTexture(Enum.ShaderProperty.HistoryTexture, Enum.RenderTexture.History)
 taa:SetRenderTexture(Enum.ShaderProperty.VelocityTexture, Enum.RenderTexture.Velocity)
--- Both optional; these are the defaults the shader falls back to
+taa:SetRenderTexture(Enum.ShaderProperty.DepthTexture, Enum.RenderTexture.Depth)
+taa:SetRenderTexture(Enum.ShaderProperty.DepthHistoryTexture, Enum.RenderTexture.DepthHistory)
+-- All optional; these are the defaults the shader falls back to
 taa:SetNumber(Enum.ShaderProperty.Feedback, 0.92)
 taa:SetNumber(Enum.ShaderProperty.Clamping, 1.25)
+taa:SetNumber(Enum.ShaderProperty.Disocclusion, 0.02)
 
 RenderSettings.AntialiasShader = taa
 print(`swapped in {taa.Name}, which reads {#taa:ListImages()} engine textures`)
 
-local resolved = render(SETTLE_FRAMES)
-local resolvedPartial = countPartialCoverage(resolved)
-print(`temporal antialias: {resolvedPartial} pixels of partial coverage`)
-resolved:Save("captures/taa_resolved.png")
-
-if resolvedPartial > builtinPartial then
-	local ratio = string.format("%.1fx", resolvedPartial / math.max(builtinPartial, 1))
-	print(`the temporal pass recovered {ratio} more edge detail`)
-else
-	print("the temporal pass did not resolve more edge detail than the built-in one")
+-- One frame, a few, and a lot.
+--
+-- The curve is not a straight climb and should not be expected to be. On the
+-- first frame there is no history, so it scores exactly what the built-in does.
+-- On the second it scores its worst of all: the picture is almost entirely the
+-- first frame, which was rendered through a projection nudged off-centre, so it
+-- is a sub-pixel-shifted copy of something that was not antialiased either. It
+-- takes several passes through the eight jitter positions for those offsets to
+-- average out, and only then does having sampled the pixel in eight places
+-- start being worth more than the shifting cost. From there it keeps improving
+-- until the history has turned over entirely.
+--
+-- That is the bargain a temporal pass makes, and it is worth knowing before
+-- reaching for one: it is behind for the first fraction of a second and ahead
+-- for as long as the camera keeps running.
+for _, frames in { 1, 2, 8, 32, 128 } do
+	local capture = resolve(frames)
+	local error = errorAgainst(capture, truth)
+	local against = string.format("%.2fx", error / math.max(builtinError, 0.0001))
+	capture:Save(`captures/taa_{frames}.png`)
+	print(`temporal antialias, {frames} frame(s): {string.format("%.3f", error)} mean error, {against} the built-in`)
 end
 
 -- Now the part that needs motion vectors. Walk the red block across the wall a
 -- pixel or so a frame and capture it mid-stride: with reprojection it stays a
 -- block, and without it the history smears a trail behind it.
-for step = 1, SETTLE_FRAMES do
-	mover.Position = Vector3.new(-12 + step * 0.9, 8, 6)
-	camera:Render()
-end
+local walker = Instance.new("Camera")
+walker.Name = "Walker"
+walker.CameraType = Enum.CameraType.Scriptable
+walker.FPS = -1
+walker.ViewportSize = VIEWPORT
+walker.CFrame = VIEW
+walker.Parent = Workspace
 
-local moving = camera:Render()
+local moving
+for step = 1, 48 do
+	mover.Position = Vector3.new(-12 + step * 0.5, 9, 6)
+	moving = walker:Render()
+end
+walker:Destroy()
+
 moving:Save("captures/taa_moving.png")
 print("saved captures/taa_moving.png -- the red block should have no trail behind it")
 
 -- Putting it back is the same one line. The engine's own pass returns, and the
--- camera stops jittering and stops keeping a history, because nothing is asking
+-- cameras stop jittering and stop keeping a history, because nothing is asking
 -- for either any more.
 RenderSettings.AntialiasShader = nil
-local restored = render(2)
-print(`restored the built-in pass: {countPartialCoverage(restored)} pixels of partial coverage`)
+-- Back where the truth was rendered from, or the comparison would be against a
+-- picture with the block somewhere else in it
+mover.Position = Vector3.new(-12, 9, 6)
+print(`restored the built-in pass: {string.format("%.3f", errorAgainst(resolve(64), truth))} mean error`)
 
 RunService.PreRender:Connect(function()
-	camera.CFrame = CFrame.lookAt(camera.CFrame.Position, wall.Position)
+	mover.Position = Vector3.new(math.sin(Workspace.DistributedGameTime) * 12, 9, 6)
 end)

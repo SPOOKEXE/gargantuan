@@ -107,11 +107,17 @@ else
 	warn(`could not save the capture: {capture.SaveError}`)
 end
 
--- Paste the capture back over the camera as a picture-in-picture
+-- The same camera over the window as a picture-in-picture, live.
+--
+-- SetCameraTexture binds the camera's target on the GPU, so the inset is
+-- whatever that camera is looking at now. SetImage(..., capture) would compile
+-- and draw too, and would then never change again: `capture` is an
+-- EditableImage, a copy that came back to the CPU at the moment Render() was
+-- called, and copies do not follow the thing they were copied from.
 local overlay = Instance.new("PostProcessShader")
 overlay.Name = "PictureInPicture"
 overlay.Source = Enum.PresetShaders.Overlay
-overlay:SetImage(Enum.ShaderProperty.OverlayTexture, capture)
+overlay:SetCameraTexture(Enum.ShaderProperty.OverlayTexture, securityCamera)
 overlay:SetNumber(Enum.ShaderProperty.Opacity, 0.75)
 overlay:SetVector2(Enum.ShaderProperty.Position, Vector2.new(4, 4))
 

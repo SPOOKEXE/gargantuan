@@ -154,6 +154,8 @@ namespace gargantuan {
 			if (target.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, target.ScratchTexture);
 			if (target.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.HistoryTexture);
 			if (target.VelocityTexture) SDL_ReleaseGPUTexture(Gpu, target.VelocityTexture);
+			if (target.ViewDepthTexture) SDL_ReleaseGPUTexture(Gpu, target.ViewDepthTexture);
+			if (target.ViewDepthHistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.ViewDepthHistoryTexture);
 			if (target.CacheTexture) SDL_ReleaseGPUTexture(Gpu, target.CacheTexture);
 			if (target.DepthTexture) SDL_ReleaseGPUTexture(Gpu, target.DepthTexture);
 		}
@@ -239,6 +241,8 @@ namespace gargantuan {
 		if (it->second.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, it->second.ScratchTexture);
 		if (it->second.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, it->second.HistoryTexture);
 		if (it->second.VelocityTexture) SDL_ReleaseGPUTexture(Gpu, it->second.VelocityTexture);
+		if (it->second.ViewDepthTexture) SDL_ReleaseGPUTexture(Gpu, it->second.ViewDepthTexture);
+		if (it->second.ViewDepthHistoryTexture) SDL_ReleaseGPUTexture(Gpu, it->second.ViewDepthHistoryTexture);
 		if (it->second.CacheTexture) SDL_ReleaseGPUTexture(Gpu, it->second.CacheTexture);
 		if (it->second.DepthTexture) SDL_ReleaseGPUTexture(Gpu, it->second.DepthTexture);
 		NeedsHistory.erase(it->first);
@@ -295,11 +299,15 @@ namespace gargantuan {
 		if (target.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, target.ScratchTexture);
 		if (target.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.HistoryTexture);
 		if (target.VelocityTexture) SDL_ReleaseGPUTexture(Gpu, target.VelocityTexture);
+		if (target.ViewDepthTexture) SDL_ReleaseGPUTexture(Gpu, target.ViewDepthTexture);
+		if (target.ViewDepthHistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.ViewDepthHistoryTexture);
 		// A resize invalidates the cached image along with everything else
 		if (target.CacheTexture) SDL_ReleaseGPUTexture(Gpu, target.CacheTexture);
 		target.ScratchTexture = nullptr;
 		target.HistoryTexture = nullptr;
 		target.VelocityTexture = nullptr;
+		target.ViewDepthTexture = nullptr;
+		target.ViewDepthHistoryTexture = nullptr;
 		target.CacheTexture = nullptr;
 		if (target.DepthTexture) SDL_ReleaseGPUTexture(Gpu, target.DepthTexture);
 
@@ -370,6 +378,10 @@ namespace gargantuan {
 				return it->second.HistoryTexture;
 			case Enums::RenderTexture::Velocity:
 				return it->second.VelocityTexture;
+			case Enums::RenderTexture::Depth:
+				return it->second.ViewDepthTexture;
+			case Enums::RenderTexture::DepthHistory:
+				return it->second.ViewDepthHistoryTexture;
 			default:
 				return nullptr;
 			}
@@ -395,14 +407,22 @@ namespace gargantuan {
 	}
 
 	SDL_GPUSampler *RenderProvider::GetSourceSampler(const ShaderScript::TextureSource &source) {
-		// Blending two neighbouring motion vectors produces a step neither
-		// surface took, and a pass reprojecting by it samples between the two.
-		// Everything else is a picture, where smoothing is what is wanted.
-		if (source.Render == Enums::RenderTexture::Velocity) {
+		// Averaging two neighbouring measurements invents a third that neither
+		// surface reported: half a step neither took, or a distance at which
+		// nothing stands. A pass reprojecting by the one or comparing against
+		// the other is then reasoning about something that was never there.
+		// Only the pictures are smoothed.
+		switch (source.Render) {
+		case Enums::RenderTexture::Velocity:
+		case Enums::RenderTexture::Depth:
+		case Enums::RenderTexture::DepthHistory:
 			EnsurePointSampler();
 			if (PointSampler) {
 				return PointSampler;
 			}
+			break;
+		default:
+			break;
 		}
 		return ShaderSampler;
 	}
@@ -423,10 +443,23 @@ namespace gargantuan {
 			}
 
 			for (const auto &source : shader->GetTextureSources()) {
-				if (source.Render == Enums::RenderTexture::History) {
+				switch (source.Render) {
+				case Enums::RenderTexture::History:
 					needs.History = true;
-				} else if (source.Render == Enums::RenderTexture::Velocity) {
-					needs.Velocity = true;
+					break;
+				// All three come out of the one geometry pass, and the copy is
+				// of what that pass wrote, so asking for the copy asks for the
+				// pass as well
+				case Enums::RenderTexture::DepthHistory:
+					needs.DepthHistory = true;
+					needs.Motion = true;
+					break;
+				case Enums::RenderTexture::Velocity:
+				case Enums::RenderTexture::Depth:
+					needs.Motion = true;
+					break;
+				default:
+					break;
 				}
 			}
 		};
@@ -485,21 +518,50 @@ namespace gargantuan {
 			}
 		}
 
-		if (needs.Velocity && !target.VelocityTexture) {
+		// Written and read, never drawn into by a shader chain, so they want
+		// less than a camera's own picture does
+		auto measurement = [&](SDL_GPUTexture *&texture, SDL_GPUTextureFormat format, const char *what) {
+			if (texture) {
+				return;
+			}
+
 			SDL_GPUTextureCreateInfo info{
 				.type = SDL_GPU_TEXTURETYPE_2D,
-				.format = VELOCITY_FORMAT,
+				.format = format,
 				.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
 				.width = target.Width,
 				.height = target.Height,
 				.layer_count_or_depth = 1,
 				.num_levels = 1,
 			};
-			target.VelocityTexture = SDL_CreateGPUTexture(Gpu, &info);
-			if (!target.VelocityTexture) {
-				SDL_Log(
-					"Failed to create a %ux%u motion vector target: %s", target.Width, target.Height, SDL_GetError()
-				);
+			texture = SDL_CreateGPUTexture(Gpu, &info);
+			if (!texture) {
+				SDL_Log("Failed to create a %ux%u %s target: %s", target.Width, target.Height, what, SDL_GetError());
+			}
+		};
+
+		// Both, whichever was asked for: one pass writes them together, and a
+		// render pass has to be given every attachment its pipeline declares
+		if (needs.Motion) {
+			measurement(target.VelocityTexture, VELOCITY_FORMAT, "motion vector");
+			measurement(target.ViewDepthTexture, VIEW_DEPTH_FORMAT, "view depth");
+		}
+
+		if (needs.DepthHistory && !target.ViewDepthHistoryTexture) {
+			measurement(target.ViewDepthHistoryTexture, VIEW_DEPTH_FORMAT, "previous view depth");
+
+			// Cleared to the far plane, like the buffer it is a copy of, for
+			// the one frame it is read before it has ever been written. A pass
+			// comparing against it then sees empty space everywhere rather than
+			// a wall of geometry pressed against the lens.
+			if (target.ViewDepthHistoryTexture && commands) {
+				SDL_GPUColorTargetInfo clear{
+					.texture = target.ViewDepthHistoryTexture,
+					.clear_color = SDL_FColor{Camera::FAR_PLANE, 0.0f, 0.0f, 0.0f},
+					.load_op = SDL_GPU_LOADOP_CLEAR,
+					.store_op = SDL_GPU_STOREOP_STORE,
+				};
+				SDL_EndGPURenderPass(SDL_BeginGPURenderPass(commands, &clear, 1, nullptr));
 			}
 		}
 	}
@@ -552,13 +614,28 @@ namespace gargantuan {
 			return;
 		}
 
-		// Two reasons to keep one, and they expire differently. Being part of a
-		// camera loop is remembered in NeedsHistory, which is only cleared when
-		// the camera goes away. A pass asking for Enum.RenderTexture.History is
-		// asked about again every frame, so putting the engine's own antialias
-		// pass back stops the copy the same frame rather than leaving the camera
-		// paying for one nothing reads.
-		if (!NeedsHistory.count(camera) && !GetTemporalNeeds(camera).History) {
+		TemporalNeeds needs = GetTemporalNeeds(camera);
+
+		// This frame's distances become last frame's, taken here so that the
+		// chain that just ran read the copy from before it. Ahead of the colour
+		// copy for no reason but that the two are independent.
+		if (needs.DepthHistory && target.ViewDepthTexture && target.ViewDepthHistoryTexture) {
+			SDL_GPUBlitInfo blit{
+				.source = {.texture = target.ViewDepthTexture, .w = target.Width, .h = target.Height},
+				.destination = {.texture = target.ViewDepthHistoryTexture, .w = target.Width, .h = target.Height},
+				.load_op = SDL_GPU_LOADOP_DONT_CARE,
+				.filter = SDL_GPU_FILTER_NEAREST,
+			};
+			SDL_BlitGPUTexture(commands, &blit);
+		}
+
+		// Two reasons to keep a picture, and they expire differently. Being part
+		// of a camera loop is remembered in NeedsHistory, which is only cleared
+		// when the camera goes away. A pass asking for
+		// Enum.RenderTexture.History is asked about again every frame, so
+		// putting the engine's own antialias pass back stops the copy the same
+		// frame rather than leaving the camera paying for one nothing reads.
+		if (!NeedsHistory.count(camera) && !needs.History) {
 			return;
 		}
 
@@ -1456,7 +1533,11 @@ namespace gargantuan {
 		frameContext.ShadowSampler = ShadowSampler;
 		frameContext.ColorTarget = target.ColorTexture;
 		frameContext.DepthTexture = target.DepthTexture;
-		frameContext.VelocityTarget = needs.Velocity ? target.VelocityTexture : nullptr;
+		// Both or neither: the pass declares two attachments and a render pass
+		// must be handed every one of them
+		bool motion = needs.Motion && target.VelocityTexture && target.ViewDepthTexture;
+		frameContext.VelocityTarget = motion ? target.VelocityTexture : nullptr;
+		frameContext.ViewDepthTarget = motion ? target.ViewDepthTexture : nullptr;
 		EnsureWhiteTexture();
 		ResolvePartTextures(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
@@ -1501,7 +1582,7 @@ namespace gargantuan {
 		// What this camera drew through, for the next frame's motion vectors to
 		// measure against. Unjittered: the offset describes the sampling, not
 		// where the camera is.
-		if (camera && needs.Velocity) {
+		if (camera && needs.Motion) {
 			camera->PreviousViewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
 			camera->HasPreviousViewProjection = true;
 		}

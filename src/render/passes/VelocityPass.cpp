@@ -9,10 +9,15 @@
 #include <memory>
 
 namespace gargantuan {
-	// Draws the scene a second time, writing where each pixel came from rather
-	// than what colour it is. Only recorded for a camera whose chain bound
-	// Enum.RenderTexture.Velocity, so a place that never asks for motion
-	// vectors never pays for the second pass.
+	// Draws the scene a second time, writing where each pixel came from and how
+	// far away it is rather than what colour it is. Only recorded for a camera
+	// whose chain bound Enum.RenderTexture.Velocity, .Depth or .DepthHistory,
+	// so a place that asks for none of them never pays for the second pass.
+	//
+	// Both attachments always, whichever of them was asked for. The depth is
+	// the w a perspective projection already produced, so the pass is doing the
+	// work either way and splitting it into two passes would mean drawing the
+	// geometry twice to save writing one float.
 	//
 	// A separate pass rather than a second colour target on the opaque one: a
 	// camera's SurfaceShader replaces the opaque fragment stage entirely, and a
@@ -46,10 +51,11 @@ namespace gargantuan {
 						   .SetFragmentShader(Shader.FragmentShader)
 						   .SetColorEnabled(true)
 						   .SetColorFormat(RenderProvider::VELOCITY_FORMAT)
-						   // Motion is a measurement, not a picture: blending a
-						   // transparent part's velocity into the one behind it
-						   // would average two answers into a third that is
-						   // neither
+						   .AddColorFormat(RenderProvider::VIEW_DEPTH_FORMAT)
+						   // Both are measurements, not pictures: blending a
+						   // transparent part's motion or distance into the one
+						   // behind it would average two answers into a third
+						   // that is neither
 						   .SetBlendingEnabled(false)
 						   .SetDepthEnabled(true)
 						   .SetDepthFormat(SDL_GPU_TEXTUREFORMAT_D16_UNORM)
@@ -57,14 +63,26 @@ namespace gargantuan {
 		};
 
 		SDL_GPURenderPass *Draw(SDL_GPUDevice *gpu, FrameContext &context) override {
-			// Zero is "did not move", which is what an empty pixel should say:
-			// nothing was drawn there, so a temporal pass reads the same place
-			// in its history and its own colour test decides the rest
-			SDL_GPUColorTargetInfo colorTarget{
-				.texture = context.VelocityTarget,
-				.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f},
-				.load_op = SDL_GPU_LOADOP_CLEAR,
-				.store_op = SDL_GPU_STOREOP_STORE,
+			SDL_GPUColorTargetInfo colorTargets[2] = {
+				// Zero is "did not move", which is what an empty pixel should
+				// say: nothing was drawn there, so a temporal pass reads the
+				// same place in its history and its other tests decide the rest
+				{
+					.texture = context.VelocityTarget,
+					.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f},
+					.load_op = SDL_GPU_LOADOP_CLEAR,
+					.store_op = SDL_GPU_STOREOP_STORE,
+				},
+				// And the far plane is how far away nothing is. Clearing to
+				// zero would put the background nearer than everything, and a
+				// pass comparing depths would read every empty pixel as a
+				// surface that had just appeared in front of the scene.
+				{
+					.texture = context.ViewDepthTarget,
+					.clear_color = SDL_FColor{Camera::FAR_PLANE, 0.0f, 0.0f, 0.0f},
+					.load_op = SDL_GPU_LOADOP_CLEAR,
+					.store_op = SDL_GPU_STOREOP_STORE,
+				},
 			};
 
 			// The opaque pass threw its depth away when it finished, so this
@@ -78,7 +96,7 @@ namespace gargantuan {
 				.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE,
 			};
 
-			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(context.Commands, &colorTarget, 1, &depthTarget);
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(context.Commands, colorTargets, 2, &depthTarget);
 			SDL_BindGPUGraphicsPipeline(pass, Pipeline);
 
 			// Unjittered on both sides. The sub-pixel offset describes how the

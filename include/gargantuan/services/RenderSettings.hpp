@@ -63,6 +63,12 @@ namespace gargantuan {
 		//   Enum.RenderTexture.Velocity  where each of its pixels was on that
 		//                                frame, which makes the engine draw the
 		//                                scene a second time to work them out
+		//   Enum.RenderTexture.Depth     how far away each one is, in studs,
+		//                                which that same second pass produces
+		//   .DepthHistory                and how far away whatever stood there
+		//                                was, which is how a pass tells a
+		//                                surface that has merely moved from one
+		//                                that has just been uncovered
 		//
 		// and reading builtin.Jitter in the shader is what puts that camera's
 		// projection on a sub-pixel wander, so successive frames have something

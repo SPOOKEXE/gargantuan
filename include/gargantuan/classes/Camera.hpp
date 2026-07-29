@@ -61,6 +61,13 @@ namespace gargantuan {
 		float Pitch = 0.0f, Yaw = 0.0f, Roll = 0.0f;
 		// Vertical field of view in degrees.
 		float FieldOfView = 70.0f;
+
+		// How near and how far a camera can see, in studs. Named rather than
+		// written into the projection, because the depth a camera hands to a
+		// shader is measured in the same units and the two agreeing is the
+		// whole point of handing it over.
+		static constexpr float NEAR_PLANE = 0.1f;
+		static constexpr float FAR_PLANE = 100000.0f;
 		Vector2 ViewportSize = gargantuan::Vector2(0.0f, 0.0f);
 
 		float AccumulatedDeltaX = 0.0f;

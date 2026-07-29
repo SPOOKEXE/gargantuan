@@ -62,7 +62,26 @@ namespace gargantuan {
 		// Written by a geometry pass the camera only pays for when a pass asks
 		// for it, and measured off the unjittered projection so the offset a
 		// jittering camera adds does not leak into it.
-		Velocity
+		Velocity,
+
+		// How far the surface under each pixel is from the camera, in studs
+		// along the direction it faces. Linear, not the reciprocal curve a
+		// depth buffer stores, so it can be compared and interpolated without
+		// first being told the clip planes. Empty pixels read as the far plane.
+		//
+		// It comes off the same geometry pass as Velocity -- the distance is
+		// what a perspective projection already divides by, so writing it costs
+		// an output and no arithmetic -- which means asking for either produces
+		// both.
+		Depth,
+
+		// The same depth, from last frame. What Velocity alone cannot answer:
+		// velocity says where a pixel was, not whether anything else was
+		// standing there at the time. A surface coming out from behind another
+		// has honest motion and a history belonging to whatever was covering
+		// it, and comparing the two depths is what tells them apart -- colour
+		// cannot, when the two are much the same shade.
+		DepthHistory
 	)
 
 	// Every parameter and texture binding the built-in shaders declare. The
@@ -80,6 +99,7 @@ namespace gargantuan {
 		Brightness,
 		Clamping,
 		Contrast,
+		Disocclusion,
 		Distortion,
 		Feedback,
 		FirstPosition,
@@ -102,6 +122,8 @@ namespace gargantuan {
 		Vignette,
 
 		// Texture bindings, for SetImage, SetCameraTexture and SetRenderTexture
+		DepthHistoryTexture,
+		DepthTexture,
 		FirstTexture,
 		HistoryTexture,
 		OutputTexture,

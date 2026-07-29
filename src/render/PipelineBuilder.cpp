@@ -26,6 +26,16 @@ namespace gargantuan {
 	PipelineBuilder &PipelineBuilder::SetColorFormat(SDL_GPUTextureFormat format) {
 		ColorFormat = format;
 		return *this;
+	}
+
+	PipelineBuilder &PipelineBuilder::AddColorFormat(SDL_GPUTextureFormat format) {
+		if (ExtraColorTargets + 1 >= MAXIMUM_COLOR_TARGETS) {
+			SDL_Log("A pipeline cannot have more than %zu colour targets", MAXIMUM_COLOR_TARGETS);
+			return *this;
+		}
+
+		ColorTargets[++ExtraColorTargets].format = format;
+		return *this;
 	};
 
 	PipelineBuilder &PipelineBuilder::SetColorEnabled(bool enabled) {
@@ -71,29 +81,36 @@ namespace gargantuan {
 		info.depth_stencil_state.enable_depth_write = DepthEnabled;
 		info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
 
-		ColorTarget.format = ColorFormat;
-		ColorTarget.blend_state.enable_blend = BlendingEnabled;
+		ColorTargets[0].format = ColorFormat;
 
-		if (BlendingEnabled) {
-			ColorTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-			ColorTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-			ColorTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-			ColorTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-			ColorTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-			ColorTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-		} else {
-			ColorTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-			ColorTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
-			ColorTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-			ColorTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-			ColorTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
-			ColorTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-		};
+		// The same blend state on every attachment. A pass writing more than
+		// one writes measurements alongside its picture, and those are never
+		// blended, so the two have not yet needed to differ.
+		for (size_t index = 0; index <= ExtraColorTargets; index++) {
+			auto &blend = ColorTargets[index].blend_state;
+			blend.enable_blend = BlendingEnabled;
 
-		info.target_info.color_target_descriptions = &ColorTarget;
+			if (BlendingEnabled) {
+				blend.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+				blend.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+				blend.color_blend_op = SDL_GPU_BLENDOP_ADD;
+				blend.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+				blend.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+				blend.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+			} else {
+				blend.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+				blend.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+				blend.color_blend_op = SDL_GPU_BLENDOP_ADD;
+				blend.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+				blend.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+				blend.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+			}
+		}
+
+		info.target_info.color_target_descriptions = ColorTargets.data();
 
 		if (ColorEnabled) {
-			info.target_info.num_color_targets = 1;
+			info.target_info.num_color_targets = (Uint32)(ExtraColorTargets + 1);
 		} else {
 			info.target_info.num_color_targets = 0;
 		}

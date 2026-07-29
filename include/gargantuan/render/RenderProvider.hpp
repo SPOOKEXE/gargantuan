@@ -45,6 +45,13 @@ namespace gargantuan {
 		// full floats would.
 		static constexpr SDL_GPUTextureFormat VELOCITY_FORMAT = SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
 
+		// Distance from the camera in studs, out to the far plane, which is a
+		// range no fixed-point format covers and half floats run out of before
+		// reaching. Full floats also make the copy kept for the next frame an
+		// ordinary picture-to-picture blit, which a depth-stencil texture would
+		// not have been.
+		static constexpr SDL_GPUTextureFormat VIEW_DEPTH_FORMAT = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+
 		// The colour and depth textures backing one offscreen camera.
 		// ScratchTexture is the other half of the ping-pong pair the shader
 		// chain bounces through, and is only created once a camera has shaders.
@@ -55,10 +62,16 @@ namespace gargantuan {
 			// something reads across a sampling cycle, where no ordering can
 			// give every reader this frame's copy.
 			SDL_GPUTexture *HistoryTexture = nullptr;
-			// Where every pixel was last frame. Only allocated for a camera
-			// whose chain bound Enum.RenderTexture.Velocity, and written by a
-			// second geometry pass that only such a camera records.
+			// Where every pixel was last frame, and how far away each one is
+			// now. Only allocated for a camera whose chain bound
+			// Enum.RenderTexture.Velocity, .Depth or .DepthHistory; the two
+			// come out of one geometry pass that only such a camera records, so
+			// they are allocated and dropped together.
 			SDL_GPUTexture *VelocityTexture = nullptr;
+			SDL_GPUTexture *ViewDepthTexture = nullptr;
+			// Last frame's distances, kept only when something asks. Velocity
+			// says where a pixel was; this says what was standing there.
+			SDL_GPUTexture *ViewDepthHistoryTexture = nullptr;
 			SDL_GPUTexture *DepthTexture = nullptr;
 			// The cascading cache: the chain's output at the last pass before
 			// the first one marked RedrawEveryFrame. On a still scene the
@@ -459,15 +472,20 @@ namespace gargantuan {
 			// is copied aside each frame -- and the camera can never sit still,
 			// since its own output is an input that changed
 			bool History = false;
-			// A pass bound Enum.RenderTexture.Velocity, so the scene is drawn a
-			// second time into a motion vector buffer
-			bool Velocity = false;
+			// A pass bound Enum.RenderTexture.Velocity, .Depth or
+			// .DepthHistory, so the scene is drawn a second time into the
+			// motion vector and distance buffers. One flag for all three
+			// because one pass writes both buffers at once.
+			bool Motion = false;
+			// A pass bound Enum.RenderTexture.DepthHistory, so this frame's
+			// distances are copied aside once it is done with them
+			bool DepthHistory = false;
 			// A pass asked for the sub-pixel offset, so the projection moves
 			// inside the pixel each frame
 			bool Jitter = false;
 
 			bool Any() const {
-				return History || Velocity || Jitter;
+				return History || Motion || DepthHistory || Jitter;
 			}
 		};
 		TemporalNeeds GetTemporalNeeds(Camera *camera);
