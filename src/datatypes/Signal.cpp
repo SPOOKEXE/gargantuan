@@ -276,6 +276,7 @@ namespace gargantuan {
 				label = "?";
 			}
 		}
+		G_PROFILE_NAMED("Script", label.data(), label.size());
 
 		int arguments = signal->LPushArgument(mainState, value);
 		if (lua_pcall(mainState, arguments, 0, 0) != LUA_OK) {
