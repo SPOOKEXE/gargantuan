@@ -2168,9 +2168,6 @@ namespace gargantuan {
 		// Count distinguishes simultaneous removal and insertion.
 		MixBits(hash, world->RawParts.size());
 
-
-		MixBits(surfaces, world->RawParts.size());
-
 		SyncPartRows(world);
 
 		// Every part's fixed share of the hash, summed as the rows were built
