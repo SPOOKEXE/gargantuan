@@ -66,6 +66,12 @@ eyes. What is missing is the runtime that drives them.
 
 - [ ] Occlusion, so a part hidden behind a wall stops costing a redraw. The
       frustum test cannot see it; something depth-aware has to
+- [ ] A real TAA to ship as the swapped-in antialias pass. RenderSettings
+      .AntialiasShader is the socket and a pass that binds its own camera
+      already gets last frame back, but that copy is only half of it. Needs
+      sub-pixel jitter on the projection and motion vectors to reproject the
+      history with; without them a pass can only reject stale samples by
+      colour, which ghosts on anything that moves
 - [ ] Textures
 - [ ] Lighting service
 - [ ] PBR
