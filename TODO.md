@@ -61,19 +61,13 @@ eyes. What is missing is the runtime that drives them.
 - [ ] Vertex stage overrides, so a shader can move geometry and not only shade it
 - [ ] Reflect vertex inputs, to reject a surface shader whose layout does not
       match what opaque.vert emits
+- [ ] Add mesh edge and mesh face inputs as well
 
 ## Render
 
+- [ ] Offscreen and un-used cameras still render (at their high frame rate), fix. (i.e. offscreen, not used onscreen, etc). Could render at a slower rate instead (1-5fps for example).
 - [ ] Occlusion, so a part hidden behind a wall stops costing a redraw. The
       frustum test cannot see it; something depth-aware has to
-- [x] Depth as a bindable render texture. Enum.RenderTexture.Depth and
-      .DepthHistory, and taa.frag now rejects a history that was nearer than
-      what stands there now, which is the disocclusion colour cannot see.
-      Not the camera's own depth buffer in the end: the motion vector pass
-      already produces the distance as the w a perspective projection divides
-      by, so it writes it to a second attachment. That gives it linear and in
-      studs, needing no clip planes to interpret, and as an ordinary picture,
-      so the copy kept for the next frame is the same blit as everything else
 - [ ] Textures
 - [ ] Lighting service
 - [ ] PBR

@@ -247,6 +247,7 @@ namespace gargantuan {
 		if (it->second.DepthTexture) SDL_ReleaseGPUTexture(Gpu, it->second.DepthTexture);
 		NeedsHistory.erase(it->first);
 		VisibleSets.erase(it->first);
+		CameraDrawCounts.erase(it->first);
 		CameraTargets.erase(it);
 	}
 
@@ -1919,13 +1920,33 @@ namespace gargantuan {
 			MixPointer(hash, part.get());
 			MixBits(hash, part->QuickHash);
 			// A part showing a camera changes when that camera does, and one
-			// showing an image when the image is drawn into
+			// showing an image when the image is drawn into. Both need the
+			// count or the revision as well as the pointer: the pointer only
+			// says which one is being shown, and a screen showing the same
+			// camera it showed last frame is the ordinary case, not the still
+			// one.
 			MixPointer(hash, part->SurfaceCamera.get());
+			MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
 			MixPointer(hash, part->SurfaceImage.get());
 			MixBits(hash, part->SurfaceImage ? part->SurfaceImage->GetRevision() : 0);
 		}
 
 		return hash;
+	}
+
+	uint64_t RenderProvider::GetCameraDrawCount(Camera *camera) const {
+		if (!camera) {
+			return 0;
+		}
+
+		auto it = CameraDrawCounts.find(camera);
+		return it == CameraDrawCounts.end() ? 0 : it->second;
+	}
+
+	void RenderProvider::CountCameraDraw(Camera *camera) {
+		if (camera) {
+			CameraDrawCounts[camera]++;
+		}
 	}
 
 	void RenderProvider::ComputeVisibleSet(
@@ -1988,7 +2009,12 @@ namespace gargantuan {
 			visible++;
 			MixPointer(hash, part.get());
 			MixBits(hash, part->QuickHash);
+			// A screen in view is a reason to redraw whenever the camera on it
+			// has drawn again, however still the screen itself has been. This
+			// is the narrow check, so it asks only about the ones this camera
+			// can actually see: a monitor behind it costs it nothing.
 			MixPointer(hash, part->SurfaceCamera.get());
+			MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
 			MixPointer(hash, part->SurfaceImage.get());
 			MixBits(hash, part->SurfaceImage ? part->SurfaceImage->GetRevision() : 0);
 		}
@@ -2220,6 +2246,11 @@ namespace gargantuan {
 
 		RecordShaderChain(commands, camera, *target, plan.FirstShader, plan.WriteCache);
 		RecordHistoryCopy(commands, camera, *target);
+		// Its target now holds a different picture, which is what a part showing
+		// this camera needs to know. The plan.Skip path above returns before
+		// here on purpose: nothing was rewritten, so nothing looking at it has
+		// been given a reason to redraw.
+		CountCameraDraw(camera);
 		outRecorded = true;
 		return target;
 	}
@@ -2358,6 +2389,9 @@ namespace gargantuan {
 		// The readback has to see what the shaders produced, not the raw render
 		RecordShaderChain(commands, camera, *target, 0, false);
 		RecordHistoryCopy(commands, camera, *target);
+		// An explicit Render() rewrites the target like any other draw, so a
+		// part showing this camera has to hear about it too
+		CountCameraDraw(camera);
 
 		SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commands);
 		SDL_GPUTextureRegion region{

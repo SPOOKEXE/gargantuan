@@ -353,6 +353,22 @@ namespace gargantuan {
 		// or it would composite this frame's picture over last frame's.
 		std::unordered_set<Camera *> RedrawnThisFrame;
 
+		// How many times each camera has rewritten its target, ever. This is a
+		// camera's answer to the revision an EditableImage carries: what a part
+		// shows on its surface is one or the other, and a camera that has drawn
+		// again has changed the part's appearance exactly as a drawn-into image
+		// would have.
+		//
+		// Counted rather than flagged per frame because the signatures it feeds
+		// are compared against the previous frame's, not read within this one.
+		// A flag would depend on whether the camera doing the looking happened
+		// to be recorded before or after the camera being looked at; a number
+		// that only ever goes up does not.
+		std::unordered_map<Camera *, uint64_t> CameraDrawCounts;
+		uint64_t GetCameraDrawCount(Camera *camera) const;
+		// Called wherever a camera's target is actually rewritten
+		void CountCameraDraw(Camera *camera);
+
 		std::vector<SDL_GPUFence *> FrameFences;
 		std::deque<std::vector<SDL_GPUFence *>> FramesInFlight;
 		// Waits on a frame's fences and releases them
