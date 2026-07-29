@@ -858,31 +858,54 @@ namespace gargantuan {
 		}
 
 		PartTextures.clear();
+		// Slot 0 is no picture, which the pass draws with its white texture.
+		SurfaceTextures.assign(1, nullptr);
+		SurfaceSlotsComplete = true;
 		ResolvedSurfaceSignature = SurfaceSignature;
 		PartTexturesResolved = true;
 
-		if (!worldRoot || !WorldHasSurfaces) {
+		if (!worldRoot) {
 			return;
 		}
 
-		for (const auto &part : worldRoot->Parts) {
-			if (!part) {
+		// Every part, not just the ones showing something: a part that lost its
+		// picture has to lose its slot with it.
+		for (BasePart *part : worldRoot->RawParts) {
+			SDL_GPUTexture *texture = nullptr;
+
+			if (part->SurfaceCamera) {
+				auto it = CameraTargets.find(part->SurfaceCamera.get());
+				if (it != CameraTargets.end() && it->second.ColorTexture) {
+					texture = it->second.ColorTexture;
+				}
+			}
+			if (!texture && part->SurfaceImage) {
+				texture = AcquireImageTexture(part->SurfaceImage.get());
+			}
+
+			if (!texture) {
+				part->SurfaceTextureSlot = 0;
 				continue;
 			}
 
-		if (part->SurfaceCamera) {
-				auto it = CameraTargets.find(part->SurfaceCamera.get());
-				if (it != CameraTargets.end() && it->second.ColorTexture) {
-					PartTextures[part.get()] = it->second.ColorTexture;
-					continue;
-				}
-			}
+			PartTextures[part] = texture;
 
-			if (part->SurfaceImage) {
-				if (SDL_GPUTexture *texture = AcquireImageTexture(part->SurfaceImage.get())) {
-					PartTextures[part.get()] = texture;
+			uint8_t slot = 0;
+			for (size_t candidate = 1; candidate < SurfaceTextures.size(); candidate++) {
+				if (SurfaceTextures[candidate] == texture) {
+					slot = (uint8_t)candidate;
+					break;
 				}
 			}
+			if (slot == 0) {
+				if (SurfaceTextures.size() >= MAX_SURFACE_SLOTS) {
+					SurfaceSlotsComplete = false;
+				} else {
+					slot = (uint8_t)SurfaceTextures.size();
+					SurfaceTextures.push_back(texture);
+				}
+			}
+			part->SurfaceTextureSlot = slot;
 		}
 	}
 
@@ -1631,6 +1654,8 @@ namespace gargantuan {
 		EnsureWhiteTexture();
 		ResolvePartTextures(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
+		frameContext.SurfaceTextures = &SurfaceTextures;
+		frameContext.SurfaceSlotsComplete = SurfaceSlotsComplete;
 		frameContext.WhiteTexture = WhiteTexture;
 		frameContext.SurfaceTextureSampler = PartSurfaceSampler ? PartSurfaceSampler : ShadowSampler;
 		frameContext.Width = target.Width;
@@ -1972,7 +1997,7 @@ namespace gargantuan {
 		}
 
 		// Count distinguishes simultaneous removal and insertion.
-		MixBits(hash, world->Parts.size());
+		MixBits(hash, world->RawParts.size());
 
 		// QuickHash invalidates the prior surface-presence answer.
 		const bool hadSurfaces = WorldHasSurfaces;
@@ -1984,16 +2009,15 @@ namespace gargantuan {
 		// Hash while these fields are already read.
 		uint64_t surfaces = 0x9E3779B97F4A7C15ull;
 		MixBits(surfaces, TargetGeneration);
-		MixBits(surfaces, world->Parts.size());
+		MixBits(surfaces, world->RawParts.size());
 
-		for (const auto &part : world->Parts) {
-			if (!part) {
-				MixBits(hash, 0);
-				continue;
-			}
+		BasePart *const *rawParts = world->RawParts.data();
+		const size_t partCount = world->RawParts.size();
+		for (size_t index = 0; index < partCount; index++) {
+			BasePart *part = rawParts[index];
 
 			// Pointer catches replacement; QuickHash catches property writes.
-			MixPointer(hash, part.get());
+			MixPointer(hash, part);
 			MixBits(hash, part->QuickHash);
 
 			// Read once: every shared_ptr deref is a call here.
@@ -2011,6 +2035,12 @@ namespace gargantuan {
 			// Pointer identifies the source; revision/count identifies its
 			// content. Only the parts carrying one: a part gaining a surface
 			// bumps its QuickHash, which is mixed above.
+			if (surfaceCamera || surfaceImage) {
+				MixPointer(surfaces, part);
+				MixPointer(surfaces, surfaceCamera);
+				MixPointer(surfaces, surfaceImage);
+			}
+
 			if (hadSurfaces && (surfaceCamera || surfaceImage)) {
 				MixPointer(hash, surfaceCamera);
 				MixBits(hash, GetCameraDrawCount(surfaceCamera));
@@ -2044,8 +2074,8 @@ namespace gargantuan {
 		G_PROFILE("Frustum Walk");
 		out.InView.clear();
 		out.ShadowsIntoView.clear();
-		out.InViewList.clear();
-		out.ShadowList.clear();
+		out.InViewCount = 0;
+		out.ShadowCount = 0;
 
 		// Only surface-camera redraw checks require lookup sets.
 		const bool needSets = WorldHasSurfaceCameras;
@@ -2053,8 +2083,10 @@ namespace gargantuan {
 
 		if (world) {
 			// Reserve once for large worlds.
-			out.InViewList.reserve(world->Parts.size());
-			out.ShadowList.reserve(world->Parts.size());
+			if (out.InViewList.size() < world->RawParts.size()) {
+				out.InViewList.resize(world->RawParts.size());
+				out.ShadowList.resize(world->RawParts.size());
+			}
 		}
 
 		uint64_t hash = 0xCBF29CE484222325ull;
@@ -2082,19 +2114,20 @@ namespace gargantuan {
 		// Reused across chunks and frames.
 		CullScratch.resize(CHUNK);
 
-		const size_t total = world->Parts.size();
+		const size_t total = world->RawParts.size();
+		BasePart *const *rawParts = world->RawParts.data();
+		BasePart **inViewOut = out.InViewList.data();
+		BasePart **shadowOut = out.ShadowList.data();
+		size_t inViewCount = 0;
+		size_t shadowCount = 0;
+
 		for (size_t start = 0; start < total; start += CHUNK) {
 			const size_t stop = std::min(start + CHUNK, total);
 
 			uint64_t cullStart = measuring ? SDL_GetTicksNS() : 0;
 			for (size_t index = start; index < stop; index++) {
-				const auto &part = world->Parts[index];
+				BasePart *part = rawParts[index];
 				CullResult &result = CullScratch[index - start];
-				if (!part) {
-					result.InView = false;
-					result.ShadowReaches = false;
-					continue;
-				}
 
 				// Half-diagonal bounds every box rotation conservatively.
 				const glm::vec3 &size = part->Size;
@@ -2112,24 +2145,20 @@ namespace gargantuan {
 
 			uint64_t gatherStart = measuring ? SDL_GetTicksNS() : 0;
 			for (size_t index = start; index < stop; index++) {
-				const auto &part = world->Parts[index];
-				if (!part) {
-					continue;
-				}
-
+				BasePart *part = rawParts[index];
 				const CullResult &result = CullScratch[index - start];
 				if (result.InView) {
 					if (needSets) {
-						out.InView.insert(part.get());
+						out.InView.insert(part);
 					}
-					out.InViewList.push_back(part.get());
+					inViewOut[inViewCount++] = part;
 				}
 				// ShadowList is a superset of visible shadow casters.
 				if (part->CastShadow && (result.InView || result.ShadowReaches)) {
 					if (needSets) {
-						out.ShadowsIntoView.insert(part.get());
+						out.ShadowsIntoView.insert(part);
 					}
-					out.ShadowList.push_back(part.get());
+					shadowOut[shadowCount++] = part;
 				}
 			}
 			if (measuring) {
@@ -2138,11 +2167,7 @@ namespace gargantuan {
 
 			uint64_t signatureStart = measuring ? SDL_GetTicksNS() : 0;
 			for (size_t index = start; index < stop; index++) {
-				const auto &part = world->Parts[index];
-				if (!part) {
-					continue;
-				}
-
+				BasePart *part = rawParts[index];
 				const CullResult &result = CullScratch[index - start];
 				// Hash visible parts and offscreen casters affecting view.
 				if (!result.InView && !result.ShadowReaches) {
@@ -2150,7 +2175,7 @@ namespace gargantuan {
 				}
 
 				visible++;
-				MixPointer(hash, part.get());
+				MixPointer(hash, part);
 				MixBits(hash, part->QuickHash);
 				// QuickHash detects newly added surfaces omitted here.
 				if (worldHasSurfaces && (part->SurfaceCamera || part->SurfaceImage)) {
@@ -2164,6 +2189,9 @@ namespace gargantuan {
 				signatureNanoseconds += SDL_GetTicksNS() - signatureStart;
 			}
 		}
+
+		out.InViewCount = inViewCount;
+		out.ShadowCount = shadowCount;
 
 		if (measuring) {
 			profiler->AddZoneTime("Cull", cullNanoseconds, total);
@@ -2646,6 +2674,8 @@ namespace gargantuan {
 		EnsureWhiteTexture();
 		ResolvePartTextures(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
+		frameContext.SurfaceTextures = &SurfaceTextures;
+		frameContext.SurfaceSlotsComplete = SurfaceSlotsComplete;
 		frameContext.WhiteTexture = WhiteTexture;
 		frameContext.SurfaceTextureSampler = PartSurfaceSampler ? PartSurfaceSampler : ShadowSampler;
 		// Direct swapchain draws must compute their own visible set.

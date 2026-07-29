@@ -16,14 +16,31 @@ namespace gargantuan {
 		ChildAdded->Connect([this](Instance::Pointer instance) {
 			if (instance->IsA("BasePart")) {
 				std::shared_ptr<BasePart> part = std::static_pointer_cast<BasePart>(instance);
+				part->WorldIndex = (uint32_t)this->Parts.size();
 				this->Parts.push_back(part);
+				this->RawParts.push_back(part.get());
 			}
 		});
 
 		ChildRemoved->Connect([this](Instance::Pointer instance) {
-			std::erase_if(this->Parts, [&instance](const std::shared_ptr<BasePart> &part) {
-				return part.get() == instance.get();
-			});
+			if (!instance->IsA("BasePart")) {
+				return;
+			}
+
+			BasePart *part = static_cast<BasePart *>(instance.get());
+			uint32_t index = part->WorldIndex;
+			if (index >= this->RawParts.size() || this->RawParts[index] != part) {
+				return;
+			}
+
+			uint32_t last = (uint32_t)this->RawParts.size() - 1;
+			if (index != last) {
+				this->Parts[index] = std::move(this->Parts[last]);
+				this->RawParts[index] = this->RawParts[last];
+				this->RawParts[index]->WorldIndex = index;
+			}
+			this->Parts.pop_back();
+			this->RawParts.pop_back();
 		});
 	}
 } // namespace gargantuan

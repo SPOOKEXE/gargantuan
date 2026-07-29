@@ -11,6 +11,7 @@ namespace gargantuan {
 	  public:
 		static const ClassDefinition DEFINITION;
 		std::vector<std::shared_ptr<BasePart>> Parts;
+		std::vector<BasePart *> RawParts;
 
 		WorldRoot();
 	};

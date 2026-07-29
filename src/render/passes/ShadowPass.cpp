@@ -60,23 +60,23 @@ namespace gargantuan {
 
 			// Includes offscreen casters whose shadows reach view; already filtered.
 			std::vector<BasePart *> everything;
-			const std::vector<BasePart *> *castList = nullptr;
+			PartSpan castList;
 			if (context.Visible) {
-				castList = &context.Visible->ShadowList;
+				castList = context.Visible->ShadowParts();
 			} else {
-				everything.reserve(context.WorldRoot->Parts.size());
-				for (const auto &candidate : context.WorldRoot->Parts) {
-					if (candidate && candidate->CastShadow) {
-						everything.push_back(candidate.get());
+				everything.reserve(context.WorldRoot->RawParts.size());
+				for (BasePart *candidate : context.WorldRoot->RawParts) {
+					if (candidate->CastShadow) {
+						everything.push_back(candidate);
 					}
 				}
-				castList = &everything;
+				castList = {everything.data(), everything.size()};
 			}
 
 			SDL_GPUBuffer *boundVertexBuffer = nullptr;
 			SDL_GPUBuffer *boundIndexBuffer = nullptr;
 
-			for (BasePart *part : *castList) {
+			for (BasePart *part : castList) {
 				auto &mesh = part->GetMesh();
 				if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
 					continue;

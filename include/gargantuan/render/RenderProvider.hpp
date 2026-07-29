@@ -260,6 +260,8 @@ namespace gargantuan {
 		std::set<std::pair<Camera *, Camera *>> HistoryEdges;
 		SDL_GPUTexture *WhiteTexture = nullptr;
 		std::unordered_map<const BasePart *, SDL_GPUTexture *> PartTextures;
+		std::vector<SDL_GPUTexture *> SurfaceTextures;
+		bool SurfaceSlotsComplete = false;
 		// Cached per camera; dropped with its target.
 		std::unordered_map<Camera *, VisibleSet> VisibleSets;
 

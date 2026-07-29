@@ -58,11 +58,11 @@ eyes. What is missing is the runtime that drives them.
 
 ## Shaders
 
-- [ ] ShaderProperties object, and move shaders and examples to it
 - [ ] Vertex stage overrides, so a shader can move geometry and not only shade it
 - [ ] Reflect vertex inputs, to reject a surface shader whose layout does not
       match what opaque.vert emits
-- [ ] Add mesh edge and mesh face inputs as well
+- [ ] Add mesh edge and mesh face inputs as well for shader scripts.
+- [ ] Build a internal "shader capabilities" which holds what the shader accesses and uses. This way if no shaders use vertex information, we skip processing it and passing it in, and we can skip entirely for entire pipeline if no shader scripts use it.
 
 ## Profiling and Tracing
 

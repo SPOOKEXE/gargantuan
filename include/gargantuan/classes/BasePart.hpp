@@ -79,6 +79,8 @@ namespace gargantuan {
 
 		// Which primitive mesh this part draws.
 		uint8_t MeshId = 0;
+		uint32_t WorldIndex = 0;
+		uint8_t SurfaceTextureSlot = 0;
 
 		glm::mat4 GetModelMatrix();
 

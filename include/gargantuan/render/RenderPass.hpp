@@ -23,6 +23,24 @@ namespace gargantuan {
 	};
 
 	// One camera's cached frustum result. Shadows include offscreen casters.
+	inline constexpr uint32_t MAX_SURFACE_SLOTS = 256;
+	inline constexpr uint32_t MAX_MESH_IDS = 32;
+
+	struct PartSpan {
+		BasePart *const *Data = nullptr;
+		size_t Count = 0;
+
+		size_t size() const {
+			return Count;
+		}
+		BasePart *const *begin() const {
+			return Data;
+		}
+		BasePart *const *end() const {
+			return Data + Count;
+		}
+	};
+
 	struct VisibleSet {
 		uint64_t Signature = 0;
 		uint64_t SceneStamp = 0;
@@ -35,6 +53,15 @@ namespace gargantuan {
 		// Lists serve passes; sets serve per-part redraw checks.
 		std::vector<BasePart *> InViewList;
 		std::vector<BasePart *> ShadowList;
+		size_t InViewCount = 0;
+		size_t ShadowCount = 0;
+
+		PartSpan InViewParts() const {
+			return {InViewList.data(), InViewCount};
+		}
+		PartSpan ShadowParts() const {
+			return {ShadowList.data(), ShadowCount};
+		}
 
 		bool IsInView(const BasePart *part) const {
 			return InView.count(part) != 0;
@@ -70,6 +97,8 @@ namespace gargantuan {
 
 		// Resolved once per frame; missing parts use WhiteTexture.
 		const std::unordered_map<const BasePart *, SDL_GPUTexture *> *PartTextures = nullptr;
+		const std::vector<SDL_GPUTexture *> *SurfaceTextures = nullptr;
+		bool SurfaceSlotsComplete = false;
 		SDL_GPUTexture *WhiteTexture = nullptr;
 		SDL_GPUSampler *SurfaceTextureSampler = nullptr;
 

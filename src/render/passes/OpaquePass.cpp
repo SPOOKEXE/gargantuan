@@ -36,7 +36,7 @@ namespace gargantuan {
 	};
 
 	namespace {
-		const std::vector<BasePart *> EMPTY_PARTS;
+		const PartSpan EMPTY_PARTS;
 	} // namespace
 
 	class OpaquePass final : public RenderPass {
@@ -90,11 +90,11 @@ namespace gargantuan {
 		static constexpr uint32_t SKIPPED = 0xFFFFFFFFu;
 		std::vector<uint32_t> PartBatch;
 		std::vector<uint32_t> Cursors;
-		// Grouped by mesh to scan only that shape's textures.
-		std::vector<GpuMesh *> MeshSlots;
-		std::vector<std::vector<uint32_t>> MeshBuckets;
-		// MeshId to slot; only the first part of each shape resolves its mesh.
-		std::array<uint32_t, 256> MeshIdSlots;
+		// (MeshId, texture slot) to batch. Both travel on the part as small
+		// numbers, so the pair indexes this instead of being searched for.
+		// Only the keys actually used are reset, so the table is never walked.
+		std::array<uint32_t, MAX_MESH_IDS * MAX_SURFACE_SLOTS> KeyToBatch;
+		std::vector<uint16_t> UsedKeys;
 		// Timed per phase to avoid per-part probe cost.
 		uint64_t InstanceBucketNanoseconds = 0;
 		uint64_t InstanceFillNanoseconds = 0;
@@ -163,7 +163,7 @@ namespace gargantuan {
 		bool PrepareInstances(
 			SDL_GPUDevice *gpu,
 			FrameContext &context,
-			const std::vector<BasePart *> &parts,
+			PartSpan parts,
 			bool anyPartTextures
 		) {
 			InstanceBucketNanoseconds = 0;
@@ -172,74 +172,91 @@ namespace gargantuan {
 			uint64_t started = SDL_GetTicksNS();
 
 			Batches.clear();
-			MeshSlots.clear();
-			MeshIdSlots.fill(SKIPPED);
-			for (auto &list : MeshBuckets) {
-				list.clear();
+			for (uint16_t key : UsedKeys) {
+				KeyToBatch[key] = SKIPPED;
 			}
-			MeshBuckets.clear();
+			UsedKeys.clear();
+			Batches.reserve(64);
+
 			// Every element is overwritten; clearing adds a measured 9 MB memset.
 			if (InstanceScratch.size() < parts.size()) {
 				InstanceScratch.resize(parts.size());
 			}
+			if (PartBatch.size() < parts.size()) {
+				PartBatch.resize(parts.size());
+			}
 
-			// Few meshes favor a linear scan and keep each shape contiguous.
-			PartBatch.clear();
-			PartBatch.reserve(parts.size());
-			for (BasePart *part : parts) {
-				// Avoid map lookup for null/default texture cases.
-				SDL_GPUTexture *texture = context.WhiteTexture;
-				if (anyPartTextures && (part->SurfaceCamera || part->SurfaceImage)) {
-					auto found = context.PartTextures->find(part);
-					if (found != context.PartTextures->end() && found->second) {
-						texture = found->second;
-					}
+			const bool useSlots = context.SurfaceTextures && context.SurfaceSlotsComplete;
+			SDL_GPUTexture *const *surfaceTextures = useSlots ? context.SurfaceTextures->data() : nullptr;
+			const uint32_t surfaceTextureCount = useSlots ? (uint32_t)context.SurfaceTextures->size() : 0;
+
+			BasePart *const *partList = parts.Data;
+			uint32_t *partBatchOut = PartBatch.data();
+			Batch *batches = Batches.data();
+			const size_t count = parts.size();
+
+			auto openBatch = [&](BasePart *part, SDL_GPUTexture *texture) -> uint32_t {
+				auto &mesh = part->GetMesh();
+				if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
+					return SKIPPED;
 				}
 
-				// Scan textures within mesh; one flat scan grew from 5 to 25 entries.
-				uint8_t meshId = part->MeshId;
-				uint32_t meshSlot = meshId != 0 ? MeshIdSlots[meshId] : SKIPPED;
-				if (meshSlot == SKIPPED) {
-					auto &mesh = part->GetMesh();
-					if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
-						PartBatch.push_back(SKIPPED);
-						continue;
-					}
+				auto *primitive = part->Cast<Part>();
+				uint32_t opened = (uint32_t)Batches.size();
+				Batches.push_back(
+					{mesh.get(), texture, primitive ? primitive->GetShape() : Enums::PartType::Block, 0, 0}
+				);
+				return opened;
+			};
 
-					for (uint32_t candidate = 0; candidate < (uint32_t)MeshSlots.size(); candidate++) {
-						if (MeshSlots[candidate] == mesh.get()) {
-							meshSlot = candidate;
-							break;
+			for (size_t index = 0; index < count; index++) {
+				BasePart *part = partList[index];
+				uint32_t meshId = part->MeshId;
+				uint32_t bucket = SKIPPED;
+
+				if (useSlots && meshId != 0 && meshId < MAX_MESH_IDS) {
+					uint32_t key = meshId * MAX_SURFACE_SLOTS + part->SurfaceTextureSlot;
+					bucket = KeyToBatch[key];
+					if (bucket == SKIPPED) {
+						uint32_t slot = part->SurfaceTextureSlot;
+						SDL_GPUTexture *texture = slot != 0 && slot < surfaceTextureCount
+							? surfaceTextures[slot]
+							: context.WhiteTexture;
+						bucket = openBatch(part, texture ? texture : context.WhiteTexture);
+						batches = Batches.data();
+						if (bucket != SKIPPED) {
+							KeyToBatch[key] = bucket;
+							UsedKeys.push_back((uint16_t)key);
 						}
 					}
-					if (meshSlot == SKIPPED) {
-						meshSlot = (uint32_t)MeshSlots.size();
-						MeshSlots.push_back(mesh.get());
-						MeshBuckets.emplace_back();
+				} else {
+					SDL_GPUTexture *texture = context.WhiteTexture;
+					if (anyPartTextures && (part->SurfaceCamera || part->SurfaceImage)) {
+						auto found = context.PartTextures->find(part);
+						if (found != context.PartTextures->end() && found->second) {
+							texture = found->second;
+						}
 					}
-					if (meshId != 0) {
-						MeshIdSlots[meshId] = meshSlot;
+
+					auto &mesh = part->GetMesh();
+					if (mesh && mesh->VertexBuffer && mesh->IndexBuffer) {
+						for (uint32_t candidate = 0; candidate < (uint32_t)Batches.size(); candidate++) {
+							if (batches[candidate].Mesh == mesh.get() && batches[candidate].Texture == texture) {
+								bucket = candidate;
+								break;
+							}
+						}
+						if (bucket == SKIPPED) {
+							bucket = openBatch(part, texture);
+							batches = Batches.data();
+						}
 					}
 				}
 
-				uint32_t bucket = SKIPPED;
-				for (uint32_t candidate : MeshBuckets[meshSlot]) {
-					if (Batches[candidate].Texture == texture) {
-						bucket = candidate;
-						break;
-					}
+				partBatchOut[index] = bucket;
+				if (bucket != SKIPPED) {
+					batches[bucket].Count++;
 				}
-				if (bucket == SKIPPED) {
-					auto *primitive = part->Cast<Part>();
-					bucket = (uint32_t)Batches.size();
-					Batches.push_back(
-						{MeshSlots[meshSlot], texture, primitive ? primitive->GetShape() : Enums::PartType::Block, 0, 0}
-					);
-					MeshBuckets[meshSlot].push_back(bucket);
-				}
-
-				PartBatch.push_back(bucket);
-				Batches[bucket].Count++;
 			}
 
 			InstanceBucketNanoseconds = SDL_GetTicksNS() - started;
@@ -265,15 +282,11 @@ namespace gargantuan {
 			SDL_GPUTexture *White = context.WhiteTexture;
 
 			// Cache vector storage used repeatedly per part.
-			const uint32_t *partBuckets = PartBatch.data();
-			BasePart *const *partList = parts.data();
 			uint32_t *cursors = Cursors.data();
 			InstanceData *scratch = InstanceScratch.data();
-			const Batch *batches = Batches.data();
 
-			const size_t count = parts.size();
 			for (size_t index = 0; index < count; index++) {
-				uint32_t bucket = partBuckets[index];
+				uint32_t bucket = partBatchOut[index];
 				if (bucket == SKIPPED) {
 					continue;
 				}
@@ -377,6 +390,7 @@ namespace gargantuan {
 		}
 
 		OpaquePass(SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchainFormat) {
+			KeyToBatch.fill(SKIPPED);
 			InstancedShader.Init(gpu);
 			InstancedPipeline = PipelineBuilder()
 									.SetVertexShader(InstancedShader.VertexShader)
@@ -416,24 +430,19 @@ namespace gargantuan {
 
 			// Instance upload must finish before opening the render pass.
 			std::vector<BasePart *> everything;
-			const std::vector<BasePart *> *drawList = nullptr;
+			PartSpan drawList;
 			if (context.Visible) {
-				drawList = &context.Visible->InViewList;
+				drawList = context.Visible->InViewParts();
 			} else {
-				everything.reserve(context.WorldRoot->Parts.size());
-				for (const auto &candidate : context.WorldRoot->Parts) {
-					if (candidate) {
-						everything.push_back(candidate.get());
-					}
-				}
-				drawList = &everything;
+				everything = context.WorldRoot->RawParts;
+				drawList = {everything.data(), everything.size()};
 			}
 
 			const bool anyPartTextures = context.PartTextures && !context.PartTextures->empty();
 
 			// One draw per mesh-texture pair; SurfaceShader stays per-part.
-			bool instanced = InstancedPipeline && !context.SurfacePipeline && !drawList->empty() &&
-				PrepareInstances(gpu, context, *drawList, anyPartTextures);
+			bool instanced = InstancedPipeline && !context.SurfacePipeline && drawList.size() > 0 &&
+				PrepareInstances(gpu, context, drawList, anyPartTextures);
 
 			SDL_GPUColorTargetInfo colorTarget = {
 				.texture = context.ColorTarget,
@@ -528,7 +537,7 @@ namespace gargantuan {
 				if (measuring) {
 					submitNanoseconds += SDL_GetTicksNS() - submitStart;
 					profiler->AddZoneTime("Bucket", InstanceBucketNanoseconds, 1);
-					profiler->AddZoneTime("Fill Instances", InstanceFillNanoseconds, (uint64_t)drawList->size());
+					profiler->AddZoneTime("Fill Instances", InstanceFillNanoseconds, (uint64_t)drawList.size());
 					profiler->AddZoneTime("Upload", InstanceUploadNanoseconds, 1);
 					for (const Batch &batch : Batches) {
 						auto index = magic_enum::enum_index(batch.Shape);
@@ -546,7 +555,7 @@ namespace gargantuan {
 				pushedBareFragment = true;
 			}
 
-			for (BasePart *part : instanced ? EMPTY_PARTS : *drawList) {
+			for (BasePart *part : instanced ? EMPTY_PARTS : drawList) {
 				uint64_t partStart = measuring ? SDL_GetTicksNS() : 0;
 
 				auto &mesh = part->GetMesh();
