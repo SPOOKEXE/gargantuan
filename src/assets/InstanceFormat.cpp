@@ -9,6 +9,7 @@
 
 #include <SDL3/SDL_log.h>
 #include <cstring>
+#include <any>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
@@ -89,11 +90,11 @@ namespace gargantuan::InstanceFormat {
 
 	void SerializeProperties(Instance::ClassDefinition *definition, Instance::Pointer instance, json &properties) {
 		for (auto &[key, property] : definition->Properties) {
-			if (key == "Parent" || !property.Serializable || !property.Read || !property.Write) continue;
+			if (key == "Parent" || key == "Name" || !property.Serializable || !property.ReadValue) continue;
 
-			auto value = property.Read(instance.get());
+			auto value = property.ReadValue(instance.get());
 			if (auto serialized = TrySerializeValue(value); serialized.has_value()) {
-				properties[key] = json::object({serialized.value()});
+				properties[key] = json::object({{serialized->first, serialized->second}});
 			}
 		}
 
@@ -339,7 +340,9 @@ namespace gargantuan::InstanceFormat {
 		instance->Name = definition->Name;
 		while (true) {
 			for (auto &[key, property] : definition->Properties) {
-				if (key == "Parent" || !property.Serializable || !property.Write || !properties.contains(key)) continue;
+				if (key == "Parent" || key == "Name" || !property.Serializable || !property.WriteValue ||
+					!properties.contains(key))
+					continue;
 
 				auto value = properties[key];
 				if (!value.is_object()) {
@@ -360,7 +363,7 @@ namespace gargantuan::InstanceFormat {
 				auto deserialized = maybeDeserialized.value();
 
 				try {
-					property.Write(instance.get(), deserialized);
+					property.WriteValue(instance.get(), deserialized);
 				} catch (const std::bad_any_cast &e) {
 					instance->Destroy();
 					return state.ReturnError(

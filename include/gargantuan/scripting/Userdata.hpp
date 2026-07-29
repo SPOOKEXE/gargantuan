@@ -1,5 +1,7 @@
 #pragma once
 
+#include <any>
+
 #include "gargantuan/scripting/StackValue.hpp"
 #include "gargantuan/scripting/UserdataTag.hpp"
 
@@ -29,6 +31,10 @@ namespace gargantuan {
 			int (*Read)(lua_State *L, Class *instance) = nullptr;
 			int (*Write)(lua_State *L, Class *instance) = nullptr;
 			TypeReflector ReflectType = nullptr;
+
+			bool Serializable = false;
+			std::any (*ReadValue)(Class *instance) = nullptr;
+			void (*WriteValue)(Class *instance, const std::any &value) = nullptr;
 
 			template <typename MemberType> struct MemberTraits;
 			template <typename C, typename T> struct MemberTraits<T C::*> {
@@ -65,6 +71,19 @@ namespace gargantuan {
 					};
 				}
 
+				if (enableRead) {
+					self.ReadValue = [](Class *instance) -> std::any {
+						return std::any(static_cast<MemberClass *>(instance)->*MemberPointer);
+					};
+				}
+
+				if (enableWrite) {
+					self.WriteValue = [](Class *instance, const std::any &value) {
+						static_cast<MemberClass *>(instance)->*MemberPointer = std::any_cast<Value>(value);
+					};
+				}
+
+				self.Serializable = enableRead && enableWrite;
 				return self;
 			}
 
@@ -81,6 +100,7 @@ namespace gargantuan {
 				self.Read = [](lua_State *L, Class *instance) -> int {
 					return StackValue<ReadType>::Push(L, storedRead(instance));
 				};
+				self.ReadValue = [](Class *instance) -> std::any { return std::any(storedRead(instance)); };
 
 				return self;
 			}
@@ -100,6 +120,12 @@ namespace gargantuan {
 					storedWrite(instance, CheckStackValue<WriteType>(L, -1));
 					return 0;
 				};
+
+				self.ReadValue = [](Class *instance) -> std::any { return std::any(storedRead(instance)); };
+				self.WriteValue = [](Class *instance, const std::any &value) {
+					storedWrite(instance, std::any_cast<WriteType>(value));
+				};
+				self.Serializable = true;
 
 				return self;
 			}
@@ -411,7 +437,11 @@ namespace gargantuan {
 				[](lua_State *L, auto *inst) -> int {                                                                  \
 					return G_UD_WRITEONLY_PROP_IMPL(classType, propertyName, valueType)(L, inst);                      \
 				},                                                                                                     \
-				G_UD_REFLECT_TYPE(valueType)                                                                           \
+				G_UD_REFLECT_TYPE(valueType), true,                                                                    \
+				[](auto *inst) -> std::any { return std::any(static_cast<classType *>(inst)->propertyName); },         \
+				[](auto *inst, const std::any &value) {                                                                \
+					static_cast<classType *>(inst)->propertyName = std::any_cast<valueType>(value);                    \
+				}                                                                                                      \
 		}                                                                                                              \
 	}
 
