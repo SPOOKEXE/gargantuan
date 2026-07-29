@@ -1,4 +1,5 @@
 #include "gargantuan/Engine.hpp"
+#include "gargantuan/ProfilerExport.hpp"
 #include "gargantuan/classes/BasePart.hpp"
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/classes/DataModel.hpp"
@@ -48,6 +49,8 @@ namespace gargantuan {
 		this->RenderProvider = new class RenderProvider(Window, Gpu);
 		// Camera:Render() reaches the renderer through this
 		RenderProvider::SetCurrent(this->RenderProvider);
+		// And the renderer's passes, and Luau callbacks, reach the profiler
+		Profiler::SetCurrent(&this->Profiler);
 
 		this->ScriptEngine = new class ScriptEngine();
 
@@ -102,6 +105,70 @@ namespace gargantuan {
 		}
 	}
 
+	void Engine::UpdateProfiler(double now) {
+		Profiler.SetEnabled(ShowProfiler);
+
+		if (!ShowProfiler) {
+			return;
+		}
+
+		if (!ProfilerPanel) {
+			ProfilerPanel = std::make_shared<EditableImage>();
+			ProfilerPanel->Name = EditableImage::DEFINITION.Name;
+			LastProfilerRefresh = 0.0;
+		}
+
+		// Only when a new second has been published. Redrawing the same numbers
+		// in between would be work charged to the frame that is being measured,
+		// which is the one thing a profiler must not do.
+		if (!Profiler.HasSnapshot()) {
+			if (LastProfilerRefresh == 0.0) {
+				ProfilerLayout = DrawProfilerPanel(*ProfilerPanel, Profiler::Snapshot{}, "GATHERING");
+				LastProfilerRefresh = now;
+			}
+		} else if (now - LastProfilerRefresh >= Profiler::WINDOW_SECONDS * 0.5) {
+			ProfilerLayout = DrawProfilerPanel(*ProfilerPanel, Profiler.Latest(), ProfilerStatus);
+			LastProfilerRefresh = now;
+		}
+	}
+
+	bool Engine::HandleProfilerClick(float x, float y) {
+		if (!ShowProfiler || !ProfilerPanel) {
+			return false;
+		}
+
+		float left = ProfilerLayout.ButtonPosition.GetX();
+		float top = PROFILER_TOP + ProfilerLayout.ButtonPosition.GetY();
+		float right = left + ProfilerLayout.ButtonSize.GetX();
+		float bottom = top + ProfilerLayout.ButtonSize.GetY();
+
+		// The panel is drawn at the window's left edge, so the button's window
+		// position is its panel position with only the top offset added
+		if (x < left || x > right || y < top || y > bottom) {
+			return false;
+		}
+
+		ExportProfilerReport();
+		return true;
+	}
+
+	void Engine::ExportProfilerReport() {
+		std::string report;
+		if (ExportProfile(Profiler.Latest(), "profiles", report)) {
+			SDL_Log("Wrote %s", report.c_str());
+			ProfilerStatus = "WROTE PROFILES";
+		} else {
+			SDL_Log("Could not export a profile: %s", report.c_str());
+			ProfilerStatus = "EXPORT FAILED";
+		}
+
+		// Repainted at once so the answer is on screen before the next window
+		// comes round, rather than up to half a second later
+		if (ProfilerPanel) {
+			ProfilerLayout = DrawProfilerPanel(*ProfilerPanel, Profiler.Latest(), ProfilerStatus);
+		}
+	}
+
 	void Engine::UpdateStatistics(double now, float deltaTime) {
 		// Recorded even while hidden. The counter is turned on because
 		// something went wrong a moment ago, and a window that only starts
@@ -111,7 +178,7 @@ namespace gargantuan {
 		if (!ShowStatistics) {
 			// Handing over nothing is what takes it off the window; the panel
 			// itself is kept, so turning it back on does not have to build one
-			RenderProvider->SetWindowOverlay(nullptr, glm::vec2(0.0f));
+			RenderProvider->SetWindowOverlay(0, nullptr, glm::vec2(0.0f));
 			return;
 		}
 
@@ -129,7 +196,7 @@ namespace gargantuan {
 		}
 
 		RenderProvider->SetWindowOverlay(
-			StatisticsPanel, glm::vec2(STATISTICS_MARGIN, STATISTICS_MARGIN)
+			0, StatisticsPanel, glm::vec2(STATISTICS_MARGIN, STATISTICS_MARGIN)
 		);
 	}
 
@@ -144,41 +211,96 @@ namespace gargantuan {
 		}
 		float deltaTime = GetDeltaTime();
 
+		double seconds = (double)CurrentTick / 1000000000.0;
+		Profiler.BeginFrame(seconds);
+
+		{
+			G_PROFILE("Main Thread");
+			StepFrame(deltaTime, seconds);
+		}
+
+		Profiler.EndFrame(seconds);
+	}
+
+	void Engine::StepFrame(float deltaTime, double seconds) {
 		SDL_Event event;
+		{
+		G_PROFILE("Events");
 		while (SDL_PollEvent(&event)) {
 			if (event.type == SDL_EVENT_QUIT) {
 				IsRunning = false;
 				return;
 			}
 
-			// Held down, F3 would repeat and flicker the panel on and off
-			if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F3 && !event.key.repeat) {
-				ShowStatistics = !ShowStatistics;
+			// Held down, these would repeat and flicker the panels on and off
+			if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
+				if (event.key.key == SDLK_F3) {
+					ShowStatistics = !ShowStatistics;
+				} else if (event.key.key == SDLK_F6) {
+					ShowProfiler = !ShowProfiler;
+					ProfilerStatus.clear();
+					LastProfilerRefresh = 0.0;
+				}
+			}
+
+			// The panel has one thing on it that can be clicked, and a click
+			// that lands on it is swallowed rather than passed on: a button the
+			// camera also turns for is not a button
+			if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT &&
+				HandleProfilerClick(event.button.x, event.button.y)) {
+				continue;
 			}
 
 			UserInputService->ProcessEvent(event);
 			Workspace->CurrentCamera->OnEvent(Window, event);
 		}
+		}
 
 		// Ahead of everything the frame does, so the reading belongs to the
 		// frame that has just been measured rather than to the one being set up
-		UpdateStatistics((double)CurrentTick / 1000000000.0, deltaTime);
+		UpdateStatistics(seconds, deltaTime);
+		UpdateProfiler(seconds);
+		RenderProvider->SetWindowOverlay(
+			1,
+			ShowProfiler ? ProfilerPanel : nullptr,
+			glm::vec2(STATISTICS_MARGIN, PROFILER_TOP)
+		);
 
-		RunService->FireSimulation(deltaTime);
-		Workspace->CurrentCamera->Step(deltaTime);
-		Workspace->DistributedGameTime += deltaTime;
-		RunService->FirePostSimulation(deltaTime);
+		{
+			G_PROFILE("Simulation");
+			RunService->FireSimulation(deltaTime);
+			Workspace->CurrentCamera->Step(deltaTime);
+			Workspace->DistributedGameTime += deltaTime;
+			RunService->FirePostSimulation(deltaTime);
+		}
 
-		RunService->FireRender(deltaTime);
-		// Tweens settle right before the frame is drawn, so the values written
-		// this step are the ones rendered
-		TweenService->Step(deltaTime);
-		MeshProvider::UploadToGpu(Gpu);
+		{
+			G_PROFILE("PreRender");
+			RunService->FireRender(deltaTime);
+		}
+		{
+			// Tweens settle right before the frame is drawn, so the values
+			// written this step are the ones rendered
+			G_PROFILE("Tweens");
+			TweenService->Step(deltaTime);
+		}
+		{
+			G_PROFILE("Mesh Upload");
+			MeshProvider::UploadToGpu(Gpu);
+		}
 
 		// Paces this frame against the GPU before any of it is submitted.
 		// Nothing else in a frame waits, so without this the backlog of
 		// submitted-but-unfinished work grows without bound.
-		RenderProvider->BeginFrame(RenderSettings->GetFramesInFlight());
+		{
+			// This is the only place a frame ever waits, so it is the whole of
+			// what "GPU" can honestly mean here: SDL exposes no timestamp
+			// queries, and how long the CPU sat blocked on last frame's fence
+			// is the measurement that is actually available. A frame that is
+			// GPU bound spends its time in here and nowhere else.
+			G_PROFILE("GPU Wait");
+			RenderProvider->BeginFrame(RenderSettings->GetFramesInFlight());
+		}
 		// Read every frame, so swapping the pass takes effect on the next one
 		// rather than needing the renderer restarted
 		RenderProvider->SetAntialiasOverride(RenderSettings->GetAntialiasShader());
@@ -192,7 +314,10 @@ namespace gargantuan {
 		RenderProvider->Scene.Time = Workspace->DistributedGameTime;
 		// Cameras compare this against the one they last drew at, so a scene
 		// that has not moved is not redrawn
-		RenderProvider->SceneSignature = RenderProvider->ComputeSceneSignature(worldRoot, lightDirection);
+		{
+			G_PROFILE("Scene Signature");
+			RenderProvider->SceneSignature = RenderProvider->ComputeSceneSignature(worldRoot, lightDirection);
+		}
 
 		auto currentCamera = Workspace->CurrentCamera;
 
@@ -316,23 +441,31 @@ namespace gargantuan {
 				.LightDirection = lightDirection,
 			});
 		}
-		// One command buffer for the lot, still in dependency order
-		RenderProvider->DrawOffscreen(offscreenCameras);
+		{
+			// One command buffer for the lot, still in dependency order
+			G_PROFILE("Offscreen Cameras");
+			RenderProvider->DrawOffscreen(offscreenCameras);
+		}
 
-		if (windowCameras.size() == 1) {
-			// One camera filling the window is the common case and can draw
-			// straight into the swapchain
-			RenderProvider->Draw(windowCameras.front());
-		} else if (!windowCameras.empty()) {
-			RenderProvider->DrawComposite(windowCameras);
+		{
+			G_PROFILE("Window");
+			if (windowCameras.size() == 1) {
+				// One camera filling the window is the common case and can draw
+				// straight into the swapchain
+				RenderProvider->Draw(windowCameras.front());
+			} else if (!windowCameras.empty()) {
+				RenderProvider->DrawComposite(windowCameras);
+			}
 		}
 
 		RenderProvider->EndFrame();
 
-		// Resume any script waiting on a Camera:Render() readback
-		RenderProvider->PollRenders(&ScriptEngine->ThreadEngine);
-
-		ScriptEngine->Step();
+		{
+			// Resume any script waiting on a Camera:Render() readback
+			G_PROFILE("Scripts");
+			RenderProvider->PollRenders(&ScriptEngine->ThreadEngine);
+			ScriptEngine->Step();
+		}
 
 		LastTick = CurrentTick;
 	}

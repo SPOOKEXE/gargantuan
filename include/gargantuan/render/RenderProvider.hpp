@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
 
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <lua.h>
@@ -205,7 +206,8 @@ namespace gargantuan {
 		// holds it, Camera:Render() does not hand it back, and nothing about it
 		// reaches the redraw signatures. A debug readout that changed what the
 		// engine decided to redraw would be measuring itself.
-		void SetWindowOverlay(std::shared_ptr<EditableImage> image, glm::vec2 position);
+		static constexpr size_t MAXIMUM_WINDOW_OVERLAYS = 2;
+		void SetWindowOverlay(size_t slot, std::shared_ptr<EditableImage> image, glm::vec2 position);
 
 		void Resize(int width, int height);
 		void Destroy();
@@ -430,9 +432,13 @@ namespace gargantuan {
 		// again. Dropped with the camera's target.
 		std::unordered_map<Camera *, VisibleSet> VisibleSets;
 
-		// What SetWindowOverlay was last given, and where it goes
-		std::shared_ptr<EditableImage> WindowOverlay;
-		glm::vec2 WindowOverlayPosition = glm::vec2(0.0f);
+		// What SetWindowOverlay was last given, and where each one goes. Drawn
+		// in slot order, so a panel in a later slot lands over an earlier one.
+		struct WindowOverlayEntry {
+			std::shared_ptr<EditableImage> Image;
+			glm::vec2 Position = glm::vec2(0.0f);
+		};
+		std::array<WindowOverlayEntry, MAXIMUM_WINDOW_OVERLAYS> WindowOverlays;
 		// Built on the first frame something is actually laid over the window,
 		// and never at all in a place that shows no overlay. Its own pipeline
 		// rather than a PostProcessShader because it draws onto the swapchain,

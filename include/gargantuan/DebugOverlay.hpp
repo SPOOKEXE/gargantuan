@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gargantuan/Profiler.hpp"
 #include "gargantuan/classes/EditableImage.hpp"
 #include "gargantuan/datatypes/Color3.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
@@ -78,4 +79,21 @@ namespace gargantuan {
 	// Paints the frame rate readout into `image`, resizing it to fit. Returns
 	// the size it settled on.
 	Vector2 DrawStatisticsPanel(EditableImage &image, const FrameStatistics &statistics);
+
+	// What the profiler panel came out as, and where the one thing on it that
+	// can be clicked ended up. The rectangle is in the panel's own coordinates;
+	// whoever placed the panel knows where that is on the window and is the
+	// only one who can turn a mouse position into a hit.
+	struct ProfilerPanelLayout {
+		Vector2 Size = Vector2(0, 0);
+		Vector2 ButtonPosition = Vector2(0, 0);
+		Vector2 ButtonSize = Vector2(0, 0);
+	};
+
+	// Paints the flame chart. `status` is a line along the bottom for whatever
+	// the panel wants to say back -- what an export wrote, or that it is still
+	// gathering its first second.
+	ProfilerPanelLayout DrawProfilerPanel(
+		EditableImage &image, const Profiler::Snapshot &snapshot, std::string_view status
+	);
 } // namespace gargantuan

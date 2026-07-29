@@ -2,6 +2,7 @@
 
 #include "gargantuan/classes/DataModel.hpp"
 #include "gargantuan/DebugOverlay.hpp"
+#include "gargantuan/Profiler.hpp"
 #include "gargantuan/render/RenderProvider.hpp"
 #include "gargantuan/scripting/ScriptEngine.hpp"
 #include "gargantuan/services/Lighting.hpp"
@@ -51,6 +52,11 @@ namespace gargantuan {
 		void ProcessEvent(SDL_Event event);
 		void Step();
 
+		// Where the frame's time went. Public because the renderer and Luau
+		// callbacks reach it through Profiler::GetCurrent(), and this is the
+		// one that gets pointed at.
+		class Profiler Profiler;
+
 	  private:
 		uint64_t CurrentTick = 0;
 		uint64_t LastTick = 0;
@@ -71,5 +77,26 @@ namespace gargantuan {
 		static constexpr float STATISTICS_MARGIN = 8.0f;
 
 		void UpdateStatistics(double now, float deltaTime);
+
+		// F6 shows the flame chart. Kept apart from the F3 counter because they
+		// answer different questions and cost different amounts: the counter is
+		// two numbers a frame, this one walks a tree.
+		bool ShowProfiler = false;
+		std::shared_ptr<EditableImage> ProfilerPanel;
+		ProfilerPanelLayout ProfilerLayout;
+		// Sits under the frame rate counter, which is why it is not at the top
+		static constexpr float PROFILER_TOP = 62.0f;
+		double LastProfilerRefresh = 0.0;
+		// What the export last did, shown on the panel until the next one
+		std::string ProfilerStatus;
+
+		void UpdateProfiler(double now);
+		// True when the click landed on the export button
+		bool HandleProfilerClick(float x, float y);
+		void ExportProfilerReport();
+
+		// Everything a frame does, wrapped so the whole of it can be timed as
+		// one zone without the timing straddling a return
+		void StepFrame(float deltaTime, double seconds);
 	};
 } // namespace gargantuan

@@ -1,11 +1,14 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
+#include "gargantuan/Profiler.hpp"
+#include "gargantuan/classes/Part.hpp"
 #include "gargantuan/render/PipelineBuilder.hpp"
 #include "gargantuan/render/RenderPass.hpp"
 #include "gargantuan/render/RenderProvider.hpp"
 #include "gargantuan/render/Shader.hpp"
 
 #include <SDL3/SDL.h>
+#include <magic_enum/magic_enum.hpp>
 #include <memory>
 
 namespace gargantuan {
@@ -198,10 +201,38 @@ namespace gargantuan {
 				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
 				SDL_DrawGPUIndexedPrimitives(pass, mesh->IndexCount, 1, 0, 0, 0);
+
+				// Counted by shape rather than timed by shape. Timing one draw
+				// would measure how long it took to write a command into a
+				// buffer, which has almost nothing to do with what a cylinder
+				// costs; how many of them went in, and how many triangles they
+				// carried, is the part the CPU here actually decides.
+				CountPrimitive(part.get(), mesh->IndexCount);
 			}
 
 			return pass;
 		};
+
+	  private:
+		// Non-const, because Instance::Cast has a const overload set that is
+		// ambiguous on its own and only resolves from a mutable pointer
+		static void CountPrimitive(BasePart *part, uint32_t indexCount) {
+			Profiler *profiler = Profiler::GetCurrent();
+			if (!profiler) {
+				return;
+			}
+
+			// Everything of one shape lands on one pair of counters, which is
+			// the whole point: three hundred blocks are interesting as three
+			// hundred blocks and not as three hundred rows
+			std::string_view shape = "Other";
+			if (auto *primitive = part->Cast<Part>()) {
+				shape = magic_enum::enum_name(primitive->Shape);
+			}
+
+			profiler->Add(std::string(shape) + " Draws", 1);
+			profiler->Add(std::string(shape) + " Tris", indexCount / 3);
+		}
 	};
 
 	std::unique_ptr<RenderPass> CreateOpaquePass(SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchainFormat) {

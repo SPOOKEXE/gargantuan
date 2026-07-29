@@ -1,3 +1,4 @@
+#include "gargantuan/Profiler.hpp"
 #include "gargantuan/datatypes/Signal.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 #include "gargantuan/scripting/UserdataTag.hpp"
@@ -7,6 +8,7 @@
 #include <lua.h>
 #include <lualib.h>
 #include <memory>
+#include <string>
 
 namespace gargantuan {
 	G_UD_IMPL_PRELUDE(SignalConnection);
@@ -246,6 +248,24 @@ namespace gargantuan {
 			lua_pop(mainState, 1);
 			return;
 		}
+
+		// Labelled with whichever script the handler was written in, taken off
+		// the function itself rather than asked for. A place with several
+		// scripts connected to PreRender otherwise reports one lump of time
+		// with nothing to say about which of them is spending it, and the
+		// answer is already sitting in the function's debug info.
+		std::string label;
+		if (Profiler *profiler = Profiler::GetCurrent(); profiler && profiler->IsEnabled()) {
+			lua_Debug info;
+			if (lua_getinfo(mainState, -1, "s", &info) && info.short_src) {
+				label = info.short_src;
+			} else {
+				label = "?";
+			}
+		}
+		// Outside the branch so the scope closes on every path out, and empty
+		// when the profiler is off, which Begin skips
+		ProfileScope scriptScope(label.empty() ? "Script" : label);
 
 		int arguments = signal->LPushArgument(mainState, value);
 		if (lua_pcall(mainState, arguments, 0, 0) != LUA_OK) {

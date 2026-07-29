@@ -65,7 +65,7 @@ eyes. What is missing is the runtime that drives them.
 
 ## Render
 
-- [ ] Offscreen and un-used cameras still render (at their high frame rate), fix. (i.e. offscreen, not used onscreen, etc). Could render at a slower rate instead (1-5fps for example).
+- [ ] Offscreen and un-used cameras still render (at their high frame rate), fix. (i.e. offscreen, not used onscreen, etc). Could render at a slower rate instead (1-5fps for example). Could also add a slightly wider FOV check than what the cameras see to scan for ones we need to render faster.
 - [ ] Occlusion, so a part hidden behind a wall stops costing a redraw. The
       frustum test cannot see it; something depth-aware has to
 - [ ] Textures

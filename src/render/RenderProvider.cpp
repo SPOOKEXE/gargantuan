@@ -1,5 +1,6 @@
 // #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
+#include "gargantuan/Profiler.hpp"
 #include "gargantuan/render/RenderProvider.hpp"
 #include "gargantuan/classes/BasePart.hpp"
 #include "gargantuan/classes/Camera.hpp"
@@ -187,7 +188,7 @@ namespace gargantuan {
 			SDL_ReleaseGPUGraphicsPipeline(Gpu, WindowOverlayPipeline);
 			WindowOverlayPipeline = nullptr;
 		}
-		WindowOverlay = nullptr;
+		WindowOverlays = {};
 
 		if (OpaqueVertexShader) {
 			SDL_ReleaseGPUShader(Gpu, OpaqueVertexShader);
@@ -397,20 +398,25 @@ namespace gargantuan {
 		return nullptr;
 	}
 
-	void RenderProvider::SetWindowOverlay(std::shared_ptr<EditableImage> image, glm::vec2 position) {
-		WindowOverlay = std::move(image);
-		WindowOverlayPosition = position;
+	void RenderProvider::SetWindowOverlay(size_t slot, std::shared_ptr<EditableImage> image, glm::vec2 position) {
+		if (slot >= MAXIMUM_WINDOW_OVERLAYS) {
+			return;
+		}
+		WindowOverlays[slot] = {std::move(image), position};
 	}
 
 	void RenderProvider::RecordWindowOverlay(
 		SDL_GPUCommandBuffer *commands, SDL_GPUTexture *target, uint32_t width, uint32_t height
 	) {
-		if (!WindowOverlay || !commands || !target || width == 0 || height == 0 || WindowOverlayFailed) {
+		if (!commands || !target || width == 0 || height == 0 || WindowOverlayFailed) {
 			return;
 		}
 
-		SDL_GPUTexture *texture = AcquireImageTexture(WindowOverlay.get());
-		if (!texture) {
+		bool anything = false;
+		for (const auto &entry : WindowOverlays) {
+			anything = anything || entry.Image != nullptr;
+		}
+		if (!anything) {
 			return;
 		}
 
@@ -507,16 +513,6 @@ namespace gargantuan {
 			glm::vec4 Rect;
 		};
 
-		OverlayUniforms uniforms{
-			.Target = glm::vec4((float)width, (float)height, 0.0f, 0.0f),
-			.Rect = glm::vec4(
-				WindowOverlayPosition.x,
-				WindowOverlayPosition.y,
-				(float)WindowOverlay->GetWidth(),
-				(float)WindowOverlay->GetHeight()
-			),
-		};
-
 		// Loaded rather than cleared, because the window's picture is already
 		// there and this is going on top of it
 		SDL_GPUColorTargetInfo colorTarget{
@@ -525,13 +521,38 @@ namespace gargantuan {
 			.store_op = SDL_GPU_STOREOP_STORE,
 		};
 
-		SDL_GPUTextureSamplerBinding binding{.texture = texture, .sampler = PointSampler};
-
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(commands, &colorTarget, 1, nullptr);
 		SDL_BindGPUGraphicsPipeline(pass, WindowOverlayPipeline);
-		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
-		SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, sizeof(OverlayUniforms));
-		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+
+		// One draw per panel. They rarely overlap and there are only ever a
+		// couple, so a pass each would cost more in beginning and ending than
+		// the triangles ever could.
+		for (const auto &entry : WindowOverlays) {
+			if (!entry.Image) {
+				continue;
+			}
+
+			SDL_GPUTexture *texture = AcquireImageTexture(entry.Image.get());
+			if (!texture) {
+				continue;
+			}
+
+			OverlayUniforms uniforms{
+				.Target = glm::vec4((float)width, (float)height, 0.0f, 0.0f),
+				.Rect = glm::vec4(
+					entry.Position.x,
+					entry.Position.y,
+					(float)entry.Image->GetWidth(),
+					(float)entry.Image->GetHeight()
+				),
+			};
+
+			SDL_GPUTextureSamplerBinding binding{.texture = texture, .sampler = PointSampler};
+			SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+			SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, sizeof(OverlayUniforms));
+			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+		}
+
 		SDL_EndGPURenderPass(pass);
 	}
 
@@ -881,6 +902,7 @@ namespace gargantuan {
 	}
 
 	void RenderProvider::ResolvePartTextures(const std::shared_ptr<WorldRoot> &worldRoot) {
+		G_PROFILE("Part Textures");
 		PartTextures.clear();
 		if (!worldRoot) {
 			return;
@@ -1425,6 +1447,7 @@ namespace gargantuan {
 	void RenderProvider::RecordShaderChain(
 		SDL_GPUCommandBuffer *commands, Camera *camera, CameraTarget &target, size_t firstShader, bool writeCache
 	) {
+		G_PROFILE("Shader Chain");
 		if (!camera || !target.ScratchTexture) {
 			return;
 		}
@@ -1655,6 +1678,7 @@ namespace gargantuan {
 	bool RenderProvider::RecordCameraPasses(
 		SDL_GPUCommandBuffer *commands, DrawContext &drawContext, const CameraTarget &target
 	) {
+		G_PROFILE("Camera Passes");
 		if (!commands || !target.ColorTexture || !target.DepthTexture || !ShadowMapTexture) {
 			return false;
 		}
@@ -1709,7 +1733,10 @@ namespace gargantuan {
 
 		// The shadow map only depends on the light, but it has to be recorded
 		// into this command buffer for the opaque pass to sample it
-		SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
+		{
+			G_PROFILE("Shadow");
+			SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
+		}
 
 		// Ahead of the opaque pass, so a SurfaceShader that binds the motion
 		// vectors reads this frame's rather than the last one's. It clears the
@@ -1717,12 +1744,16 @@ namespace gargantuan {
 		// pass was going to keep -- that one clears depth for itself.
 		if (frameContext.VelocityTarget) {
 			if (RenderPass *velocity = GetVelocityPass()) {
+				G_PROFILE("Motion");
 				SDL_EndGPURenderPass(velocity->Draw(Gpu, frameContext));
 				VelocityInUse = true;
 			}
 		}
 
-		SDL_EndGPURenderPass(OffscreenOpaquePass->Draw(Gpu, frameContext));
+		{
+			G_PROFILE("Opaque");
+			SDL_EndGPURenderPass(OffscreenOpaquePass->Draw(Gpu, frameContext));
+		}
 
 		// What this camera drew through, for the next frame's motion vectors to
 		// measure against. Unjittered: the offset describes the sampling, not
@@ -2097,6 +2128,7 @@ namespace gargantuan {
 	void RenderProvider::ComputeVisibleSet(
 		Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection, VisibleSet &out
 	) {
+		G_PROFILE("Frustum Walk");
 		out.InView.clear();
 		out.ShadowsIntoView.clear();
 
