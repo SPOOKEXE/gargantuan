@@ -77,6 +77,9 @@ namespace gargantuan {
 		float GetMass() const;
 		PhysicalProperties GetPhysicalProperties() const;
 
+		// Which primitive mesh this part draws.
+		uint8_t MeshId = 0;
+
 		glm::mat4 GetModelMatrix();
 
 		// Where this part stood last frame. Bookkeeping, not a property: the

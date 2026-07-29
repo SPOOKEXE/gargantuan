@@ -94,10 +94,9 @@ else()
 	set(GARGANTUAN_SHADERC FALSE)
 endif()
 
-# Every dependency is a git submodule, and a clone without --recursive leaves
-# the vendor folders empty. Left alone, the add_subdirectory calls below then
-# fail with "source directory does not contain a CMakeLists.txt file", which
-# says nothing about the actual problem.
+# A clone without --recursive leaves the vendor folders empty, and the
+# add_subdirectory calls below then fail with "source directory does not contain
+# a CMakeLists.txt file", which says nothing about the actual problem.
 set(GARGANTUAN_VENDORED box3d glm json luau magicenum sdl spdlog)
 
 find_package(Git QUIET)
@@ -119,8 +118,7 @@ if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
 	endif()
 endif()
 
-# Says which one is missing rather than which folder has no CMakeLists in it.
-# Reachable from a source tarball, where there is no .git to ask.
+# Reachable from a source tarball, where there is no .git to ask
 foreach(GARGANTUAN_DEPENDENCY IN LISTS GARGANTUAN_VENDORED)
 	file(GLOB GARGANTUAN_DEPENDENCY_FILES "${CMAKE_CURRENT_SOURCE_DIR}/vendor/${GARGANTUAN_DEPENDENCY}/*")
 	if(NOT GARGANTUAN_DEPENDENCY_FILES)

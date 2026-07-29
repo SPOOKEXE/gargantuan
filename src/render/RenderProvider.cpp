@@ -887,9 +887,8 @@ namespace gargantuan {
 	void RenderProvider::ResolvePartTextures(const std::shared_ptr<WorldRoot> &worldRoot) {
 		G_PROFILE("Part Textures");
 
-		// The map is the same for every camera and the same between frames
-		// until something it is built from changes. It was being rebuilt once
-		// per camera pass regardless.
+		// Same for every camera and between frames until something it is built
+		// from changes. Was rebuilt once per camera pass regardless.
 		if (PartTexturesResolved && ResolvedSurfaceSignature == SurfaceSignature) {
 			return;
 		}
@@ -2096,6 +2095,7 @@ namespace gargantuan {
 		WorldHasSurfaceCameras = false;
 		WorldHasSurfaces = false;
 
+		// Hashed here because this walk already reads the fields
 		uint64_t surfaces = 0x9E3779B97F4A7C15ull;
 		MixBits(surfaces, TargetGeneration);
 		MixBits(surfaces, world->Parts.size());
@@ -2275,9 +2275,9 @@ namespace gargantuan {
 				visible++;
 				MixPointer(hash, part.get());
 				MixBits(hash, part->QuickHash);
-				// Four mixes that say "still nothing" in a world with no
-				// screens. The flag flipping is itself a change of signature.
-				if (worldHasSurfaces) {
+				// Only the parts that carry one. A part gaining a surface bumps
+				// its QuickHash, mixed above, so the change is still noticed.
+				if (worldHasSurfaces && (part->SurfaceCamera || part->SurfaceImage)) {
 					MixPointer(hash, part->SurfaceCamera.get());
 					MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
 					MixPointer(hash, part->SurfaceImage.get());

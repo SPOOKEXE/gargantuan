@@ -14,7 +14,11 @@ namespace gargantuan {
 		.Superclass = "BasePart",
 		.Constructor = ClassDefinition::WrapConstructor<Part>(),
 		.Properties = {
-			{"Shape", Property::fromSimple<&Part::Shape>(true, true)},
+			{"Shape",
+			 Property::fromReadWrite<Enums::PartType>(
+				 [](Instance *instance) { return instance->Cast<Part>()->GetShape(); },
+				 [](Instance *instance, Enums::PartType shape) { instance->Cast<Part>()->SetShape(shape); }
+			 )},
 		}
 	};
 
@@ -50,7 +54,7 @@ namespace gargantuan {
 		// A plain cast rather than magic_enum::enum_index, which searches. The
 		// enum is declared with no explicit values, so its items are 0..n-1 and
 		// the cast is the index.
-		size_t index = (size_t)Shape;
+		size_t index = (size_t)GetShape();
 		if (index >= MESH_KEYS.size()) {
 			return MeshProvider::GetGpuMesh(MESH_FALLBACK);
 		}

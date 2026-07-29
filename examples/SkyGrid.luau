@@ -200,9 +200,8 @@ local angle = 0.0
 local SETTLE = 2.0
 local MEASURE = 5.0
 
--- os.clock, not the deltaTime handed in: the engine clamps that to a tenth of
--- a second so a stall cannot teleport the simulation, which also means it
--- cannot report anything below ten frames a second
+-- os.clock, not deltaTime: the engine clamps that to a tenth of a second, so
+-- deltaTime cannot report anything below ten frames a second
 local elapsed = 0.0
 local measured = 0.0
 local frames = 0

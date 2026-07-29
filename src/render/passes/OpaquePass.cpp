@@ -105,6 +105,12 @@ namespace gargantuan {
 		static constexpr uint32_t SKIPPED = 0xFFFFFFFFu;
 		std::vector<uint32_t> PartBatch;
 		std::vector<uint32_t> Cursors;
+		// Grouped by mesh, so a part only scans its own shape's textures
+		std::vector<GpuMesh *> MeshSlots;
+		std::vector<std::vector<uint32_t>> MeshBuckets;
+		// MeshId -> slot, so a part finds its mesh without asking through a
+		// virtual call. Only the first part of each shape has to ask.
+		std::array<uint32_t, 256> MeshIdSlots;
 		// Timed at their own boundaries rather than per part
 		uint64_t InstanceBucketNanoseconds = 0;
 		uint64_t InstanceFillNanoseconds = 0;
@@ -183,6 +189,12 @@ namespace gargantuan {
 			uint64_t started = SDL_GetTicksNS();
 
 			Batches.clear();
+			MeshSlots.clear();
+			MeshIdSlots.fill(SKIPPED);
+			for (auto &list : MeshBuckets) {
+				list.clear();
+			}
+			MeshBuckets.clear();
 			// Never cleared: every element is written before it is read, so
 			// zeroing first is a nine megabyte memset for nothing
 			if (InstanceScratch.size() < parts.size()) {
@@ -196,23 +208,9 @@ namespace gargantuan {
 			// the buckets all over again
 			PartBatch.clear();
 			PartBatch.reserve(parts.size());
-			// The upload only ever reads the first `running` of them, so a
-			// larger vector left over from a busier frame costs nothing
-
-
 			for (BasePart *part : parts) {
-				auto &mesh = part->GetMesh();
-				if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
-					PartBatch.push_back(SKIPPED);
-					continue;
-				}
-
-				// A part showing a picture batches with the others that show the
-				// same one. It used to be drawn on its own, because the face
-				// the picture lands on differs per part and that lived in a
-				// uniform; it rides in the instance buffer now.
 				// Two pointer tests before the map, which holds only the parts
-				// that show something but was being asked about all of them
+				// that show something but was asked about all of them
 				SDL_GPUTexture *texture = context.WhiteTexture;
 				if (anyPartTextures && (part->SurfaceCamera || part->SurfaceImage)) {
 					auto found = context.PartTextures->find(part);
@@ -221,9 +219,39 @@ namespace gargantuan {
 					}
 				}
 
+				// Mesh first, then the texture within it. One flat scan grew from
+				// five entries to twenty five when textures arrived.
+				//
+				// Parts sharing a MeshId share a mesh, so only the first of each
+				// shape asks for it -- the rest are one array read.
+				uint8_t meshId = part->MeshId;
+				uint32_t meshSlot = meshId != 0 ? MeshIdSlots[meshId] : SKIPPED;
+				if (meshSlot == SKIPPED) {
+					auto &mesh = part->GetMesh();
+					if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
+						PartBatch.push_back(SKIPPED);
+						continue;
+					}
+
+					for (uint32_t candidate = 0; candidate < (uint32_t)MeshSlots.size(); candidate++) {
+						if (MeshSlots[candidate] == mesh.get()) {
+							meshSlot = candidate;
+							break;
+						}
+					}
+					if (meshSlot == SKIPPED) {
+						meshSlot = (uint32_t)MeshSlots.size();
+						MeshSlots.push_back(mesh.get());
+						MeshBuckets.emplace_back();
+					}
+					if (meshId != 0) {
+						MeshIdSlots[meshId] = meshSlot;
+					}
+				}
+
 				uint32_t bucket = SKIPPED;
-				for (uint32_t candidate = 0; candidate < (uint32_t)Batches.size(); candidate++) {
-					if (Batches[candidate].Mesh == mesh.get() && Batches[candidate].Texture == texture) {
+				for (uint32_t candidate : MeshBuckets[meshSlot]) {
+					if (Batches[candidate].Texture == texture) {
 						bucket = candidate;
 						break;
 					}
@@ -232,8 +260,9 @@ namespace gargantuan {
 					auto *primitive = part->Cast<Part>();
 					bucket = (uint32_t)Batches.size();
 					Batches.push_back(
-						{mesh.get(), texture, primitive ? primitive->Shape : Enums::PartType::Block, 0, 0}
+						{MeshSlots[meshSlot], texture, primitive ? primitive->GetShape() : Enums::PartType::Block, 0, 0}
 					);
+					MeshBuckets[meshSlot].push_back(bucket);
 				}
 
 				PartBatch.push_back(bucket);
@@ -644,7 +673,7 @@ namespace gargantuan {
 					if (measuring) {
 					// Indexed, not named; names are attached after the loop
 					auto *primitive = part->Cast<Part>();
-					auto index = magic_enum::enum_index(primitive ? primitive->Shape : Enums::PartType::Block);
+					auto index = magic_enum::enum_index(primitive ? primitive->GetShape() : Enums::PartType::Block);
 					if (index && *index < shapeDraws.size()) {
 						shapeDraws[*index]++;
 						shapeTriangles[*index] += mesh->IndexCount / 3;
