@@ -143,6 +143,12 @@ namespace gargantuan {
 		// Invalidates stale texture pointers.
 		uint64_t TargetGeneration = 1;
 
+		// Everything the render walks read off a part, kept flat and in world
+		// order. Rebuilt only when a part's QuickHash moves, by the scene
+		// signature pass -- which visits every part once a frame and already
+		// reads that hash. The camera walks then touch no part at all, which
+		// is the whole point: a part is 456 bytes on its own heap block and
+		// cull, bucket and fill were each poking a different corner of it.
 		struct PartRow {
 			glm::vec3 Centre{0.0f};
 			float Radius = 0.0f;
