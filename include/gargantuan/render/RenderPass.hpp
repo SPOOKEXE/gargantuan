@@ -23,7 +23,7 @@ namespace gargantuan {
 		bool NotDueYet = false;
 	};
 
-	// One camera's cached frustum result. Shadows include offscreen casters.
+	// The shadow map covers one fixed box at the world origin. The walk needs
 	// the same numbers to reject casters that could never land in it, so they
 	// live here rather than inside the pass.
 	inline constexpr float SHADOW_ORTHO_EXTENT = 30.0f;
