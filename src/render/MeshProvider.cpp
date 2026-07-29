@@ -7,9 +7,9 @@
 namespace gargantuan::MeshProvider {
 	namespace {
 		std::unordered_map<std::string, Mesh> UnloadedMeshes = {
-			{"gargantuan://meshes/Ball", PrimitiveMeshes::Block()},
+			{"gargantuan://meshes/Ball", PrimitiveMeshes::Sphere()},
 			{"gargantuan://meshes/Block", PrimitiveMeshes::Block()},
-			{"gargantuan://meshes/Cylinder", PrimitiveMeshes::Block()},
+			{"gargantuan://meshes/Cylinder", PrimitiveMeshes::Cylinder()},
 			{"gargantuan://meshes/Wedge", PrimitiveMeshes::Wedge()},
 			{"gargantuan://meshes/CornerWedge", PrimitiveMeshes::Block()},
 		};

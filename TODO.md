@@ -52,15 +52,8 @@ eyes. What is missing is the runtime that drives them.
 
 - [ ] Give the freecam a configurable invert-Y and separate sensitivity per axis
 
-- [ ] Give Ball and Cylinder their own geometry. PrimitiveMeshes declares
-      Sphere() and Cylinder() but neither is written, so MeshProvider hands both
-      shapes a Block(). NormalId.Sphere and NormalId.Circumference are right
-      about what they select, they just have a box to select it on
-
 ## Images
 
-- [ ] AssetService:CreateEditableImage
-- [ ] Save formats besides PNG, ie. JPEG and BMP. Enum.SaveFormat.PNG / JPG / BMP.
 - [ ] DrawText, which needs a font first; examples/SecurityCamera.luau draws its
       clock as seven-segment rectangles to work around this
 
