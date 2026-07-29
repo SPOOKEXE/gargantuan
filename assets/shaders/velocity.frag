@@ -10,10 +10,10 @@ layout(location = 0) out vec2 OutVelocity;
 layout(location = 1) out float OutDepth;
 
 void main() {
-    // Clip w is linear camera-forward distance and needs no depth-curve inversion.
+    // Clip w is linear camera-forward distance.
     OutDepth = CurrentClip.w;
 
-    // Points formerly behind the eye emit zero motion; temporal passes reject by colour/depth.
+    // Prior points behind the eye emit zero motion; temporal passes reject them.
     if (PreviousClip.w <= 0.0) {
         OutVelocity = vec2(0.0);
         return;
@@ -23,8 +23,6 @@ void main() {
     vec2 previous = PreviousClip.xy / PreviousClip.w;
     vec2 step = current - previous;
 
-    // Clip space spans two units across the target and runs y-up; SDL flips the
-    // viewport to a top-left origin, so v counts the other way. Halving turns
-    // the span into the 0..1 of a texture coordinate.
+	// NDC spans two units; texture space spans one and has top-left origin.
     OutVelocity = vec2(0.5 * step.x, -0.5 * step.y);
 }

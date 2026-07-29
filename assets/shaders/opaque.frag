@@ -16,27 +16,21 @@ layout(set = 3, binding = 0) uniform WorldUniforms {
 } world;
 
 layout(set = 2, binding = 0) uniform sampler2DShadow ShadowMap;
-// A part can show another camera's picture on its surface. Parts without one
-// get a single white pixel, so the multiply below leaves them alone.
+// Untextured parts receive a white fallback texture.
 layout(set = 2, binding = 1) uniform sampler2D SurfaceTexture;
 
 layout(set = 3, binding = 1) uniform PartFragmentUniforms {
-    // x is 1 when this part actually has a surface texture
+    // x: surface texture present.
     vec4 HasSurfaceTexture;
-    // xyz is the face the picture lands on, in world space; w is the rule
-    // that recognises it. 0 matches that direction, 1 matches every
-    // direction, 2 matches every direction square to xyz.
+    // xyz: world-space face; w: 0 facing, 1 all, 2 perpendicular.
     vec4 SurfaceNormal;
-    // xy tiles the picture across that face, zw slides it
+    // xy: tiling; zw: offset.
     vec4 SurfaceTransform;
 } partFragment;
 
-// How closely a fragment's normal has to match a flat face. Tight enough that a
-// cube shows the picture on one face and a wedge does not bleed it onto the
-// slope.
+// Prevent flat-face textures bleeding onto wedge slopes.
 float SURFACE_FACE_MATCH = 0.9;
-// How far off square a fragment can lean and still count as part of a curved
-// side rather than one of the flat ends it runs between
+// Separates curved sides from their flat ends.
 float SURFACE_AROUND_MATCH = 0.5;
 
 bool OnSurfaceFace(vec3 n) {
@@ -87,7 +81,7 @@ void main() {
     vec3 surface = FragmentColor.rgb;
     if (partFragment.HasSurfaceTexture.x > 0.5 && OnSurfaceFace(n)) {
         vec2 surfaceUV = (FragmentUV * partFragment.SurfaceTransform.xy) + partFragment.SurfaceTransform.zw;
-        // Shown as-is rather than tinted, so a camera feed reads true
+        // Surface feeds bypass part tint.
         surface = texture(SurfaceTexture, surfaceUV).rgb;
     }
 

@@ -1,62 +1,30 @@
 #version 450
 
-// Temporal antialiasing. Meant to be swapped in for the built-in edge blur:
-//
-//   local taa = Instance.new("PostProcessShader")
-//   taa.Preset = Enum.PresetShaders.TemporalAntialias
-//   taa:SetRenderTexture(Enum.ShaderProperty.HistoryTexture, Enum.RenderTexture.History)
-//   taa:SetRenderTexture(Enum.ShaderProperty.VelocityTexture, Enum.RenderTexture.Velocity)
-//   taa:SetRenderTexture(Enum.ShaderProperty.DepthTexture, Enum.RenderTexture.Depth)
-//   taa:SetRenderTexture(Enum.ShaderProperty.DepthHistoryTexture, Enum.RenderTexture.DepthHistory)
-//   RenderSettings.AntialiasShader = taa
-//
-// Asking for the bindings is what makes the engine produce them. Reading
-// builtin.Jitter separately puts the camera's projection on a sub-pixel wander.
-//
-// Where FXAA guesses at an edge from one frame, this averages the frames
-// themselves: each samples the pixel somewhere different, so together they
-// describe how much of it the edge actually covers.
-//
-// The hard part is history that should not be reused. The colour test asks
-// whether the old sample belongs among its neighbours, and is blind in one
-// case: a surface emerging from behind another of the same shade. The depth
-// test sees that one.
-
 layout(location = 0) in vec2 FragmentUV;
 layout(location = 0) out vec4 OutputColor;
 
+// These bindings request temporal targets; reading Jitter enables projection jitter.
 layout(set = 2, binding = 0) uniform sampler2D SourceTexture;
-// The camera's own last frame, after this pass ran on it -- the accumulation,
-// not the raw render
+// Previous accumulated output, not the raw render.
 layout(set = 2, binding = 1) uniform sampler2D HistoryTexture;
-// Texture-space step from the previous frame's position to this one's
+// Texture-space previous-to-current motion.
 layout(set = 2, binding = 2) uniform sampler2D VelocityTexture;
-// Distance from the camera in studs, this frame and last
+// Linear camera-forward distance in studs.
 layout(set = 2, binding = 3) uniform sampler2D DepthTexture;
 layout(set = 2, binding = 4) uniform sampler2D DepthHistoryTexture;
 
 layout(set = 3, binding = 0) uniform Builtin {
-    vec4 Resolution; // xy = pixels, zw = 1/pixels
+    vec4 Resolution; // xy: pixels; zw: reciprocal pixels.
     vec4 Time;
-    vec4 Jitter; // xy = this frame's sub-pixel offset in pixels, zw = last frame's
+    vec4 Jitter; // xy: current pixel offset; zw: previous pixel offset.
 } builtin;
 
 layout(set = 3, binding = 1) uniform Params {
-    // x: how much of the picture is carried over from last frame. Higher
-    // resolves smoother and settles slower, and drags harder on anything the
-    // neighbourhood test fails to catch. Zero asks for the default.
+    // x: history weight; zero selects the default.
     vec4 Feedback;
-    // x: how far outside the local range of colours the history is allowed to
-    // sit before it is pulled back in, in standard deviations. Lower is
-    // stricter: less ghosting, more of the accumulation thrown away. Zero asks
-    // for the default.
+    // x: history clamp in standard deviations; zero selects the default.
     vec4 Clamping;
-    // x: how far the two depths may disagree, as a fraction of how far away the
-    // surface is, before the history is treated as belonging to something else.
-    // Relative rather than absolute because a camera closing on a wall changes
-    // its distance by a little and a wall giving way to the room behind it
-    // changes by a lot, whatever the scale of the place. Zero asks for the
-    // default.
+    // x: relative depth rejection threshold; zero selects the default.
     vec4 Disocclusion;
 } params;
 
@@ -64,9 +32,7 @@ const float DEFAULT_FEEDBACK = 0.92;
 const float DEFAULT_CLAMPING = 1.25;
 const float DEFAULT_DISOCCLUSION = 0.1;
 
-// Clamping in RGB tests three channels that move together, so a colour can sit
-// inside all three ranges and still be wrong. In YCoCg brightness is its own
-// axis, which is the one ghosting travels along.
+// YCoCg isolates luminance for tighter history clamping.
 vec3 RgbToYCoCg(vec3 colour) {
     return vec3(
         0.25 * colour.r + 0.5 * colour.g + 0.25 * colour.b,
@@ -80,8 +46,7 @@ vec3 YCoCgToRgb(vec3 colour) {
     return vec3(t + colour.y, colour.x + colour.z, t - colour.y);
 }
 
-// Bicubic, because the history is resampled every frame and bilinear loses a
-// little each time. Within a second of drifting it is visibly soft.
+// Five-tap Catmull-Rom avoids repeated bilinear softening.
 vec4 SampleHistory(vec2 uv) {
     vec2 resolution = builtin.Resolution.xy;
     vec2 texel = builtin.Resolution.zw;
@@ -90,14 +55,12 @@ vec4 SampleHistory(vec2 uv) {
     vec2 centre = floor(position - 0.5) + 0.5;
     vec2 f = position - centre;
 
-    // Catmull-Rom weights for the four taps along each axis
     vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
     vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
     vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
     vec2 w3 = f * f * (-0.5 + 0.5 * f);
 
-    // The middle two taps of each axis as one bilinear sample between them,
-    // which turns sixteen reads into five
+    // Combine middle weights into bilinear taps: sixteen reads become five.
     vec2 w12 = w1 + w2;
     vec2 offset12 = w2 / max(w12, vec2(0.0001));
 
@@ -128,19 +91,13 @@ vec4 SampleHistory(vec2 uv) {
     result += texture(HistoryTexture, vec2(uv12.x, uv3.y)) * weight;
     total += weight;
 
-    // The corner taps are dropped, so the weights no longer sum to one
+    // Renormalize after dropping corner taps.
     result /= max(total, 0.0001);
-    // Catmull-Rom overshoots at a hard edge and can ring below black
+    // Clamp negative Catmull-Rom ringing.
     return max(result, vec4(0.0));
 }
 
-// The nearest surface around the pixel, and how it moved.
-//
-// The centre pixel's own motion looks right and is not: an edge is antialiased
-// across two pixels, so the one holding a silhouette often reports the
-// background's motion and the near surface trails behind itself.
-//
-// The distance comes back with it because the two have to agree.
+// Nearest depth supplies silhouette motion instead of background motion.
 struct Nearest {
     vec2 Velocity;
     float Depth;
@@ -164,9 +121,7 @@ Nearest FindNearest(vec2 uv, vec2 texel) {
     return Nearest(texture(VelocityTexture, closest).xy, nearest);
 }
 
-// The same question of last frame, asked the same way. A single tap would hold
-// "nearest thing around here" against "whatever landed on one texel", and at an
-// edge those are not comparable -- every edge would read as a disocclusion.
+// Match the current 3x3 nearest-depth rule to avoid false edge disocclusion.
 float NearestHistoryDepth(vec2 uv, vec2 texel) {
     float nearest = texture(DepthHistoryTexture, uv).r;
 
@@ -187,20 +142,16 @@ void main() {
     float clamping = params.Clamping.x <= 0.0 ? DEFAULT_CLAMPING : params.Clamping.x;
     float disocclusion = params.Disocclusion.x <= 0.0 ? DEFAULT_DISOCCLUSION : params.Disocclusion.x;
 
-    // Where this point was last frame. Zero on the background, which nothing
-    // was drawn over, so it reprojects onto itself.
+    // Velocity is previous-to-current, so subtract for history reprojection.
     Nearest nearest = FindNearest(FragmentUV, texel);
     vec2 historyUv = FragmentUV - nearest.Velocity;
 
-    // It was off the side of the screen, so there is no history of it to
-    // accumulate. Nothing to do but show this frame.
+    // Reject history outside the prior viewport.
     if (historyUv.x < 0.0 || historyUv.x > 1.0 || historyUv.y < 0.0 || historyUv.y > 1.0) {
         OutputColor = current;
         return;
     }
 
-    // What this pixel's surroundings take, which is the test for whether the
-    // history still belongs here
     vec3 centre = RgbToYCoCg(current.rgb);
     vec3 sum = vec3(0.0);
     vec3 sumOfSquares = vec3(0.0);
@@ -217,8 +168,7 @@ void main() {
         }
     }
 
-    // Mean and spread, not min and max: one bright pixel in the nine drags a
-    // hard range wide enough to let a stale sample through
+    // Variance clipping resists a single bright neighbour widening the range.
     vec3 mean = sum / 9.0;
     vec3 deviation = sqrt(max(sumOfSquares / 9.0 - mean * mean, vec3(0.0)));
     vec3 minimum = max(mean - clamping * deviation, lowest);
@@ -227,8 +177,7 @@ void main() {
     vec4 historySample = SampleHistory(historyUv);
     vec3 history = RgbToYCoCg(historySample.rgb);
 
-    // Pulled towards the middle along the line it sits on. Clamping each axis
-    // on its own moves the colour sideways too, which reads as the wrong hue.
+    // Clip toward the centre along one line to preserve hue.
     vec3 offset = history - centre;
     vec3 extent = max(max(maximum - centre, centre - minimum), vec3(0.0001));
     vec3 units = abs(offset) / extent;
@@ -237,35 +186,17 @@ void main() {
         history = centre + offset / furthest;
     }
 
-    // How much this frame is worth saying about this pixel. It was sampled
-    // wherever the jitter put it, and a sample taken near the middle of the
-    // pixel describes that pixel better than one taken out by its corner, so
-    // the offset the camera used is worth something here rather than being
-    // merely the thing that made the accumulation possible.
+    // Centre-biased jitter samples carry more weight.
     float distanceFromCentre = length(builtin.Jitter.xy);
     float sampleWeight = exp(-2.29 * distanceFromCentre * distanceFromCentre);
 
-    // What stood at that spot last frame, against what stands here now. The
-    // colour test above cannot separate a surface coming out from behind
-    // another of the same shade from that same surface simply sitting there;
-    // the distances can, because the thing that was covering it was nearer.
-    //
-    // Relative, so a camera closing on a surface is not mistaken for one: a
-    // frame of approach changes the distance by a fraction of a percent, and
-    // an occluder giving way to what is behind it changes it by a great deal.
-    //
-    // One-sided: only a history NEARER than what stands here is a
-    // disocclusion. The other direction is something arriving in front, which
-    // the colour test catches easily -- and testing it would make every
-    // silhouette flicker, the distance behind a shape being the far plane.
+    // Reject only nearer history; relative depth tolerates camera approach.
     float depthThen = NearestHistoryDepth(historyUv, texel);
     float revealed = max(nearest.Depth - depthThen, 0.0) / max(nearest.Depth, 0.0001);
-    // Eased rather than cut, because a hard threshold draws its own visible
-    // outline around everything that fails it
+    // Smooth rejection avoids threshold outlines.
     float believable = 1.0 - smoothstep(disocclusion, disocclusion * 3.0, revealed);
 
-    // Weighted against brightness, so one bright frame cannot outvote the
-    // dimmer ones around it and a crawling glint resolves instead of flickering
+    // Luma weighting prevents bright samples dominating accumulation.
     float currentWeight = (1.0 - feedback) * sampleWeight / (1.0 + max(centre.x, 0.0));
     float historyWeight = believable * feedback / (1.0 + max(history.x, 0.0));
 

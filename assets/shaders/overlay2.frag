@@ -1,12 +1,6 @@
 #version 450
 
-// Preset: pastes two EditableImages over the camera, one after the other, to
-// show how several images bind at once.
-//
-//   overlay:SetImage("First", imageA)    -- sampler slot 1
-//   overlay:SetImage("Second", imageB)   -- sampler slot 2
-//
-// Images bind in the order they were first set; ListImages() reports it.
+// Image bindings follow first-set order reported by ListImages().
 
 layout(location = 0) in vec2 FragmentUV;
 layout(location = 0) out vec4 OutputColor;

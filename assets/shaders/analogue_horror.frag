@@ -1,11 +1,5 @@
 #version 450
 
-// Preset: worn VHS tape. Tracking wobble, chromatic bleed, scanlines, noise
-// and a sunken contrast curve.
-//   shader:SetNumber("Intensity", 1)
-//   shader:SetNumber("Noise", 0.35)
-//   shader:SetNumber("Tracking", 1)
-
 layout(location = 0) in vec2 FragmentUV;
 layout(location = 0) out vec4 OutputColor;
 
@@ -26,17 +20,16 @@ void main() {
     float intensity = clamp(params.Intensity.x, 0.0, 1.0);
     vec2 uv = FragmentUV;
 
-    // Tape tracking: the head loses the line, so whole rows slide sideways
     float row = uv.y * builtin.Resolution.y;
     float wobble = sin(uv.y * 90.0 + time * 6.0) * 0.0016
         + sin(uv.y * 13.0 - time * 2.0) * 0.0035;
 
-    // Every so often a band tears much further across
+    // Quantized row-time hash creates intermittent tracking tears.
     float band = step(0.985, Hash(vec2(floor(row / 6.0), floor(time * 8.0))));
     wobble += band * 0.02 * params.Tracking.x;
     uv.x += wobble * params.Tracking.x * intensity;
 
-    // Colour bleeds apart the way composite video does
+    // Offset RGB taps mimic composite chroma bleed.
     float bleed = (0.0022 + band * 0.004) * intensity;
     vec3 colour = vec3(
             texture(SourceTexture, uv + vec2(bleed, 0.0)).r,
@@ -44,7 +37,6 @@ void main() {
             texture(SourceTexture, uv - vec2(bleed, 0.0)).b
         );
 
-    // Scanlines and the slow bright bar rolling up the screen
     float scanline = 0.82 + 0.18 * sin(row * 3.14159);
     float roll = 0.94 + 0.06 * sin((uv.y + time * 0.12) * 6.28318);
     colour *= mix(1.0, scanline * roll, intensity);
@@ -52,7 +44,6 @@ void main() {
     float grain = Hash(uv * builtin.Resolution.xy + time * 60.0);
     colour += (grain - 0.5) * params.Noise.x * intensity;
 
-    // Washed out, slightly green, and crushed at both ends
     float luma = dot(colour, vec3(0.2126, 0.7152, 0.0722));
     colour = mix(colour, vec3(luma), 0.35 * intensity);
     colour *= mix(vec3(1.0), vec3(0.86, 1.02, 0.90), intensity);

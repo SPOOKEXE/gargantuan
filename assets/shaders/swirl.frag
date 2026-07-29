@@ -1,10 +1,5 @@
 #version 450
 
-// Preset: twists the picture around its centre, strongest in the middle and
-// easing out to nothing at Radius.
-//   shader:SetNumber("Strength", 3)
-//   shader:SetNumber("Radius", 0.45)
-
 layout(location = 0) in vec2 FragmentUV;
 layout(location = 0) out vec4 OutputColor;
 
@@ -16,7 +11,7 @@ layout(set = 3, binding = 1) uniform Params {
 } params;
 
 void main() {
-    // Work in square units, or the twist comes out elliptical on a wide image
+    // Aspect-corrected coordinates keep the twist circular.
     float aspect = builtin.Resolution.x / max(builtin.Resolution.y, 1.0);
     vec2 offset = (FragmentUV - 0.5) * vec2(aspect, 1.0);
 
@@ -24,7 +19,7 @@ void main() {
     float distance = length(offset);
 
     if (distance < radius) {
-        // Smooth falloff, so there is no visible seam at the rim
+        // Squared falloff hides the radius seam.
         float falloff = 1.0 - distance / radius;
         float angle = params.Strength.x * falloff * falloff;
         float s = sin(angle);

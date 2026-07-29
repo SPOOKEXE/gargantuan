@@ -1,13 +1,6 @@
 #version 450
 
-// The opaque fragment stage for the instanced pipeline.
-//
-// A copy of opaque.frag, differing only in where the two per-part surface
-// values come from: varyings out of the instance buffer rather than a uniform
-// block pushed for every part. Kept as a copy rather than shared through an
-// include, because opaque.frag is what every non-instanced draw in the engine
-// goes through and this change had no business touching it. If the lighting
-// below ever changes, it has to change in both.
+// Mirrors opaque.frag; keep lighting changes synchronized.
 
 
 layout(location = 0) in vec3 FragmentNormal;
@@ -28,26 +21,19 @@ layout(set = 3, binding = 0) uniform WorldUniforms {
 } world;
 
 layout(set = 2, binding = 0) uniform sampler2DShadow ShadowMap;
-// A part can show another camera's picture on its surface. Parts without one
-// get a single white pixel, so the multiply below leaves them alone.
+// Untextured parts receive a white fallback texture.
 layout(set = 2, binding = 1) uniform sampler2D SurfaceTexture;
 
-// Only the flag now, and it is pushed once per batch rather than once per part:
-// every part in a batch shares a texture, so they share the answer to whether
-// there is one. The two values that genuinely differ per part arrive above, out
-// of the instance buffer.
+// Texture presence is per batch; normal and transform are per-instance varyings.
 layout(set = 3, binding = 1) uniform PartFragmentUniforms {
     vec4 HasSurfaceTexture;
     vec4 Unused0;
     vec4 Unused1;
 } partFragment;
 
-// How closely a fragment's normal has to match a flat face. Tight enough that a
-// cube shows the picture on one face and a wedge does not bleed it onto the
-// slope.
+// Prevent flat-face textures bleeding onto wedge slopes.
 float SURFACE_FACE_MATCH = 0.9;
-// How far off square a fragment can lean and still count as part of a curved
-// side rather than one of the flat ends it runs between
+// Separates curved sides from their flat ends.
 float SURFACE_AROUND_MATCH = 0.5;
 
 bool OnSurfaceFace(vec3 n) {
@@ -98,7 +84,7 @@ void main() {
     vec3 surface = FragmentColor.rgb;
     if (partFragment.HasSurfaceTexture.x > 0.5 && OnSurfaceFace(n)) {
         vec2 surfaceUV = (FragmentUV * SurfaceTransform.xy) + SurfaceTransform.zw;
-        // Shown as-is rather than tinted, so a camera feed reads true
+        // Surface feeds bypass part tint.
         surface = texture(SurfaceTexture, surfaceUV).rgb;
     }
 

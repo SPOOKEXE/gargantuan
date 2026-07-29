@@ -1,15 +1,6 @@
 #version 450
 
-// Preset surface shader: draws every object in flat colour, ignoring the sun
-// and the shadow map entirely.
-//
-//   local unlit = Instance.new("SurfaceShader")
-//   unlit.Source = "surface_unlit"
-//   unlit:SetNumber("Brightness", 1)
-//   camera.SurfaceShader = unlit
-//
-// Every input below must be declared even when unused, because the vertex
-// stage and the pipeline both expect them.
+// Inputs must match the vertex-stage pipeline contract, even when unused.
 
 layout(location = 0) in vec3 FragmentNormal;
 layout(location = 1) in vec4 FragmentColor;

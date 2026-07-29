@@ -1,11 +1,5 @@
 #version 450
 
-// Preset: cheap wide-angle body camera. Barrel distortion, heavy vignette,
-// sensor grain and a warm low-light cast.
-//   shader:SetNumber("Distortion", 0.35)
-//   shader:SetNumber("Vignette", 1)
-//   shader:SetNumber("Grain", 0.12)
-
 layout(location = 0) in vec2 FragmentUV;
 layout(location = 0) out vec4 OutputColor;
 
@@ -25,16 +19,13 @@ void main() {
     vec2 centred = FragmentUV - 0.5;
     float squared = dot(centred, centred);
 
-    // Barrel: push samples outwards with the square of the radius
     vec2 uv = 0.5 + centred * (1.0 + params.Distortion.x * squared);
     if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
-        // Beyond the lens there is nothing, which is what gives it the
-        // rounded-off frame
         OutputColor = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
 
-    // A touch of lateral chromatic aberration towards the edges
+    // Radial RGB offsets mimic lateral chromatic aberration.
     float fringe = 0.0015 * params.Distortion.x;
     vec3 colour = vec3(
             texture(SourceTexture, 0.5 + (uv - 0.5) * (1.0 + fringe)).r,
@@ -42,7 +33,6 @@ void main() {
             texture(SourceTexture, 0.5 + (uv - 0.5) * (1.0 - fringe)).b
         );
 
-    // Small sensors are noisy and lose colour in the dark
     float luma = dot(colour, vec3(0.2126, 0.7152, 0.0722));
     colour = mix(colour, vec3(luma), 0.25);
     colour *= vec3(1.06, 1.0, 0.92);

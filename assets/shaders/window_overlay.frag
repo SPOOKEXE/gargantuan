@@ -1,7 +1,6 @@
 #version 450
 
-// Swapchain-only debug overlay; excluded from camera outputs and caches.
-// Discards the fullscreen triangle outside the target rectangle.
+// Swapchain-only; excluded from camera outputs and caches.
 
 layout(location = 0) in vec2 FragmentUV;
 layout(location = 0) out vec4 OutputColor;
@@ -9,9 +8,9 @@ layout(location = 0) out vec4 OutputColor;
 layout(set = 2, binding = 0) uniform sampler2D OverlayTexture;
 
 layout(set = 3, binding = 0) uniform Overlay {
-    // xy is the size of the whole target in pixels
+    // xy: target size in pixels.
     vec4 Target;
-    // xy is the top-left corner of the picture in pixels, zw is its size
+    // xy: top-left in pixels; zw: size in pixels.
     vec4 Rect;
 } overlay;
 
@@ -23,7 +22,6 @@ void main() {
         discard;
     }
 
-    // Alpha comes out as it went in; the pipeline blends it over what is
-    // already on the swapchain
+    // Pipeline blends straight alpha over the swapchain.
     OutputColor = texture(OverlayTexture, local);
 }
