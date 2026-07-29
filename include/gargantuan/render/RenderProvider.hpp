@@ -98,6 +98,20 @@ namespace gargantuan {
 		// Returns roots plus unlisted inputs, inputs first. Cycles read the prior frame.
 		std::vector<Camera *> GetRenderOrder(const std::vector<Camera *> &roots);
 
+		// Cameras something is reading this frame, walked outwards from the
+		// ones drawing to the window: what a reader samples, and the surface
+		// camera on any part a reader can see. A camera nothing arrives at is
+		// idle -- it is still drawing the world, but into a target that is
+		// never looked at, so it can afford to do so far less often.
+		//
+		// The surface test uses a frustum widened by fieldOfViewMargin, a
+		// fraction of the viewer's field of view, so a surface coming round the
+		// edge of the screen is already being kept current when it lands.
+		// Reference is valid until the next call.
+		const std::unordered_set<Camera *> &GetDemandedCameras(
+			const std::vector<Camera *> &viewers, float fieldOfViewMargin
+		);
+
 		struct WindowRegion {
 			int X = 0;
 			int Y = 0;
@@ -169,6 +183,10 @@ namespace gargantuan {
 		mutable uint64_t PartsMix = 0;
 
 		mutable std::vector<Camera *> SurfaceCameras;
+		// Which rows those cameras are painted on, so asking where a surface
+		// camera's picture ends up in the world is a lookup rather than another
+		// walk over every part
+		mutable std::vector<uint32_t> SurfaceCameraRows;
 		mutable std::vector<EditableImage *> SurfaceImages;
 		mutable bool SurfaceRowsStale = true;
 		mutable uint64_t SurfaceRowsGeneration = 0;
@@ -365,6 +383,9 @@ namespace gargantuan {
 		// Evict oldest, excluding current-frame entries.
 		void TrimShaderCache();
 		std::unordered_set<Camera *> ReportedCycles;
+		// Kept between frames so the demand walk allocates nothing per frame
+		std::unordered_set<Camera *> DemandedCameras;
+		std::vector<Camera *> DemandQueue;
 		// Cyclic readers and edges that use prior-frame targets.
 		std::unordered_set<Camera *> NeedsHistory;
 		std::set<std::pair<Camera *, Camera *>> HistoryEdges;

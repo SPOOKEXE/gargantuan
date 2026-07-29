@@ -459,6 +459,16 @@ namespace gargantuan {
 			offscreenRoots.push_back(camera);
 		}
 
+		std::vector<Camera *> viewers;
+		viewers.reserve(windowCameras.size());
+		for (const auto &context : windowCameras) {
+			viewers.push_back(context.Camera.get());
+		}
+
+		const auto &demanded =
+			RenderProvider->GetDemandedCameras(viewers, RenderSettings->GetCameraVisibilityMargin());
+		double idleInterval = RenderSettings->GetIdleCameraInterval();
+
 		// Sorted so a camera reading another's target sees this frame's picture.
 		// Enabled decides whether a camera renders on its own; one that another
 		// camera samples is drawn regardless, or that camera would be wrong.
@@ -481,6 +491,10 @@ namespace gargantuan {
 			// and everything it samples, which is the point of the mode.
 			if (interval < 0.0) {
 				continue;
+			}
+
+			if (idleInterval >= 0.0 && !demanded.count(camera)) {
+				interval = glm::max(interval, idleInterval);
 			}
 
 			// A camera that has never drawn always draws, or its target would

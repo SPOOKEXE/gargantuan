@@ -754,7 +754,9 @@ end
 
 declare class RenderSettings extends Instance
 	AntialiasShader: ShaderScript?
+	CameraVisibilityMargin: number
 	FramesInFlight: number
+	IdleCameraFPS: number
 	MaxCameraFPS: number
 end
 

@@ -3,6 +3,7 @@
 #include "gargantuan/scripting/Userdata.hpp"
 
 #include <glm/common.hpp>
+#include <limits>
 #include <lualib.h>
 
 namespace gargantuan {
@@ -35,6 +36,34 @@ namespace gargantuan {
 						},
 						[](lua_State *L, Instance *instance) -> int {
 							instance->Cast<RenderSettings>()->SetMaxCameraFPS(CheckStackValue<float>(L, -1));
+							return 0;
+						},
+						G_UD_REFLECT_TYPE(float),
+					},
+				},
+				{
+					"IdleCameraFPS",
+					{
+						[](lua_State *L, Instance *instance) -> int {
+							StackValue<float>::Push(L, instance->Cast<RenderSettings>()->GetIdleCameraFPS());
+							return 1;
+						},
+						[](lua_State *L, Instance *instance) -> int {
+							instance->Cast<RenderSettings>()->SetIdleCameraFPS(CheckStackValue<float>(L, -1));
+							return 0;
+						},
+						G_UD_REFLECT_TYPE(float),
+					},
+				},
+				{
+					"CameraVisibilityMargin",
+					{
+						[](lua_State *L, Instance *instance) -> int {
+							StackValue<float>::Push(L, instance->Cast<RenderSettings>()->GetCameraVisibilityMargin());
+							return 1;
+						},
+						[](lua_State *L, Instance *instance) -> int {
+							instance->Cast<RenderSettings>()->SetCameraVisibilityMargin(CheckStackValue<float>(L, -1));
 							return 0;
 						},
 						G_UD_REFLECT_TYPE(float),
@@ -95,5 +124,39 @@ namespace gargantuan {
 		// A ceiling of zero would stop every camera, which is what Camera.FPS
 		// is for; the ceiling only ever lowers a rate, never silences one
 		MaxCameraFPS = glm::max(framesPerSecond, MINIMUM_MAX_CAMERA_FPS);
+	}
+
+	float RenderSettings::GetIdleCameraFPS() const {
+		return IdleCameraFPS;
+	}
+
+	void RenderSettings::SetIdleCameraFPS(float framesPerSecond) {
+		if (!(framesPerSecond == framesPerSecond)) {
+			framesPerSecond = DEFAULT_IDLE_CAMERA_FPS;
+		}
+
+		IdleCameraFPS = framesPerSecond < 0.0f ? -1.0f : framesPerSecond;
+	}
+
+	double RenderSettings::GetIdleCameraInterval() const {
+		if (IdleCameraFPS < 0.0f) {
+			return -1.0;
+		}
+		if (IdleCameraFPS == 0.0f) {
+			return std::numeric_limits<double>::infinity();
+		}
+		return 1.0 / (double)IdleCameraFPS;
+	}
+
+	float RenderSettings::GetCameraVisibilityMargin() const {
+		return CameraVisibilityMargin;
+	}
+
+	void RenderSettings::SetCameraVisibilityMargin(float margin) {
+		if (!(margin == margin)) {
+			margin = DEFAULT_CAMERA_VISIBILITY_MARGIN;
+		}
+
+		CameraVisibilityMargin = glm::clamp(margin, 0.0f, MAXIMUM_CAMERA_VISIBILITY_MARGIN);
 	}
 } // namespace gargantuan

@@ -18,6 +18,7 @@
 
 #include <SDL3/SDL.h>
 #include <glm/geometric.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -2480,6 +2481,7 @@ namespace gargantuan {
 
 	void RenderProvider::RebuildSurfaceRows() const {
 		SurfaceCameras.clear();
+		SurfaceCameraRows.clear();
 		SurfaceImages.clear();
 
 		uint64_t surfaces = 0x9E3779B97F4A7C15ull;
@@ -2500,6 +2502,7 @@ namespace gargantuan {
 
 			if (row.SurfaceCamera) {
 				SurfaceCameras.push_back(row.SurfaceCamera);
+				SurfaceCameraRows.push_back((uint32_t)index);
 			}
 			if (row.SurfaceImage) {
 				SurfaceImages.push_back(row.SurfaceImage);
@@ -2516,6 +2519,61 @@ namespace gargantuan {
 		SurfaceSignature = surfaces;
 		SurfaceRowsGeneration = TargetGeneration;
 		SurfaceRowsStale = false;
+	}
+
+	namespace {
+		glm::mat4 WidenedProjection(Camera &camera, float margin) {
+			if (margin <= 0.0f) {
+				return camera.GetProjectionMatrix();
+			}
+
+			constexpr float WIDEST_FIELD_OF_VIEW = 179.0f;
+			float fieldOfView = glm::min(camera.FieldOfView * (1.0f + margin), WIDEST_FIELD_OF_VIEW);
+			return glm::perspective(
+				glm::radians(fieldOfView), camera.GetAspectRatio(), Camera::NEAR_PLANE, Camera::FAR_PLANE
+			);
+		}
+	} // namespace
+
+	const std::unordered_set<Camera *> &RenderProvider::GetDemandedCameras(
+		const std::vector<Camera *> &viewers, float fieldOfViewMargin
+	) {
+		G_PROFILE("Camera Demand");
+
+		DemandedCameras.clear();
+		DemandQueue.assign(viewers.begin(), viewers.end());
+
+		while (!DemandQueue.empty()) {
+			Camera *camera = DemandQueue.back();
+			DemandQueue.pop_back();
+			if (!camera || !DemandedCameras.insert(camera).second) {
+				continue;
+			}
+
+			for (Camera *sampled : GetSampledCameras(camera)) {
+				DemandQueue.push_back(sampled);
+			}
+
+			if (SurfaceCameraRows.empty()) {
+				continue;
+			}
+
+			SidePlanes planes =
+				ExtractSidePlanes(WidenedProjection(*camera, fieldOfViewMargin) * camera->GetViewMatrix());
+
+			for (uint32_t index : SurfaceCameraRows) {
+				if (index >= PartRows.size()) {
+					continue;
+				}
+
+				const PartRow &row = PartRows[index];
+				if (row.SurfaceCamera && SphereInside(planes, row.Centre, row.Radius)) {
+					DemandQueue.push_back(row.SurfaceCamera);
+				}
+			}
+		}
+
+		return DemandedCameras;
 	}
 
 	uint64_t RenderProvider::ComputeSceneSignature(

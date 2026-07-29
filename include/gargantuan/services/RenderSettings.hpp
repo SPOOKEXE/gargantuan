@@ -47,6 +47,43 @@ namespace gargantuan {
 		float GetMaxCameraFPS() const;
 		void SetMaxCameraFPS(float framesPerSecond);
 
+		// The rate a camera drops to while nothing is reading it: not drawing
+		// to the window, not sampled by a camera that is, and not the surface
+		// of a part any of them can see. Four security cameras nobody is
+		// looking at are four whole passes over the world a frame, and the
+		// picture they produce is thrown away.
+		//
+		//   >0  that many times a second while idle
+		//    0  not at all, until something reads it again
+		//   <0  off; every camera keeps its own rate, read or not
+		//
+		// Like MaxCameraFPS this only ever lowers a rate, so a camera asking
+		// for less than it keeps what it asked for, and it never touches one
+		// set to -1 (on demand). The first draw is never skipped whatever this
+		// says, or a target nothing has read yet would be black at the moment
+		// something finally does.
+		static constexpr float DEFAULT_IDLE_CAMERA_FPS = 2.0f;
+
+		float GetIdleCameraFPS() const;
+		void SetIdleCameraFPS(float framesPerSecond);
+		// Seconds an idle camera waits between redraws. Negative when idle
+		// throttling is off, infinite when an idle camera never redraws.
+		double GetIdleCameraInterval() const;
+
+		// How much wider than what a camera really sees the surface check is,
+		// as a fraction of its field of view. A camera feeding a surface starts
+		// redrawing at its full rate while that surface is still off the side
+		// of the screen, so it has caught up by the time it arrives rather than
+		// showing a stale picture for the first few frames it is visible.
+		//
+		// Zero tests the frustum as it is, which is exact and pops. Wider costs
+		// redraws for surfaces that never come into view at all.
+		static constexpr float DEFAULT_CAMERA_VISIBILITY_MARGIN = 0.25f;
+		static constexpr float MAXIMUM_CAMERA_VISIBILITY_MARGIN = 2.0f;
+
+		float GetCameraVisibilityMargin() const;
+		void SetCameraVisibilityMargin(float margin);
+
 		// What Camera.Antialiasing runs. Null is the engine's own edge-softening
 		// pass; setting one puts that shader in its place for every camera with
 		// Antialiasing on, which is the whole point -- the built-in is one
@@ -90,6 +127,8 @@ namespace gargantuan {
 	  private:
 		int FramesInFlight = DEFAULT_FRAMES_IN_FLIGHT;
 		float MaxCameraFPS = DEFAULT_MAX_CAMERA_FPS;
+		float IdleCameraFPS = DEFAULT_IDLE_CAMERA_FPS;
+		float CameraVisibilityMargin = DEFAULT_CAMERA_VISIBILITY_MARGIN;
 		std::shared_ptr<ShaderScript> AntialiasShader;
 	};
 } // namespace gargantuan
