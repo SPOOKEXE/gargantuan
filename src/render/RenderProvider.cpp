@@ -2119,6 +2119,7 @@ namespace gargantuan {
 
 		std::vector<Instance *> &dirty = world->DirtyParts;
 		if (dirty.empty()) {
+			// A world that has gone still still has cells to work back down
 			if (!GridStale) {
 				TightenCells();
 			}
@@ -2145,6 +2146,11 @@ namespace gargantuan {
 			const glm::vec3 centre = part->CFrame.Position;
 			const float radius = std::sqrt(size.x * size.x + size.y * size.y + size.z * size.z) * 0.5f;
 
+			// A part that moved inside its own cell costs nothing, one that left
+			// it is taken out of that run and put on the end of another, and
+			// only a cell with nowhere to put it forces the grid to be laid out
+			// again. Growing or starting to cast just widens what its cell
+			// claims, which is loose but never wrong.
 			if (!GridStale && index < RowCells.size()) {
 				uint32_t was = RowCells[index];
 				uint32_t now = GridCellOf(Grid, centre);
@@ -2154,12 +2160,18 @@ namespace gargantuan {
 					GridStale = true;
 				} else if (now != was) {
 					if (!MoveRowCell((uint32_t)index, now, part, radius, part->CastShadow)) {
+						// Nowhere to put it, so the cell it is still in
+						// stretches to cover where it went. That costs one cell
+						// the slow road rather than costing the world a re-sort.
 						Grid.Casts[slot] = Grid.Casts[slot] | (part->CastShadow ? 1 : 0);
 						if (!StretchCell(slot, centre, radius)) {
 							GridStale = true;
 						}
 					}
 				} else {
+					// Stayed in its cell, which covers anything centred inside it
+					// whatever the reach, so only a part that changed size or
+					// stopped casting can leave the cell claiming too much
 					Grid.Extents[slot] = std::max(Grid.Extents[slot], Grid.CellSize * 0.5f + radius);
 					Grid.Casts[slot] = Grid.Casts[slot] | (part->CastShadow ? 1 : 0);
 					if (radius != row.Radius || part->CastShadow != row.CastShadow) {
@@ -2289,11 +2301,16 @@ namespace gargantuan {
 			Grid.Starts.push_back((uint32_t)slots);
 			Grid.Fill.push_back(members);
 			Grid.Centres.push_back(low + glm::vec3((float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f) * cellSize);
+			// Filled in below, once the members are placed
 			Grid.Extents.push_back(half);
 			Grid.Casts.push_back(0);
 			Grid.Loose.push_back(0);
 			Grid.Largest = std::max(Grid.Largest, (size_t)members);
 
+			// Exactly what it holds and no spare. A cell can still take a part
+			// once one has left it, which in anything that oscillates is most
+			// of them, and spare slots measured worse than they were worth:
+			// they are dead weight in every scene where nothing crosses.
 			slots += members;
 		}
 		Grid.Starts.push_back((uint32_t)slots);
@@ -2344,6 +2361,8 @@ namespace gargantuan {
 	}
 
 	void RenderProvider::TightenCells() const {
+		// Bounded, because a cell claiming more than it needs is only slow and
+		// never wrong, so there is nothing to be gained by catching up in one go
 		constexpr size_t PER_FRAME = 8;
 
 		const float half = Grid.CellSize * 0.5f;
@@ -2373,9 +2392,12 @@ namespace gargantuan {
 	}
 
 	bool RenderProvider::StretchCell(uint32_t slot, glm::vec3 centre, float radius) const {
+		// The cell is a cube, so the widest axis decides
 		glm::vec3 offset = glm::abs(centre - Grid.Centres[slot]);
 		float need = std::max(offset.x, std::max(offset.y, offset.z)) + radius;
 
+		// Past this a cell covers most of its neighbours and stops being an
+		// answer for anything
 		constexpr float STRETCH_LIMIT = 2.0f;
 		if (need > Grid.CellSize * STRETCH_LIMIT) {
 			return false;
@@ -2394,6 +2416,8 @@ namespace gargantuan {
 
 		const uint32_t from = Grid.Slots[RowCells[index]];
 		const uint32_t to = Grid.Slots[toCell];
+		// Nothing was ever placed where it is headed, so that cell owns no
+		// slots at all and the whole layout has to be worked out again
 		if (from == PartGrid::NO_CELL || to == PartGrid::NO_CELL || Grid.Fill[from] == 0) {
 			return false;
 		}
@@ -2401,6 +2425,7 @@ namespace gargantuan {
 			return false;
 		}
 
+		// Out of the run it was in, by pulling the last one down over it
 		const uint32_t at = RowPositions[index];
 		const uint32_t last = Grid.Starts[from] + Grid.Fill[from] - 1;
 		if (at < Grid.Starts[from] || at > last) {
@@ -2417,6 +2442,8 @@ namespace gargantuan {
 		Grid.Fill[from]--;
 		MarkCellLoose(from);
 
+		// And onto the end of the run it joined. The caller writes the instance
+		// once it has built it.
 		const uint32_t landed = Grid.Starts[to] + Grid.Fill[to]++;
 		Grid.Rows[landed] = index;
 		RowPositions[index] = landed;
@@ -2617,6 +2644,7 @@ namespace gargantuan {
 
 		for (size_t cell = 0; cell < cellCount; cell++) {
 			const size_t memberCount = Grid.Fill[cell];
+			// Emptied by everything in it moving out
 			if (memberCount == 0) {
 				continue;
 			}
