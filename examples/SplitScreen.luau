@@ -99,6 +99,9 @@ monitor.Size = Vector3.new(8, 6, 0.5)
 monitor.Position = Vector3.new(-10, 5, 4)
 monitor.Color = Color3.new(1, 1, 1)
 monitor.SurfaceCamera = mirror
+-- The picture lands on one face rather than all six. Back is +Z, which is the
+-- side the left camera is looking from.
+monitor.SurfaceFace = Enum.NormalId.Back
 monitor.Parent = Workspace
 print("monitor part showing the mirror camera")
 

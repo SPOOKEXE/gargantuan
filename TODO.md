@@ -52,14 +52,18 @@ eyes. What is missing is the runtime that drives them.
 
 - [ ] Give the freecam a configurable invert-Y and separate sensitivity per axis
 
-- [ ] Let a part choose which face a SurfaceCamera lands on, and how it is
-      tiled; it uses the mesh's own UVs on every face today
-- [ ] Show an EditableImage on a part's surface, not only a camera
+- [x] Let a part choose which face a SurfaceCamera lands on, and how it is
+      tiled. SurfaceFace picks the face, SurfaceTiling and SurfaceOffset place
+      the picture on it. Fixing this turned up the block mesh's UVs: one corner
+      of every quad carried the wrong constant, and the four side faces carried
+      the top face's assignment, so a picture came out a quarter turn round
+- [x] Show an EditableImage on a part's surface, not only a camera. SurfaceImage
+      takes one; SurfaceCamera still wins when a part somehow carries both
 
 ## Images
 
 - [ ] AssetService:CreateEditableImage
-- [ ] Save formats besides PNG, ie. JPEG and BMP
+- [ ] Save formats besides PNG, ie. JPEG and BMP. Enum.SaveFormat.PNG / JPG / BMP.
 - [ ] DrawText, which needs a font first; examples/SecurityCamera.luau draws its
       clock as seven-segment rectangles to work around this
 

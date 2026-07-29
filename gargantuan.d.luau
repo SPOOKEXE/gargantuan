@@ -44,6 +44,8 @@ declare class Enum_ModifierKey extends EnumItem
 end
 declare class Enum_MouseBehavior extends EnumItem
 end
+declare class Enum_NormalId extends EnumItem
+end
 declare class Enum_PartType extends EnumItem
 end
 declare class Enum_PlaybackState extends EnumItem
@@ -51,6 +53,8 @@ end
 declare class Enum_PreferredInput extends EnumItem
 end
 declare class Enum_PresetShaders extends EnumItem
+end
+declare class Enum_RotationOrder extends EnumItem
 end
 declare class Enum_ShaderProperty extends EnumItem
 end
@@ -334,6 +338,14 @@ declare Enum: {
 		LockCenter: Enum_MouseBehavior,
 		LockCurrentPosition: Enum_MouseBehavior,
 	},
+	NormalId: Enum & {
+		Right: Enum_NormalId,
+		Top: Enum_NormalId,
+		Back: Enum_NormalId,
+		Left: Enum_NormalId,
+		Bottom: Enum_NormalId,
+		Front: Enum_NormalId,
+	},
 	PartType: Enum & {
 		Ball: Enum_PartType,
 		Block: Enum_PartType,
@@ -374,6 +386,14 @@ declare Enum: {
 		ThermalRed: Enum_PresetShaders,
 		Transpose: Enum_PresetShaders,
 		Vignette: Enum_PresetShaders,
+	},
+	RotationOrder: Enum & {
+		XYZ: Enum_RotationOrder,
+		XZY: Enum_RotationOrder,
+		YZX: Enum_RotationOrder,
+		YXZ: Enum_RotationOrder,
+		ZXY: Enum_RotationOrder,
+		ZYX: Enum_RotationOrder,
 	},
 	ShaderProperty: Enum & {
 		None: Enum_ShaderProperty,
@@ -473,6 +493,7 @@ declare class CFrame
 	function PointToObjectSpace(self, a1: Vector3): Vector3
 	function PointToWorldSpace(self, a1: Vector3): Vector3
 	function ToAxisAngle(self): (Vector3, number)
+	function ToEulerAngles(self, a1: Enum_RotationOrder): (number, number, number)
 	function ToEulerAnglesXYZ(self): (number, number, number)
 	function ToEulerAnglesYXZ(self): (number, number, number)
 	function ToObjectSpace(self, a1: CFrame): CFrame
@@ -624,6 +645,10 @@ declare class BasePart extends Instance
 	Rotation: Vector3
 	Size: Vector3
 	SurfaceCamera: Instance?
+	SurfaceFace: Enum_NormalId
+	SurfaceImage: EditableImage?
+	SurfaceOffset: Vector2
+	SurfaceTiling: Vector2
 	Transparency: number
 	function GetMass(self): number
 end

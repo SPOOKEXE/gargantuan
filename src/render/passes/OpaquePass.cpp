@@ -48,6 +48,12 @@ namespace gargantuan {
 
 		struct alignas(16) PartFragmentUniforms {
 			glm::vec4 HasSurfaceTexture;
+			// xyz is the face the picture lands on, in world space, so the
+			// fragment stage can tell which face it is shading without needing
+			// the part's own transform
+			glm::vec4 SurfaceNormal;
+			// xy tiles the picture across that face, zw slides it
+			glm::vec4 SurfaceTransform;
 		};
 
 		FileShader Shader{
@@ -146,9 +152,21 @@ namespace gargantuan {
 						}
 					}
 
+					// Size only scales an axis-aligned face normal, so
+					// normalising after gives back the rotated face itself
+					glm::vec3 surfaceNormal =
+						glm::normalize(glm::mat3(uniforms.ModelMatrix) * part->GetSurfaceNormal());
+
 					PartFragmentUniforms fragmentUniforms{
 						.HasSurfaceTexture =
 							glm::vec4(surfaceTexture != context.WhiteTexture ? 1.0f : 0.0f, 0, 0, 0),
+						.SurfaceNormal = glm::vec4(surfaceNormal, 0.0f),
+						.SurfaceTransform = glm::vec4(
+							part->SurfaceTiling.GetX(),
+							part->SurfaceTiling.GetY(),
+							part->SurfaceOffset.GetX(),
+							part->SurfaceOffset.GetY()
+						),
 					};
 					SDL_PushGPUFragmentUniformData(
 						context.Commands, 1, &fragmentUniforms, sizeof(PartFragmentUniforms)

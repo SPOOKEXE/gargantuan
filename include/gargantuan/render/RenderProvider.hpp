@@ -359,6 +359,10 @@ namespace gargantuan {
 		SDL_GPUShader *FullscreenVertexShader = nullptr;
 		SDL_GPUShader *OpaqueVertexShader = nullptr;
 		SDL_GPUSampler *ShaderSampler = nullptr;
+		// Repeats rather than clamping, which is what lets a part tile its
+		// surface picture. Kept apart from ShaderSampler because a post-process
+		// pass reading past its own edge wants the edge, not the far side.
+		SDL_GPUSampler *PartSurfaceSampler = nullptr;
 
 		// Returns the camera's target, sized to its ViewportSize, or nullptr
 		// when the viewport is empty. `withScratch` also guarantees the second

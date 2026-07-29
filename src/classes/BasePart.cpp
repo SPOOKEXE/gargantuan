@@ -1,5 +1,6 @@
 #include "gargantuan/classes/BasePart.hpp"
 #include "gargantuan/classes/Camera.hpp"
+#include "gargantuan/classes/EditableImage.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/datatypes/PhysicalProperties.hpp"
@@ -76,6 +77,31 @@ namespace gargantuan {
 				},
 			},
 			{
+				"SurfaceImage",
+				{
+					[](lua_State *L, Instance *instance) -> int {
+						StackValue<std::shared_ptr<EditableImage>>::Push(
+							L, instance->Cast<BasePart>()->SurfaceImage
+						);
+						return 1;
+					},
+					[](lua_State *L, Instance *instance) -> int {
+						auto part = instance->Cast<BasePart>();
+						if (lua_isnoneornil(L, -1)) {
+							part->SurfaceImage = nullptr;
+							return 0;
+						}
+
+						part->SurfaceImage = CheckStackValue<std::shared_ptr<EditableImage>>(L, -1);
+						return 0;
+					},
+					G_UD_REFLECT_TYPE(std::shared_ptr<EditableImage>),
+				},
+			},
+			G_UD_READWRITE_PROP(BasePart, SurfaceFace, Enums::NormalId),
+			G_UD_READWRITE_PROP(BasePart, SurfaceTiling, Vector2),
+			G_UD_READWRITE_PROP(BasePart, SurfaceOffset, Vector2),
+			{
 				"Mass",
 				{
 					[](lua_State *L, Instance *instance) -> int {
@@ -136,6 +162,24 @@ namespace gargantuan {
 			{"GetMass", Method::Wrap<&BasePart::GetMass>()},
 		}
 	};
+
+	glm::vec3 BasePart::GetSurfaceNormal() const {
+		switch (SurfaceFace) {
+		case Enums::NormalId::Right:
+			return {1, 0, 0};
+		case Enums::NormalId::Top:
+			return {0, 1, 0};
+		case Enums::NormalId::Back:
+			return {0, 0, 1};
+		case Enums::NormalId::Left:
+			return {-1, 0, 0};
+		case Enums::NormalId::Bottom:
+			return {0, -1, 0};
+		case Enums::NormalId::Front:
+		default:
+			return {0, 0, -1};
+		}
+	}
 
 	glm::vec3 BasePart::GetOrientation() const {
 		auto [x, y, z] = CFrame.ToOrientation();

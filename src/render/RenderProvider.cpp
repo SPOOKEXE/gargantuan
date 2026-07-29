@@ -183,6 +183,11 @@ namespace gargantuan {
 			ShaderSampler = nullptr;
 		}
 
+		if (PartSurfaceSampler) {
+			SDL_ReleaseGPUSampler(Gpu, PartSurfaceSampler);
+			PartSurfaceSampler = nullptr;
+		}
+
 		if (DepthTexture != nullptr) {
 			SDL_ReleaseGPUTexture(Gpu, DepthTexture);
 			DepthTexture = nullptr;
@@ -381,6 +386,18 @@ namespace gargantuan {
 			ShaderSampler = SDL_CreateGPUSampler(Gpu, &samplerInfo);
 		}
 
+		if (!PartSurfaceSampler) {
+			SDL_GPUSamplerCreateInfo samplerInfo{
+				.min_filter = SDL_GPU_FILTER_LINEAR,
+				.mag_filter = SDL_GPU_FILTER_LINEAR,
+				.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR,
+				.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
+				.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
+				.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
+			};
+			PartSurfaceSampler = SDL_CreateGPUSampler(Gpu, &samplerInfo);
+		}
+
 		if (WhiteTexture) {
 			return;
 		}
@@ -432,13 +449,24 @@ namespace gargantuan {
 		}
 
 		for (const auto &part : worldRoot->Parts) {
-			if (!part || !part->SurfaceCamera) {
+			if (!part) {
 				continue;
 			}
 
-			auto it = CameraTargets.find(part->SurfaceCamera.get());
-			if (it != CameraTargets.end() && it->second.ColorTexture) {
-				PartTextures[part.get()] = it->second.ColorTexture;
+			// A live camera feed is the more specific of the two, so it wins
+			// when a part somehow carries both
+			if (part->SurfaceCamera) {
+				auto it = CameraTargets.find(part->SurfaceCamera.get());
+				if (it != CameraTargets.end() && it->second.ColorTexture) {
+					PartTextures[part.get()] = it->second.ColorTexture;
+					continue;
+				}
+			}
+
+			if (part->SurfaceImage) {
+				if (SDL_GPUTexture *texture = AcquireImageTexture(part->SurfaceImage.get())) {
+					PartTextures[part.get()] = texture;
+				}
 			}
 		}
 	}
@@ -1202,7 +1230,7 @@ namespace gargantuan {
 		ResolvePartTextures(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
 		frameContext.WhiteTexture = WhiteTexture;
-		frameContext.SurfaceTextureSampler = ShaderSampler ? ShaderSampler : ShadowSampler;
+		frameContext.SurfaceTextureSampler = PartSurfaceSampler ? PartSurfaceSampler : ShadowSampler;
 		frameContext.Width = target.Width;
 		frameContext.Height = target.Height;
 		// Usually the walk PlanRedraw already made. The readback path reaches
@@ -1546,8 +1574,11 @@ namespace gargantuan {
 			// many there are.
 			MixPointer(hash, part.get());
 			MixBits(hash, part->QuickHash);
-			// A part showing a camera changes when that camera does
+			// A part showing a camera changes when that camera does, and one
+			// showing an image when the image is drawn into
 			MixPointer(hash, part->SurfaceCamera.get());
+			MixPointer(hash, part->SurfaceImage.get());
+			MixBits(hash, part->SurfaceImage ? part->SurfaceImage->GetRevision() : 0);
 		}
 
 		return hash;
@@ -1614,6 +1645,8 @@ namespace gargantuan {
 			MixPointer(hash, part.get());
 			MixBits(hash, part->QuickHash);
 			MixPointer(hash, part->SurfaceCamera.get());
+			MixPointer(hash, part->SurfaceImage.get());
+			MixBits(hash, part->SurfaceImage ? part->SurfaceImage->GetRevision() : 0);
 		}
 
 		// Cheap insurance on how many were in view, since the loop above
@@ -2105,7 +2138,7 @@ namespace gargantuan {
 		ResolvePartTextures(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
 		frameContext.WhiteTexture = WhiteTexture;
-		frameContext.SurfaceTextureSampler = ShaderSampler ? ShaderSampler : ShadowSampler;
+		frameContext.SurfaceTextureSampler = PartSurfaceSampler ? PartSurfaceSampler : ShadowSampler;
 		// Drawing straight to the swapchain skips PlanRedraw entirely, so this
 		// path pays for its own walk
 		frameContext.Visible = &EnsureVisibleSet(

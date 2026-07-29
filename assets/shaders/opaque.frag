@@ -23,7 +23,16 @@ layout(set = 2, binding = 1) uniform sampler2D SurfaceTexture;
 layout(set = 3, binding = 1) uniform PartFragmentUniforms {
     // x is 1 when this part actually has a surface texture
     vec4 HasSurfaceTexture;
+    // xyz is the one face the picture lands on, in world space
+    vec4 SurfaceNormal;
+    // xy tiles the picture across that face, zw slides it
+    vec4 SurfaceTransform;
 } partFragment;
+
+// How closely a fragment's normal has to match the chosen face. Tight enough
+// that a cube shows the picture on one face and a wedge does not bleed it onto
+// the slant; a curved mesh has no faces, so it gets the cap pointing that way.
+float SURFACE_FACE_MATCH = 0.9;
 
 float SHADOW_SPREAD = 2.0;
 vec2 SHADOW_TEXEL_SIZE = vec2(1.0 / 2048.0);
@@ -60,9 +69,11 @@ void main() {
     float lighting = ambient + (nDotL * shadowFactor);
 
     vec3 surface = FragmentColor.rgb;
-    if (partFragment.HasSurfaceTexture.x > 0.5) {
+    if (partFragment.HasSurfaceTexture.x > 0.5 &&
+            dot(n, partFragment.SurfaceNormal.xyz) > SURFACE_FACE_MATCH) {
+        vec2 surfaceUV = (FragmentUV * partFragment.SurfaceTransform.xy) + partFragment.SurfaceTransform.zw;
         // Shown as-is rather than tinted, so a camera feed reads true
-        surface = texture(SurfaceTexture, FragmentUV).rgb;
+        surface = texture(SurfaceTexture, surfaceUV).rgb;
     }
 
     OutputColor = vec4(surface * lighting, FragmentColor.a);
