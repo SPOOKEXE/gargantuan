@@ -16,9 +16,12 @@ namespace gargantuan {
 	class Camera;
 	class EditableImage;
 
-	// Which face of a part its surface picture lands on. Ordered the way
-	// Roblox orders NormalId, so a value copied from there means the same here.
-	G_ENUM(NormalId, Right, Top, Back, Left, Bottom, Front);
+	// Which face of a part its surface picture lands on. The first six are
+	// ordered the way Roblox orders NormalId, so a value copied from there
+	// means the same here; the three after them name the faces a box does not
+	// have -- a wedge's slope, a ball's whole surface, a cylinder's curved
+	// side.
+	G_ENUM(NormalId, Right, Top, Back, Left, Bottom, Front, Slope, Sphere, Circumference);
 
 	class BasePart : public Instance {
 	  public:
@@ -53,8 +56,18 @@ namespace gargantuan {
 		Vector2 SurfaceTiling = Vector2(1.0f, 1.0f);
 		Vector2 SurfaceOffset = Vector2(0.0f, 0.0f);
 
-		// The outward normal of SurfaceFace, in the part's own space
-		glm::vec3 GetSurfaceNormal() const;
+		// How the fragment stage recognises SurfaceFace. A flat face is a
+		// direction to match, but a ball has no one direction and a cylinder's
+		// side has a whole ring of them, so the rule travels with it.
+		//
+		// xyz is in the part's own space; w says what to do with it:
+		//   0  the face pointing that way
+		//   1  every direction, for a surface that curves through all of them
+		//   2  every direction square to xyz, for a side that wraps that axis
+		static constexpr float SURFACE_MATCH_NORMAL = 0.0f;
+		static constexpr float SURFACE_MATCH_ANY = 1.0f;
+		static constexpr float SURFACE_MATCH_AROUND = 2.0f;
+		glm::vec4 GetSurfaceMatch() const;
 
 		// Euler angles in degrees, the way Roblox reports part rotation
 		glm::vec3 GetOrientation() const;

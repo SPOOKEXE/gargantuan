@@ -345,6 +345,9 @@ declare Enum: {
 		Left: Enum_NormalId,
 		Bottom: Enum_NormalId,
 		Front: Enum_NormalId,
+		Slope: Enum_NormalId,
+		Sphere: Enum_NormalId,
+		Circumference: Enum_NormalId,
 	},
 	PartType: Enum & {
 		Ball: Enum_PartType,

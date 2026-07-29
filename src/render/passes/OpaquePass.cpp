@@ -152,15 +152,20 @@ namespace gargantuan {
 						}
 					}
 
-					// Size only scales an axis-aligned face normal, so
-					// normalising after gives back the rotated face itself
-					glm::vec3 surfaceNormal =
-						glm::normalize(glm::mat3(uniforms.ModelMatrix) * part->GetSurfaceNormal());
+					// Carried through the same transform the vertex stage puts
+					// the mesh's own normals through, rather than the correct
+					// inverse transpose. Wrong the same way on both sides, so
+					// the two still line up, which is all a match needs.
+					glm::vec4 surfaceMatch = part->GetSurfaceMatch();
+					glm::vec3 surfaceNormal = glm::vec3(surfaceMatch);
+					if (glm::dot(surfaceNormal, surfaceNormal) > 0.0f) {
+						surfaceNormal = glm::normalize(glm::mat3(uniforms.ModelMatrix) * surfaceNormal);
+					}
 
 					PartFragmentUniforms fragmentUniforms{
 						.HasSurfaceTexture =
 							glm::vec4(surfaceTexture != context.WhiteTexture ? 1.0f : 0.0f, 0, 0, 0),
-						.SurfaceNormal = glm::vec4(surfaceNormal, 0.0f),
+						.SurfaceNormal = glm::vec4(surfaceNormal, surfaceMatch.w),
 						.SurfaceTransform = glm::vec4(
 							part->SurfaceTiling.GetX(),
 							part->SurfaceTiling.GetY(),

@@ -13,6 +13,16 @@ namespace gargantuan::PrimitiveMeshes {
 	static constexpr glm::vec2 UV_10{1.0f, 0.0f};
 	static constexpr glm::vec2 UV_11{1.0f, 1.0f};
 
+	// The wedge's slope runs from the top of the back edge down to the bottom
+	// of the front one, so it leans along Y and Z and not at all along X. It
+	// used to carry 0.707 in X as well, which is a direction the face does not
+	// point in: the slope lit as though it were turned a third of the way
+	// towards the right-hand side.
+	//
+	// NOTE: BasePart::GetSurfaceMatch has to answer with this same vector, or
+	// NormalId.Slope would be comparing against a face that is not there.
+	static constexpr glm::vec3 SLOPE_NORMAL{0.0f, 0.70710678f, 0.70710678f};
+
 	// NOTE: the UV on each face is chosen so a picture put on it reads upright
 	// when looked at from outside: u runs to the viewer's right, v downwards to
 	// match image space. The four side faces used to carry the top face's
@@ -78,10 +88,10 @@ namespace gargantuan::PrimitiveMeshes {
 				Vertex{{0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}, UV_10},
 				Vertex{{0.5f, 0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, UV_01},
 
-				Vertex{{-0.5f, 0.5f, -0.5f}, {0.707f, 0.707f, 0.707f}, UV_00},
-				Vertex{{0.5f, 0.5f, -0.5f}, {0.707f, 0.707f, 0.707f}, UV_10},
-				Vertex{{0.5f, -0.5f, 0.5f}, {0.707f, 0.707f, 0.707f}, UV_11},
-				Vertex{{-0.5f, -0.5f, 0.5f}, {0.707f, 0.707f, 0.707f}, UV_01},
+				Vertex{{-0.5f, 0.5f, -0.5f}, SLOPE_NORMAL, UV_00},
+				Vertex{{0.5f, 0.5f, -0.5f}, SLOPE_NORMAL, UV_10},
+				Vertex{{0.5f, -0.5f, 0.5f}, SLOPE_NORMAL, UV_11},
+				Vertex{{-0.5f, -0.5f, 0.5f}, SLOPE_NORMAL, UV_01},
 			},
 			{
 				0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 8, 9, 10, 11, 13, 12, 14, 16, 15, 14, 17, 16,

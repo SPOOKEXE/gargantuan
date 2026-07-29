@@ -163,21 +163,38 @@ namespace gargantuan {
 		}
 	};
 
-	glm::vec3 BasePart::GetSurfaceNormal() const {
+	glm::vec4 BasePart::GetSurfaceMatch() const {
 		switch (SurfaceFace) {
 		case Enums::NormalId::Right:
-			return {1, 0, 0};
+			return {1, 0, 0, SURFACE_MATCH_NORMAL};
 		case Enums::NormalId::Top:
-			return {0, 1, 0};
+			return {0, 1, 0, SURFACE_MATCH_NORMAL};
 		case Enums::NormalId::Back:
-			return {0, 0, 1};
+			return {0, 0, 1, SURFACE_MATCH_NORMAL};
 		case Enums::NormalId::Left:
-			return {-1, 0, 0};
+			return {-1, 0, 0, SURFACE_MATCH_NORMAL};
 		case Enums::NormalId::Bottom:
-			return {0, -1, 0};
+			return {0, -1, 0, SURFACE_MATCH_NORMAL};
+
+		// The wedge's slope, which leans along Y and Z only. Must stay the
+		// vector PrimitiveMeshes gives the slope's own vertices, or this
+		// compares against a direction the face does not point in.
+		case Enums::NormalId::Slope:
+			return {0.0f, 0.70710678f, 0.70710678f, SURFACE_MATCH_NORMAL};
+
+		// A ball is one face that faces everywhere
+		case Enums::NormalId::Sphere:
+			return {0, 0, 0, SURFACE_MATCH_ANY};
+
+		// The curved side of a cylinder, which is everything square to the
+		// axis its flat ends sit on. Roblox puts those ends on Right and Left,
+		// so the axis is X.
+		case Enums::NormalId::Circumference:
+			return {1, 0, 0, SURFACE_MATCH_AROUND};
+
 		case Enums::NormalId::Front:
 		default:
-			return {0, 0, -1};
+			return {0, 0, -1, SURFACE_MATCH_NORMAL};
 		}
 	}
 

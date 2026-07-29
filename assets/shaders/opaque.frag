@@ -23,16 +23,32 @@ layout(set = 2, binding = 1) uniform sampler2D SurfaceTexture;
 layout(set = 3, binding = 1) uniform PartFragmentUniforms {
     // x is 1 when this part actually has a surface texture
     vec4 HasSurfaceTexture;
-    // xyz is the one face the picture lands on, in world space
+    // xyz is the face the picture lands on, in world space; w is the rule
+    // that recognises it. 0 matches that direction, 1 matches every
+    // direction, 2 matches every direction square to xyz.
     vec4 SurfaceNormal;
     // xy tiles the picture across that face, zw slides it
     vec4 SurfaceTransform;
 } partFragment;
 
-// How closely a fragment's normal has to match the chosen face. Tight enough
-// that a cube shows the picture on one face and a wedge does not bleed it onto
-// the slant; a curved mesh has no faces, so it gets the cap pointing that way.
+// How closely a fragment's normal has to match a flat face. Tight enough that a
+// cube shows the picture on one face and a wedge does not bleed it onto the
+// slope.
 float SURFACE_FACE_MATCH = 0.9;
+// How far off square a fragment can lean and still count as part of a curved
+// side rather than one of the flat ends it runs between
+float SURFACE_AROUND_MATCH = 0.5;
+
+bool OnSurfaceFace(vec3 n) {
+    float rule = partFragment.SurfaceNormal.w;
+    if (rule > 1.5) {
+        return abs(dot(n, partFragment.SurfaceNormal.xyz)) < SURFACE_AROUND_MATCH;
+    }
+    if (rule > 0.5) {
+        return true;
+    }
+    return dot(n, partFragment.SurfaceNormal.xyz) > SURFACE_FACE_MATCH;
+}
 
 float SHADOW_SPREAD = 2.0;
 vec2 SHADOW_TEXEL_SIZE = vec2(1.0 / 2048.0);
@@ -69,8 +85,7 @@ void main() {
     float lighting = ambient + (nDotL * shadowFactor);
 
     vec3 surface = FragmentColor.rgb;
-    if (partFragment.HasSurfaceTexture.x > 0.5 &&
-            dot(n, partFragment.SurfaceNormal.xyz) > SURFACE_FACE_MATCH) {
+    if (partFragment.HasSurfaceTexture.x > 0.5 && OnSurfaceFace(n)) {
         vec2 surfaceUV = (FragmentUV * partFragment.SurfaceTransform.xy) + partFragment.SurfaceTransform.zw;
         // Shown as-is rather than tinted, so a camera feed reads true
         surface = texture(SurfaceTexture, surfaceUV).rgb;
