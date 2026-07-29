@@ -17,7 +17,9 @@ namespace gargantuan::MeshProvider {
 		std::unordered_map<std::string, std::unique_ptr<GpuMesh>> GpuMeshes;
 	} // namespace
 
-	std::unique_ptr<GpuMesh> &GetGpuMesh(std::string id) {
+	// By reference: taken by value, every caller paid for a copy of the key on
+	// top of building it
+	std::unique_ptr<GpuMesh> &GetGpuMesh(const std::string &id) {
 		return GpuMeshes[id];
 	}
 

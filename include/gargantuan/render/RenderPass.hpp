@@ -8,6 +8,7 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace gargantuan {
 	struct DrawContext {
@@ -39,6 +40,17 @@ namespace gargantuan {
 
 		std::unordered_set<const BasePart *> InView;
 		std::unordered_set<const BasePart *> ShadowsIntoView;
+
+		// The same two answers as flat lists. A pass wants to walk what it has
+		// to draw; the sets answer about one part at a time, so walking the
+		// world and asking about each part costs a hash lookup for every part
+		// that turned out not to be there. At a few thousand parts that is the
+		// larger half of what the pass was doing before it drew anything.
+		//
+		// Kept as well as the sets rather than instead of them, because the
+		// redraw check does ask about one part at a time.
+		std::vector<BasePart *> InViewList;
+		std::vector<BasePart *> ShadowList;
 
 		bool IsInView(const BasePart *part) const {
 			return InView.count(part) != 0;

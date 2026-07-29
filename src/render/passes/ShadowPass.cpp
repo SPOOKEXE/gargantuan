@@ -9,6 +9,7 @@
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_gpu.h>
 #include <memory>
+#include <vector>
 
 namespace gargantuan {
 
@@ -57,18 +58,27 @@ namespace gargantuan {
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(context.Commands, nullptr, 0, &depthTarget);
 			SDL_BindGPUGraphicsPipeline(pass, Pipeline);
 
-			for (auto part : context.WorldRoot->Parts) {
-				if (!part->CastShadow) {
-					continue;
+			// The wider of the two lists: a caster off screen still belongs here
+			// when the shadow it throws lands in the picture. Already filtered
+			// by CastShadow when the walk built it.
+			std::vector<BasePart *> everything;
+			const std::vector<BasePart *> *castList = nullptr;
+			if (context.Visible) {
+				castList = &context.Visible->ShadowList;
+			} else {
+				everything.reserve(context.WorldRoot->Parts.size());
+				for (const auto &candidate : context.WorldRoot->Parts) {
+					if (candidate && candidate->CastShadow) {
+						everything.push_back(candidate.get());
+					}
 				}
+				castList = &everything;
+			}
 
-				// The wider of the two sets: a caster off screen still belongs
-				// here when the shadow it throws lands in the picture. Culling
-				// this by what is on screen instead would drop those shadows.
-				if (context.Visible && !context.Visible->CastsIntoView(part.get())) {
-					continue;
-				}
+			SDL_GPUBuffer *boundVertexBuffer = nullptr;
+			SDL_GPUBuffer *boundIndexBuffer = nullptr;
 
+			for (BasePart *part : *castList) {
 				auto &mesh = part->GetMesh();
 				if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
 					continue;
@@ -77,11 +87,19 @@ namespace gargantuan {
 				Uniforms uniforms{.ShadowMatrix = shadowMatrix, .PartMatrix = part->GetModelMatrix()};
 				SDL_PushGPUVertexUniformData(context.Commands, 0, &uniforms, sizeof(Uniforms));
 
-				SDL_GPUBufferBinding vertexBinding{.buffer = mesh->VertexBuffer, .offset = 0};
-				SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+				// Parts of a shape share one primitive mesh, so this binds once
+				// per shape rather than once per part
+				if (mesh->VertexBuffer != boundVertexBuffer) {
+					SDL_GPUBufferBinding vertexBinding{.buffer = mesh->VertexBuffer, .offset = 0};
+					SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+					boundVertexBuffer = mesh->VertexBuffer;
+				}
 
-				SDL_GPUBufferBinding indexBinding{.buffer = mesh->IndexBuffer, .offset = 0};
-				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				if (mesh->IndexBuffer != boundIndexBuffer) {
+					SDL_GPUBufferBinding indexBinding{.buffer = mesh->IndexBuffer, .offset = 0};
+					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					boundIndexBuffer = mesh->IndexBuffer;
+				}
 
 				SDL_DrawGPUIndexedPrimitives(pass, mesh->IndexCount, 1, 0, 0, 0);
 			}

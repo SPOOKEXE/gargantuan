@@ -83,6 +83,13 @@ namespace gargantuan {
 
 		void Add(std::string_view name, uint64_t amount);
 
+		// Adds time to a child zone without opening and closing one, for a loop
+		// that runs thousands of times a frame. Begin and End cost a name
+		// lookup and two clock reads apiece, which at that count is more than
+		// the work being measured; this lets the loop keep its own running
+		// totals and hand them over once at the end.
+		void AddZoneTime(std::string_view name, uint64_t nanoseconds, uint64_t calls);
+
 		const Snapshot &Latest() const;
 		// Whether anything has been published yet, so a reader can say it is
 		// still gathering rather than drawing an empty chart

@@ -85,6 +85,7 @@ eyes. What is missing is the runtime that drives them.
       switchable. Needs somewhere to put them in the opaque pass's uniforms and
       a decision about how many one draw can carry
 - [ ] PBR
+- [ ] Ensure batched, parallel, vectorised and SIMD compute across the board (use stress test to find bottlenecks).
 
 ## Scripting
 

@@ -95,6 +95,22 @@ namespace gargantuan {
 		Live[open.Index].Calls++;
 	}
 
+	void Profiler::AddZoneTime(std::string_view name, uint64_t nanoseconds, uint64_t calls) {
+		if (!MeasuringFrame) {
+			return;
+		}
+
+		size_t parent = Stack.empty() ? NONE : Stack.back().Index;
+		// Inside a zone that was skipped, so this one is skipped with it
+		if (!Stack.empty() && parent == NONE) {
+			return;
+		}
+
+		size_t index = FindOrCreate(parent, name);
+		Live[index].Nanoseconds += nanoseconds;
+		Live[index].Calls += calls;
+	}
+
 	void Profiler::Add(std::string_view name, uint64_t amount) {
 		if (!MeasuringFrame) {
 			return;

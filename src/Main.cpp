@@ -43,6 +43,28 @@ int main(int argc, char **argv) {
 	SDL_Log("end enums");
 
 	gargantuan::Engine engine;
+
+	// --profile [seconds] runs with the flame chart on, writes profiles/ and
+	// quits, so two builds can be compared without anyone watching
+	for (int i = 1; i < argc; i++) {
+		if (std::strcmp(argv[i], "--profile") != 0) {
+			continue;
+		}
+
+		double seconds = 6.0;
+		if (i + 1 < argc) {
+			char *end = nullptr;
+			double parsed = std::strtod(argv[i + 1], &end);
+			if (end && end != argv[i + 1] && parsed > 0.0) {
+				seconds = parsed;
+			}
+		}
+
+		SDL_Log("Profiling for %.1f s", seconds);
+		engine.ProfileAndExit(seconds);
+		break;
+	}
+
 	while (engine.IsRunning) {
 		engine.Step();
 	}

@@ -105,8 +105,29 @@ namespace gargantuan {
 		}
 	}
 
+	void Engine::ProfileAndExit(double seconds) {
+		AutomaticProfileSeconds = seconds;
+		AutomaticProfileStarted = 0.0;
+		ShowProfiler = true;
+	}
+
 	void Engine::UpdateProfiler(double now) {
 		Profiler.SetEnabled(ShowProfiler);
+
+		// An unattended run: gather for as long as it was asked to, write the
+		// report and stop. The first frame is where the clock starts, not
+		// construction, so the window is time actually spent rendering.
+		if (AutomaticProfileSeconds >= 0.0) {
+			if (AutomaticProfileStarted == 0.0) {
+				AutomaticProfileStarted = now;
+			} else if (now - AutomaticProfileStarted >= AutomaticProfileSeconds) {
+				ExportProfilerReport();
+				SDL_Log("Profiled for %.1f s, stopping", now - AutomaticProfileStarted);
+				AutomaticProfileSeconds = -1.0;
+				IsRunning = false;
+				return;
+			}
+		}
 
 		if (!ShowProfiler) {
 			return;

@@ -57,6 +57,12 @@ namespace gargantuan {
 		// one that gets pointed at.
 		class Profiler Profiler;
 
+		// Starts with the flame chart running and writes the report after
+		// `seconds`, then stops the engine. Profiling a change otherwise means
+		// a person pressing F6 and clicking a button at the right moment, which
+		// is no way to compare two builds.
+		void ProfileAndExit(double seconds);
+
 	  private:
 		uint64_t CurrentTick = 0;
 		uint64_t LastTick = 0;
@@ -91,6 +97,9 @@ namespace gargantuan {
 		std::string ProfilerStatus;
 
 		void UpdateProfiler(double now);
+		// Negative when nothing asked for an unattended run
+		double AutomaticProfileSeconds = -1.0;
+		double AutomaticProfileStarted = 0.0;
 		// True when the click landed on the export button
 		bool HandleProfilerClick(float x, float y);
 		void ExportProfilerReport();

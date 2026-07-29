@@ -81,6 +81,16 @@ namespace gargantuan {
 		};
 
 		SDL_GPURenderPass *Draw(SDL_GPUDevice *gpu, FrameContext &context) override {
+			// Read once. Two clock reads a part is affordable; asking the
+			// profiler whether it is switched on, for every part of every
+			// frame, is not something a measurement should be doing to the
+			// thing it is measuring.
+			Profiler *profiler = Profiler::GetCurrent();
+			const bool measuring = profiler && profiler->IsEnabled();
+			uint64_t transformNanoseconds = 0;
+			uint64_t submitNanoseconds = 0;
+			uint64_t partsDrawn = 0;
+
 			SDL_GPUColorTargetInfo colorTarget = {
 				.texture = context.ColorTarget,
 				.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f},
@@ -139,13 +149,34 @@ namespace gargantuan {
 			SDL_GPUTexture *boundSurfaceTexture = nullptr;
 			SDL_GPUBuffer *boundVertexBuffer = nullptr;
 			SDL_GPUBuffer *boundIndexBuffer = nullptr;
+			// Whether the fragment uniforms currently hold the "no picture on
+			// this part" values, which every bare part would otherwise push again
+			bool pushedBareFragment = false;
 
-			for (auto part : context.WorldRoot->Parts) {
-				// Off the side of the screen, so every uniform push, binding
-				// and draw call below would be work the rasteriser discards
-				if (context.Visible && !context.Visible->IsInView(part.get())) {
-					continue;
+			// What the frustum walk already worked out, rather than the world
+			// filtered again a part at a time. Without a walk there is nothing
+			// to iterate but everything, which is wasteful and never wrong.
+			std::vector<BasePart *> everything;
+			const std::vector<BasePart *> *drawList = nullptr;
+			if (context.Visible) {
+				drawList = &context.Visible->InViewList;
+			} else {
+				everything.reserve(context.WorldRoot->Parts.size());
+				for (const auto &candidate : context.WorldRoot->Parts) {
+					if (candidate) {
+						everything.push_back(candidate.get());
+					}
 				}
+				drawList = &everything;
+			}
+
+			// Nothing to look up when nothing in the world has a picture on it,
+			// which spares a hash lookup for every part of every frame in the
+			// scenes that never use one
+			const bool anyPartTextures = context.PartTextures && !context.PartTextures->empty();
+
+			for (BasePart *part : *drawList) {
+				uint64_t partStart = measuring ? SDL_GetTicksNS() : 0;
 
 				auto &mesh = part->GetMesh();
 				if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
@@ -156,43 +187,64 @@ namespace gargantuan {
 					.ModelMatrix = part->GetModelMatrix(),
 					.Color = glm::vec4((glm::vec3)part->Color, 1.0f - part->Transparency),
 				};
+				// Everything above is this pass working out what to say;
+				// everything below is saying it. The two answer different
+				// questions -- one is arithmetic and the other is driver calls
+				// -- and which of them is larger decides what is worth doing
+				// about it.
+				uint64_t partSubmit = measuring ? SDL_GetTicksNS() : 0;
 				SDL_PushGPUVertexUniformData(context.Commands, 1, &uniforms, sizeof(PartUniforms));
 
 				// Only the engine's own pipeline knows about part textures; a
 				// surface shader has taken the fragment stage over instead
 				if (!context.SurfacePipeline) {
 					SDL_GPUTexture *surfaceTexture = context.WhiteTexture;
-					if (context.PartTextures) {
-						auto it = context.PartTextures->find(part.get());
+					if (anyPartTextures) {
+						auto it = context.PartTextures->find(part);
 						if (it != context.PartTextures->end() && it->second) {
 							surfaceTexture = it->second;
 						}
 					}
 
-					// Carried through the same transform the vertex stage puts
-					// the mesh's own normals through, rather than the correct
-					// inverse transpose. Wrong the same way on both sides, so
-					// the two still line up, which is all a match needs.
-					glm::vec4 surfaceMatch = part->GetSurfaceMatch();
-					glm::vec3 surfaceNormal = glm::vec3(surfaceMatch);
-					if (glm::dot(surfaceNormal, surfaceNormal) > 0.0f) {
-						surfaceNormal = glm::normalize(glm::mat3(uniforms.ModelMatrix) * surfaceNormal);
-					}
+					bool textured = surfaceTexture != context.WhiteTexture;
 
-					PartFragmentUniforms fragmentUniforms{
-						.HasSurfaceTexture =
-							glm::vec4(surfaceTexture != context.WhiteTexture ? 1.0f : 0.0f, 0, 0, 0),
-						.SurfaceNormal = glm::vec4(surfaceNormal, surfaceMatch.w),
-						.SurfaceTransform = glm::vec4(
-							part->SurfaceTiling.GetX(),
-							part->SurfaceTiling.GetY(),
-							part->SurfaceOffset.GetX(),
-							part->SurfaceOffset.GetY()
-						),
-					};
-					SDL_PushGPUFragmentUniformData(
-						context.Commands, 1, &fragmentUniforms, sizeof(PartFragmentUniforms)
-					);
+					// A part with no picture on it makes this block of uniforms
+					// identical to the last one that also had none: the shader
+					// reads nothing but the flag once the flag is zero. Pushing
+					// it again for each of thousands of bare parts is a driver
+					// call apiece to say the same thing.
+					if (textured || !pushedBareFragment) {
+						// Carried through the same transform the vertex stage
+						// puts the mesh's own normals through, rather than the
+						// correct inverse transpose. Wrong the same way on both
+						// sides, so the two still line up, which is all a match
+						// needs.
+						glm::vec3 surfaceNormal(0.0f);
+						glm::vec4 surfaceMatch(0.0f);
+						if (textured) {
+							surfaceMatch = part->GetSurfaceMatch();
+							surfaceNormal = glm::vec3(surfaceMatch);
+							if (glm::dot(surfaceNormal, surfaceNormal) > 0.0f) {
+								surfaceNormal =
+									glm::normalize(glm::mat3(uniforms.ModelMatrix) * surfaceNormal);
+							}
+						}
+
+						PartFragmentUniforms fragmentUniforms{
+							.HasSurfaceTexture = glm::vec4(textured ? 1.0f : 0.0f, 0, 0, 0),
+							.SurfaceNormal = glm::vec4(surfaceNormal, surfaceMatch.w),
+							.SurfaceTransform = glm::vec4(
+								part->SurfaceTiling.GetX(),
+								part->SurfaceTiling.GetY(),
+								part->SurfaceOffset.GetX(),
+								part->SurfaceOffset.GetY()
+							),
+						};
+						SDL_PushGPUFragmentUniformData(
+							context.Commands, 1, &fragmentUniforms, sizeof(PartFragmentUniforms)
+						);
+						pushedBareFragment = !textured;
+					}
 
 					// Only when it actually changed. Nearly every part shows the
 					// same white texture as the one before it, and rebinding
@@ -231,7 +283,25 @@ namespace gargantuan {
 				// buffer, which has almost nothing to do with what a cylinder
 				// costs; how many of them went in, and how many triangles they
 				// carried, is the part the CPU here actually decides.
-				CountPrimitive(part.get(), mesh->IndexCount);
+				CountPrimitive(part, mesh->IndexCount);
+
+				if (measuring) {
+					uint64_t partEnd = SDL_GetTicksNS();
+					transformNanoseconds += partSubmit - partStart;
+					submitNanoseconds += partEnd - partSubmit;
+				}
+				partsDrawn++;
+			}
+
+			if (measuring) {
+				// Handed over once, rather than opened and closed per part.
+				// Calls is the part count, so the chart can report a per-part
+				// cost rather than only a total.
+				profiler->AddZoneTime("Transforms", transformNanoseconds, partsDrawn);
+				profiler->AddZoneTime("Submit", submitNanoseconds, partsDrawn);
+			}
+			if (profiler) {
+				profiler->Add("Parts Drawn", partsDrawn);
 			}
 
 			return pass;

@@ -5,6 +5,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Deliberately no default build type. An unoptimised build is the one that shows
+# where the code is actually doing too much work: -O0 leaves every inefficiency
+# on the profile where it can be seen and fixed, rather than letting the
+# inliner hide it. Ship with `-DCMAKE_BUILD_TYPE=Release` when that is what is
+# wanted; measured on examples/SkyGrid.luau the difference is roughly tenfold on
+# the opaque pass, so the two are not comparable and are not meant to be.
+
 # Shaders
 
 find_program(GLSL_COMPILER glslc REQUIRED)

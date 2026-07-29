@@ -2131,6 +2131,8 @@ namespace gargantuan {
 		G_PROFILE("Frustum Walk");
 		out.InView.clear();
 		out.ShadowsIntoView.clear();
+		out.InViewList.clear();
+		out.ShadowList.clear();
 
 		uint64_t hash = 0xCBF29CE484222325ull;
 		MixVec3(hash, lightDirection);
@@ -2168,6 +2170,7 @@ namespace gargantuan {
 
 			if (inView) {
 				out.InView.insert(part.get());
+				out.InViewList.push_back(part.get());
 			}
 			// A caster already on screen throws its shadow onto the screen too,
 			// so this set is the wider of the two and never drops one InView
@@ -2175,6 +2178,7 @@ namespace gargantuan {
 			// saying so costs nothing and does not rely on noticing that.
 			if (part->CastShadow && (inView || shadowReaches)) {
 				out.ShadowsIntoView.insert(part.get());
+				out.ShadowList.push_back(part.get());
 			}
 
 			// Anything that can change the picture: by being in it, or by

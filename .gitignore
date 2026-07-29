@@ -1,4 +1,6 @@
 build
+build-release
+build-relwithdeb
 cmake-build-debug
 .DS_Store
 .cache
