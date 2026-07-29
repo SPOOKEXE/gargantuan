@@ -99,9 +99,21 @@ local TEXTURES = {
 -- batches the grid ends up in
 local TEXTURED_SHARE = 0.20
 
+-- One block in ten bobs a stud either side of where it was placed. A grid
+-- where nothing moves lets the engine cache almost everything, which is not
+-- what a stress test is for: these are the parts that have to be noticed,
+-- rebuilt and re-sorted every frame while the rest sit still.
+local BOB_EVERY = 10
+local BOB_HEIGHT = 1
+local BOB_SPEED = 1.5
+
 local started = os.clock()
 local random = Random.new(4242)
 local half = (EXTENT - 1) * SPACING / 2
+
+local bobbers = {}
+local bobberHomes = {}
+local placed = 0
 
 for layer = -LAYERS_BELOW, LAYERS_ABOVE - 1 do
 	for column = 0, EXTENT - 1 do
@@ -127,6 +139,12 @@ for layer = -LAYERS_BELOW, LAYERS_ABOVE - 1 do
 			end
 
 			block.Parent = Workspace
+
+			placed += 1
+			if placed % BOB_EVERY == 0 then
+				table.insert(bobbers, block)
+				table.insert(bobberHomes, block.Position)
+			end
 		end
 	end
 end
@@ -136,7 +154,8 @@ local parts = EXTENT * EXTENT * layers
 local built = os.clock() - started
 print(
 	`skygrid: {parts} parts in a {EXTENT}x{EXTENT} grid, {layers} layers, `
-		.. `{math.floor(TEXTURED_SHARE * 100)}% textured, built in {string.format("%.2f", built)}s`
+		.. `{math.floor(TEXTURED_SHARE * 100)}% textured, {#bobbers} bobbing, `
+		.. `built in {string.format("%.2f", built)}s`
 )
 
 -- Each is a real camera rendering the same world, so the strip is more full
@@ -211,6 +230,13 @@ local lastClock = os.clock()
 
 RunService.PreRender:Connect(function(deltaTime)
 	local now = Workspace.DistributedGameTime
+
+	-- Offset by index so they are a rolling swell rather than one flat slab
+	for index, block in bobbers do
+		local home = bobberHomes[index]
+		block.Position =
+			Vector3.new(home.X, home.Y + math.sin(now * BOB_SPEED + index * 0.35) * BOB_HEIGHT, home.Z)
+	end
 
 	-- A cone by moving what they look at, not where they are: moving them
 	-- would be an orbit and would leave the grid
