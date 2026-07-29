@@ -435,9 +435,8 @@ namespace gargantuan {
 		};
 
 		SDL_GPURenderPass *Draw(SDL_GPUDevice *gpu, FrameContext &context) override {
-			// Read counters once outside the measured per-part path.
-			Profiler *profiler = Profiler::GetCurrent();
-			const bool measuring = profiler && profiler->IsEnabled();
+			// Asked once, outside the measured per-part path.
+			const bool measuring = G_PROFILE_ACTIVE();
 			uint64_t transformNanoseconds = 0;
 			uint64_t submitNanoseconds = 0;
 			uint64_t partsDrawn = 0;
@@ -556,10 +555,11 @@ namespace gargantuan {
 
 				if (measuring) {
 					submitNanoseconds += SDL_GetTicksNS() - submitStart;
-					profiler->AddZoneTime("Bucket", InstanceBucketNanoseconds, 1);
-					profiler->AddZoneTime("Fill Instances", InstanceFillNanoseconds, (uint64_t)drawList.size());
-					profiler->AddZoneTime("Upload", InstanceUploadNanoseconds, 1);
-					profiler->AddZoneTime("Batch Submit", submitNanoseconds, (uint64_t)Batches.size());
+					ProfilerCountTime("Bucket ms", InstanceBucketNanoseconds);
+					ProfilerCountTime("Fill Instances ms", InstanceFillNanoseconds);
+					ProfilerCountTime("Upload ms", InstanceUploadNanoseconds);
+					ProfilerCountTime("Batch Submit ms", submitNanoseconds);
+					ProfilerCount("Batches", (uint64_t)Batches.size());
 					submitNanoseconds = 0;
 					for (const Batch &batch : Batches) {
 						auto index = magic_enum::enum_index(batch.Shape);
@@ -681,10 +681,11 @@ namespace gargantuan {
 			}
 
 			if (measuring) {
-				// Publish once with part count for per-part cost.
+				// Published once, with the count beside it for per-part cost.
 				if (individualParts > 0) {
-					profiler->AddZoneTime("Individual Transforms", transformNanoseconds, individualParts);
-					profiler->AddZoneTime("Individual Submit", submitNanoseconds, individualParts);
+					ProfilerCountTime("Individual Transforms ms", transformNanoseconds);
+					ProfilerCountTime("Individual Submit ms", submitNanoseconds);
+					ProfilerCount("Individual Parts", individualParts);
 				}
 			}
 			if (measuring) {
@@ -693,16 +694,18 @@ namespace gargantuan {
 						continue;
 					}
 					const auto &names = CounterNames(magic_enum::enum_values<Enums::PartType>()[index]);
-					profiler->Add(names.first, shapeDraws[index]);
-					profiler->Add(names.second, shapeTriangles[index]);
+					// Held by a function-local static, so the pointers Tracy
+					// keeps stay good for the life of the process
+					ProfilerCount(names.first.c_str(), shapeDraws[index]);
+					ProfilerCount(names.second.c_str(), shapeTriangles[index]);
 				}
 				uint64_t totalTriangles = 0;
 				for (uint64_t count : shapeTriangles) {
 					totalTriangles += count;
 				}
 
-				profiler->Add("Parts Drawn", partsDrawn);
-				profiler->Add("Triangles", totalTriangles);
+				ProfilerCount("Parts Drawn", partsDrawn);
+				ProfilerCount("Triangles", totalTriangles);
 			}
 
 			return pass;

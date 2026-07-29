@@ -2,7 +2,6 @@
 
 #include "gargantuan/classes/DataModel.hpp"
 #include "gargantuan/DebugOverlay.hpp"
-#include "gargantuan/Profiler.hpp"
 #include "gargantuan/render/RenderProvider.hpp"
 #include "gargantuan/scripting/ScriptEngine.hpp"
 #include "gargantuan/services/Lighting.hpp"
@@ -58,11 +57,9 @@ namespace gargantuan {
 		void ProcessEvent(SDL_Event event);
 		void Step();
 
-		// Public because Profiler::GetCurrent() points at this one
-		class Profiler Profiler;
-
-		// Runs the chart, writes the report after `seconds`, then stops. Two
-		// builds cannot be compared by a person pressing F6 at the right moment.
+		// Runs for `seconds`, then stops. Bounds an unattended run so
+		// `tracy-capture` alongside it gets a trace of a known length rather
+		// than whenever somebody thought to close the window.
 		void ProfileAndExit(double seconds);
 
 	  private:
@@ -90,24 +87,10 @@ namespace gargantuan {
 		static constexpr double SETTLE_AFTER_RESUME = 0.3;
 		double SettleUntil = 0.0;
 
-		// Apart from the F3 counter: that is two numbers a frame, this walks a
-		// tree
-		bool ShowProfiler = false;
-		std::shared_ptr<EditableImage> ProfilerPanel;
-		ProfilerPanelLayout ProfilerLayout;
-		// Sits under the frame rate counter, which is why it is not at the top
-		static constexpr float PROFILER_TOP = 62.0f;
-		double LastProfilerRefresh = 0.0;
-		// What the export last did, shown on the panel until the next one
-		std::string ProfilerStatus;
-
-		void UpdateProfiler(double now);
 		// Negative when nothing asked for an unattended run
 		double AutomaticProfileSeconds = -1.0;
 		double AutomaticProfileStarted = 0.0;
-		// True when the click landed on the export button
-		bool HandleProfilerClick(float x, float y);
-		void ExportProfilerReport();
+		void UpdateAutomaticProfile(double now);
 
 		// Wrapped so the whole frame is one zone without straddling a return
 		void StepFrame(float deltaTime, double seconds);

@@ -1,5 +1,5 @@
 #include "gargantuan/Engine.hpp"
-#include "gargantuan/ProfilerExport.hpp"
+#include "gargantuan/Profiler.hpp"
 #include "gargantuan/classes/BasePart.hpp"
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/classes/DataModel.hpp"
@@ -49,8 +49,6 @@ namespace gargantuan {
 		this->RenderProvider = new class RenderProvider(Window, Gpu);
 		// Camera:Render() reaches the renderer through this
 		RenderProvider::SetCurrent(this->RenderProvider);
-		// And the renderer's passes, and Luau callbacks, reach the profiler
-		Profiler::SetCurrent(&this->Profiler);
 
 		this->ScriptEngine = new class ScriptEngine();
 
@@ -108,92 +106,24 @@ namespace gargantuan {
 	void Engine::ProfileAndExit(double seconds) {
 		AutomaticProfileSeconds = seconds;
 		AutomaticProfileStarted = 0.0;
-		ShowProfiler = true;
 	}
 
-	void Engine::UpdateProfiler(double now) {
-		Profiler.SetEnabled(ShowProfiler);
-
-		// The clock starts at the first frame, not construction, so the window
-		// is time actually spent rendering
-		if (AutomaticProfileSeconds >= 0.0) {
-			if (AutomaticProfileStarted == 0.0) {
-				AutomaticProfileStarted = now;
-			} else if (now - AutomaticProfileStarted >= AutomaticProfileSeconds) {
-				ExportProfilerReport();
-				SDL_Log("Profiled for %.1f s, stopping", now - AutomaticProfileStarted);
-				AutomaticProfileSeconds = -1.0;
-				IsRunning = false;
-				return;
-			}
-		}
-
-		if (!ShowProfiler) {
+	void Engine::UpdateAutomaticProfile(double now) {
+		if (AutomaticProfileSeconds < 0.0) {
 			return;
 		}
 
-		if (!ProfilerPanel) {
-			ProfilerPanel = std::make_shared<EditableImage>();
-			ProfilerPanel->Name = EditableImage::DEFINITION.Name;
-			LastProfilerRefresh = 0.0;
+		// The clock starts at the first frame, not at construction, so the
+		// window is time actually spent rendering
+		if (AutomaticProfileStarted == 0.0) {
+			AutomaticProfileStarted = now;
+			return;
 		}
 
-		// Redrawing the same numbers in between would be work charged to the
-		// frame being measured
-		if (!Profiler.HasSnapshot()) {
-			if (LastProfilerRefresh == 0.0) {
-				ProfilerLayout = DrawProfilerPanel(*ProfilerPanel, Profiler::Snapshot{}, "GATHERING");
-				LastProfilerRefresh = now;
-			}
-		} else if (now - LastProfilerRefresh >= Profiler::WINDOW_SECONDS * 0.5) {
-			ProfilerLayout = DrawProfilerPanel(*ProfilerPanel, Profiler.Latest(), ProfilerStatus);
-			LastProfilerRefresh = now;
-		}
-	}
-
-	bool Engine::HandleProfilerClick(float x, float y) {
-		if (!ShowProfiler || !ProfilerPanel) {
-			return false;
-		}
-
-		// SDL reports the pointer in window coordinates and the panel is placed
-		// in swapchain pixels, which differ on a display that scales
-		int windowWidth = 0, windowHeight = 0;
-		int pixelWidth = 0, pixelHeight = 0;
-		SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
-		SDL_GetWindowSizeInPixels(Window, &pixelWidth, &pixelHeight);
-		if (windowWidth > 0 && windowHeight > 0) {
-			x *= (float)pixelWidth / (float)windowWidth;
-			y *= (float)pixelHeight / (float)windowHeight;
-		}
-
-		// Both offsets: the panel is inset from the left as well as pushed down
-		float left = STATISTICS_MARGIN + ProfilerLayout.ButtonPosition.GetX();
-		float top = PROFILER_TOP + ProfilerLayout.ButtonPosition.GetY();
-		float right = left + ProfilerLayout.ButtonSize.GetX();
-		float bottom = top + ProfilerLayout.ButtonSize.GetY();
-
-		if (x < left || x > right || y < top || y > bottom) {
-			return false;
-		}
-
-		ExportProfilerReport();
-		return true;
-	}
-
-	void Engine::ExportProfilerReport() {
-		std::string report;
-		if (ExportProfile(Profiler.Latest(), "profiles", report)) {
-			SDL_Log("Wrote %s", report.c_str());
-			ProfilerStatus = "WROTE PROFILES";
-		} else {
-			SDL_Log("Could not export a profile: %s", report.c_str());
-			ProfilerStatus = "EXPORT FAILED";
-		}
-
-		// At once, so the answer is on screen before the next window
-		if (ProfilerPanel) {
-			ProfilerLayout = DrawProfilerPanel(*ProfilerPanel, Profiler.Latest(), ProfilerStatus);
+		if (now - AutomaticProfileStarted >= AutomaticProfileSeconds) {
+			SDL_Log("Ran for %.1f s, stopping", now - AutomaticProfileStarted);
+			AutomaticProfileSeconds = -1.0;
+			IsRunning = false;
 		}
 	}
 
@@ -241,14 +171,14 @@ namespace gargantuan {
 		float deltaTime = GetDeltaTime();
 
 		double seconds = (double)CurrentTick / 1000000000.0;
-		Profiler.BeginFrame(seconds);
 
 		{
 			G_PROFILE("Main Thread");
 			StepFrame(deltaTime, seconds);
 		}
 
-		Profiler.EndFrame(seconds);
+		// Outside the zone: it separates frames rather than belonging to one
+		G_PROFILE_FRAME();
 	}
 
 	void Engine::StepFrame(float deltaTime, double seconds) {
@@ -267,23 +197,9 @@ namespace gargantuan {
 				SettleUntil = seconds + SETTLE_AFTER_RESUME;
 			}
 
-			// Held down, these would repeat and flicker the panels on and off
-			if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
-				if (event.key.key == SDLK_F3) {
-					ShowStatistics = !ShowStatistics;
-				} else if (event.key.key == SDLK_F6) {
-					ShowProfiler = !ShowProfiler;
-					ProfilerStatus.clear();
-					LastProfilerRefresh = 0.0;
-				}
-			}
-
-			// The panel has one thing on it that can be clicked, and a click
-			// that lands on it is swallowed rather than passed on: a button the
-			// camera also turns for is not a button
-			if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT &&
-				HandleProfilerClick(event.button.x, event.button.y)) {
-				continue;
+			// Held down, this would repeat and flicker the panel on and off
+			if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_F3) {
+				ShowStatistics = !ShowStatistics;
 			}
 
 			UserInputService->ProcessEvent(event);
@@ -294,12 +210,7 @@ namespace gargantuan {
 		// Ahead of the frame's work, so the reading belongs to the frame just
 		// measured
 		UpdateStatistics(seconds, deltaTime);
-		UpdateProfiler(seconds);
-		RenderProvider->SetWindowOverlay(
-			1,
-			ShowProfiler ? ProfilerPanel : nullptr,
-			glm::vec2(STATISTICS_MARGIN, PROFILER_TOP)
-		);
+		UpdateAutomaticProfile(seconds);
 
 		{
 			G_PROFILE("Simulation");

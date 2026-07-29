@@ -64,10 +64,6 @@ eyes. What is missing is the runtime that drives them.
 - [ ] Add mesh edge and mesh face inputs as well for shader scripts.
 - [ ] Build a internal "shader capabilities" which holds what the shader accesses and uses. This way if no shaders use vertex information, we skip processing it and passing it in, and we can skip entirely for entire pipeline if no shader scripts use it.
 
-## Profiling and Tracing
-
-- [ ] https://github.com/wolfpld/tracy
-
 ## Render
 
 - [ ] Occlusion, so a part hidden behind a wall stops costing a redraw. The

@@ -2671,8 +2671,7 @@ namespace gargantuan {
 
 		uint64_t visible = 0;
 
-		Profiler *profiler = Profiler::GetCurrent();
-		const bool measuring = profiler && profiler->IsEnabled();
+		const bool measuring = G_PROFILE_ACTIVE();
 		uint64_t cullNanoseconds = 0;
 		uint64_t gatherNanoseconds = 0;
 		uint64_t signatureNanoseconds = 0;
@@ -2814,9 +2813,12 @@ namespace gargantuan {
 		out.ShadowCount = shadowCount;
 
 		if (measuring) {
-			profiler->AddZoneTime("Cull", cullNanoseconds, total);
-			profiler->AddZoneTime("Gather", gatherNanoseconds, total);
-			profiler->AddZoneTime("Signature", signatureNanoseconds, total);
+			// One zone per part would be a hundred thousand of them a frame, so
+			// the walk times itself and plots the totals instead
+			ProfilerCountTime("Cull ms", cullNanoseconds);
+			ProfilerCountTime("Gather ms", gatherNanoseconds);
+			ProfilerCountTime("Signature ms", signatureNanoseconds);
+			ProfilerCount("Parts Walked", total);
 		}
 
 		// Include visible count, especially for empty views.

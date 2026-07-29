@@ -5,8 +5,9 @@
 -- EXTENT squared times the layers, so widening the grid costs four times what
 -- it looks like it should.
 --
--- It prints the part count, build time and frame rate it settled at. Press F6
--- for the flame chart, or start with --profile to write the report and quit.
+-- It prints the part count, build time and frame rate it settled at. Run
+-- tracy-profiler alongside it for the breakdown, or tracy-capture with
+-- --profile to take one unattended.
 --
 -- On scale: a 10000x10000 stud field at this spacing is 5000 x 5000 = twenty
 -- five million parts in ONE layer, which is gigabytes before a triangle is
@@ -276,6 +277,6 @@ RunService.PreRender:Connect(function(deltaTime)
 				.. `({string.format("%.2f", 1000 / average)} ms a frame), `
 				.. `worst frame {string.format("%.1f", slowest * 1000)} ms`
 		)
-		print("skygrid: press F3 for the counter and F6 for the breakdown")
+		print("skygrid: press F3 for the counter, connect tracy-profiler for the breakdown")
 	end
 end)

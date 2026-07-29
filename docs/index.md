@@ -42,6 +42,39 @@ For now, set Luau LSP's `platform` to Roblox. Eventually, Gargantuan will have
 procedurally generated type definitions for consumption, alongside proper
 project management and a test framework.
 
+## Profiling
+
+The engine is instrumented for [Tracy](https://github.com/wolfpld/tracy). The
+client is compiled in by default and collects nothing until Tracy's profiler
+connects, so an ordinary build pays an atomic read per zone.
+
+Build the tools once. They are separate programs, so they are off by default:
+
+```sh
+cmake -B build -DGARGANTUAN_TRACY_TOOLS=ON
+cmake --build build --target tracy-profiler tracy-capture tracy-csvexport
+```
+
+Run the engine, then connect to it:
+
+```sh
+./build/gargantuan
+./build/bin/tracy-profiler
+```
+
+For an unattended run, `--profile <seconds>` stops the engine after that long,
+which bounds what a capture alongside it collects:
+
+```sh
+./build/bin/tracy-capture -o run.tracy -s 10 &
+./build/gargantuan --profile 12
+```
+
+`tracy-csvexport run.tracy` prints per-zone totals, which is how two runs get
+compared without opening a window.
+
+`-DGARGANTUAN_TRACY=OFF` compiles every zone out entirely.
+
 ## Adding Data Types
 
 It's easy!

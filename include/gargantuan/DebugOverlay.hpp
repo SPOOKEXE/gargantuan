@@ -1,6 +1,5 @@
 #pragma once
 
-#include "gargantuan/Profiler.hpp"
 #include "gargantuan/classes/EditableImage.hpp"
 #include "gargantuan/datatypes/Color3.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
@@ -62,17 +61,4 @@ namespace gargantuan {
 	// Resizes `image` to fit and returns the size it settled on
 	Vector2 DrawStatisticsPanel(EditableImage &image, const FrameStatistics &statistics);
 
-	// The rectangle is in the panel's own coordinates; whoever placed the panel
-	// is the only one who can turn a mouse position into a hit
-	struct ProfilerPanelLayout {
-		Vector2 Size = Vector2(0, 0);
-		Vector2 ButtonPosition = Vector2(0, 0);
-		Vector2 ButtonSize = Vector2(0, 0);
-	};
-
-	// `status` is a line along the bottom: what an export wrote, or that it is
-	// still gathering its first second
-	ProfilerPanelLayout DrawProfilerPanel(
-		EditableImage &image, const Profiler::Snapshot &snapshot, std::string_view status
-	);
 } // namespace gargantuan

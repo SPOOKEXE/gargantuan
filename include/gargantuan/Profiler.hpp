@@ -1,137 +1,67 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
-#include <string_view>
-#include <vector>
+
+#if defined(TRACY_ENABLE)
+	#include <tracy/Tracy.hpp>
+#endif
 
 namespace gargantuan {
-	// Named zone tree, averaged per frame over a one-second window.
-	// The F3 minimum captures isolated bad frames without retaining every frame.
-	class Profiler {
-	  public:
-		static constexpr size_t NONE = (size_t)-1;
-		static constexpr double WINDOW_SECONDS = 1.0;
-		static constexpr int MAXIMUM_DEPTH = 12;
+	// The engine's zones go to Tracy. Nothing is collected until its profiler
+	// connects, so a build with this on and nobody watching costs an atomic
+	// read per zone.
+	//
+	// Run the engine, then `tracy-profiler` and hit Connect. Both are built by
+	// configuring with -DGARGANTUAN_TRACY_TOOLS=ON.
 
-		struct Zone {
-			std::string Name;
-			size_t Parent = NONE;
-			int Depth = 0;
-			std::vector<size_t> Children;
-			// Per-frame window average.
-			double Milliseconds = 0.0;
-			double CallsPerFrame = 0.0;
-		};
+#if defined(TRACY_ENABLE)
+	// A scope's worth of time, under whatever zone is already open on this
+	// thread. The name must be a literal: Tracy registers the source location
+	// once and sends a reference to it, not the string.
+	#define G_PROFILE(name) ZoneScopedN(name)
 
-		// Count draws; command-buffer write time is not renderer cost.
-		struct Counter {
-			std::string Name;
-			double PerFrame = 0.0;
-			uint64_t Total = 0;
-		};
+	// For a zone whose name is only known once it runs -- a Luau chunk being
+	// the one that is. Costs a copy of the text every call, which is why it is
+	// not what G_PROFILE does.
+	//
+	// The length is checked because the caller only looks a name up when
+	// something is listening, and whether that is true is decided one frame and
+	// acted on the next. Handing Tracy a zero-length name on the frame the
+	// profiler attaches loses the zone and everything nested inside it.
+	#define G_PROFILE_NAMED(fallback, text, length) \
+		ZoneScopedN(fallback);                      \
+		do {                                        \
+			if ((length) > 0) {                     \
+				ZoneName(text, length);             \
+			}                                       \
+		} while (0)
 
-		struct Snapshot {
-			std::vector<Zone> Zones;
-			// First-open order keeps rows stable.
-			std::vector<size_t> Roots;
-			std::vector<Counter> Counters;
-			uint64_t Frames = 0;
-			double Seconds = 0.0;
-			// Wall-clock frame time; roots do not cover the whole frame.
-			double FrameMilliseconds = 0.0;
+	// Ends the frame. Everything between two of these is one row on the frame
+	// bar, which is what makes a single bad frame findable.
+	#define G_PROFILE_FRAME() FrameMark
 
-			bool Empty() const {
-				return Zones.empty() && Counters.empty();
-			}
-		};
+	// Whether anything is listening. The walks that time themselves by hand
+	// ask first, because reading the clock per iteration costs more than the
+	// iteration does.
+	#define G_PROFILE_ACTIVE() TracyIsConnected
+#else
+	#define G_PROFILE(name) ((void)0)
+	#define G_PROFILE_NAMED(fallback, text, length) ((void)0)
+	#define G_PROFILE_FRAME() ((void)0)
+	#define G_PROFILE_ACTIVE() false
+#endif
 
-		// Applies at the next frame boundary to preserve the zone stack.
-		void SetEnabled(bool enabled);
-		bool IsEnabled() const;
+	// Numbers that are not spans of time: parts drawn, triangles behind them.
+	// Tracy plots these against the timeline rather than nesting them in it.
+	//
+	// The name is kept by address rather than copied, so it has to outlive the
+	// program: a literal, or a string owned by something static.
+	void ProfilerCount(const char *name, uint64_t amount);
 
-		void BeginFrame(double now);
-		void EndFrame(double now);
-
-		void Begin(std::string_view name);
-		void End();
-
-		void Add(std::string_view name, uint64_t amount);
-
-		// Adds nanoseconds and calls without per-iteration scope overhead.
-		void AddZoneTime(std::string_view name, uint64_t nanoseconds, uint64_t calls);
-
-		const Snapshot &Latest() const;
-		bool HasSnapshot() const;
-
-		static Profiler *GetCurrent();
-		static void SetCurrent(Profiler *profiler);
-
-	  private:
-		struct LiveZone {
-			std::string Name;
-			size_t Parent = NONE;
-			int Depth = 0;
-			std::vector<size_t> Children;
-			uint64_t Nanoseconds = 0;
-			uint64_t Calls = 0;
-		};
-
-		struct LiveCounter {
-			std::string Name;
-			uint64_t Total = 0;
-		};
-
-		struct Open {
-			size_t Index = NONE;
-			uint64_t Start = 0;
-		};
-
-		size_t FindOrCreate(size_t parent, std::string_view name);
-		void Publish(double now);
-
-		std::vector<LiveZone> Live;
-		std::vector<size_t> LiveRoots;
-		std::vector<LiveCounter> LiveCounters;
-		std::vector<Open> Stack;
-
-		Snapshot Published;
-		bool Snapshotted = false;
-
-		bool Enabled = false;
-		bool PendingEnabled = false;
-		bool MeasuringFrame = false;
-
-		double WindowStart = 0.0;
-		uint64_t WindowFrames = 0;
-		uint64_t FrameStartNanoseconds = 0;
-		uint64_t WindowFrameNanoseconds = 0;
-	};
-
-	// Closes its zone on every scope exit path.
-	struct ProfileScope {
-		explicit ProfileScope(std::string_view name) : Owner(Profiler::GetCurrent()) {
-			if (Owner) {
-				Owner->Begin(name);
-			}
-		}
-
-		~ProfileScope() {
-			if (Owner) {
-				Owner->End();
-			}
-		}
-
-		ProfileScope(const ProfileScope &) = delete;
-		ProfileScope &operator=(const ProfileScope &) = delete;
-
-	  private:
-		Profiler *Owner = nullptr;
-	};
-
-	void ProfilerCount(std::string_view name, uint64_t amount);
-
-#define G_PROFILE_JOIN2(a, b) a##b
-#define G_PROFILE_JOIN(a, b) G_PROFILE_JOIN2(a, b)
-#define G_PROFILE(name) ::gargantuan::ProfileScope G_PROFILE_JOIN(profileScope, __LINE__)(name)
+	// A span of time measured by hand rather than by a scope, plotted in
+	// milliseconds. The walks this exists for run hundreds of thousands of
+	// times a frame, where a zone per iteration would swamp both the trace and
+	// the thing being traced; they total their own nanoseconds and hand the sum
+	// over once.
+	void ProfilerCountTime(const char *name, uint64_t nanoseconds);
 } // namespace gargantuan

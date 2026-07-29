@@ -97,7 +97,7 @@ endif()
 # A clone without --recursive leaves the vendor folders empty, and the
 # add_subdirectory calls below then fail with "source directory does not contain
 # a CMakeLists.txt file", which says nothing about the actual problem.
-set(GARGANTUAN_VENDORED box3d glm json luau magicenum sdl spdlog)
+set(GARGANTUAN_VENDORED box3d glm json luau magicenum sdl spdlog tracy)
 
 find_package(Git QUIET)
 if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
@@ -134,6 +134,72 @@ add_subdirectory(vendor/json)
 add_subdirectory(vendor/luau)
 add_subdirectory(vendor/sdl)
 add_subdirectory(vendor/spdlog)
+
+# Tracing.
+#
+# The client is always compiled in. It collects nothing until Tracy's profiler
+# connects, which is what TRACY_ON_DEMAND buys: a build nobody is watching pays
+# an atomic read per zone and holds no buffers. Turn GARGANTUAN_TRACY off and
+# every G_PROFILE compiles to nothing at all.
+option(GARGANTUAN_TRACY "Compile in the Tracy client" ON)
+set(TRACY_ENABLE ${GARGANTUAN_TRACY} CACHE BOOL "" FORCE)
+set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
+# Traces leave the process over a socket. Refusing anything off this machine is
+# the right default for a profiler that is on in ordinary builds.
+set(TRACY_ONLY_LOCALHOST ON CACHE BOOL "" FORCE)
+add_subdirectory(vendor/tracy)
+
+# The viewer and the headless capture tool. Off by default because they are
+# their own programs with their own dependencies, and configuring them reaches
+# the network for whatever the system does not already have.
+#
+# ExternalProject rather than add_subdirectory: each is its own CMake project
+# and the two of them declare targets of the same names (TracyServer,
+# TracyCapstone, libzstd), so they cannot share a build tree with us or with
+# each other. Separate trees also keep their dependency downloads out of ours.
+#
+# They land in build/bin, which is where their own install rules put them.
+option(GARGANTUAN_TRACY_TOOLS "Build tracy-profiler and tracy-capture" OFF)
+if(GARGANTUAN_TRACY_TOOLS)
+	include(ExternalProject)
+
+	# The viewer picks its window backend at build time and defaults to
+	# Wayland. Nothing detects this at runtime, so an X11 session gets a binary
+	# that cannot open a window unless it is told now.
+	if(NOT WIN32 AND NOT APPLE AND NOT DEFINED ENV{WAYLAND_DISPLAY})
+		set(GARGANTUAN_TRACY_LEGACY ON)
+	else()
+		set(GARGANTUAN_TRACY_LEGACY OFF)
+	endif()
+
+	ExternalProject_Add(tracy-capture
+		SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/tracy/capture"
+		BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/tracy/capture"
+		CMAKE_ARGS
+			-DCMAKE_BUILD_TYPE=Release
+			-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}
+	)
+
+	ExternalProject_Add(tracy-profiler
+		SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/tracy/profiler"
+		BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/tracy/profiler"
+		CMAKE_ARGS
+			-DCMAKE_BUILD_TYPE=Release
+			-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}
+			-DLEGACY=${GARGANTUAN_TRACY_LEGACY}
+	)
+
+	# Turns a .tracy into per-zone totals on stdout, which is how two runs get
+	# compared without a window open. This is what the old markdown report was
+	# for, and it is Tracy's own tool rather than ours.
+	ExternalProject_Add(tracy-csvexport
+		SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/tracy/csvexport"
+		BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/tracy/csvexport"
+		CMAKE_ARGS
+			-DCMAKE_BUILD_TYPE=Release
+			-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}
+	)
+endif()
 
 file(GLOB_RECURSE GARGANTUAN_SOURCES CONFIGURE_DEPENDS
 	"src/*.cpp"
@@ -183,6 +249,7 @@ target_link_libraries(gargantuan
 		Luau.VM
 		Luau.Require
 		Luau.Config
+		Tracy::TracyClient
 )
 
 if(GARGANTUAN_SHADERC)
