@@ -185,6 +185,11 @@ namespace gargantuan {
 		}
 
 		signal->Fire(argumentVector);
+
+		for (int ref : *argumentVector) {
+			lua_unref(L, ref);
+		}
+
 		return 0;
 	}
 
@@ -255,7 +260,7 @@ namespace gargantuan {
 		// with nothing to say about which of them is spending it, and the
 		// answer is already sitting in the function's debug info.
 		std::string label;
-		if (Profiler *profiler = Profiler::GetCurrent(); profiler && profiler->IsEnabled()) {
+		if (G_PROFILE_ACTIVE()) {
 			lua_Debug info;
 			if (lua_getinfo(mainState, -1, "s", &info) && info.short_src) {
 				label = info.short_src;
@@ -271,9 +276,6 @@ namespace gargantuan {
 				label = "?";
 			}
 		}
-		// Outside the branch so the scope closes on every path out, and empty
-		// when the profiler is off, which Begin skips
-		ProfileScope scriptScope(label.empty() ? "Script" : label);
 
 		int arguments = signal->LPushArgument(mainState, value);
 		if (lua_pcall(mainState, arguments, 0, 0) != LUA_OK) {
