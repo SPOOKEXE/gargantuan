@@ -9,8 +9,7 @@
 //   shader:SetNumber("Strength", 1)
 //   camera:AddShader(shader)
 
-// Must match ComputeShader.ThreadGroupSize; SDL needs the counts to build the
-// pipeline and cannot read them back out of the bytecode
+// Must match ComputeShader.ThreadGroupSize; SDL requires counts at pipeline creation.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, rgba8) uniform readonly image2D SourceTexture;
@@ -28,8 +27,7 @@ layout(set = 2, binding = 1) uniform Params {
 void main() {
     ivec2 coordinate = ivec2(gl_GlobalInvocationID.xy);
 
-    // The dispatch is rounded up to whole thread groups, so the edge groups
-    // run past the image and have to be discarded
+    // Rounded-up dispatches must discard out-of-range edge invocations.
     if (coordinate.x >= int(builtin.Resolution.x) || coordinate.y >= int(builtin.Resolution.y)) {
         return;
     }

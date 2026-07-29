@@ -6,10 +6,7 @@
 //   transpose.Source = "transpose"
 //   camera:AddShader(transpose)
 //
-// NOTE: a camera's ping-pong textures are both the viewport's size, so a true
-// transpose only holds for a square viewport. On a non-square one the read is
-// clamped into range, which mirrors the overlapping square and leaves the rest
-// smeared. Give the camera a square ViewportSize if you want the real thing.
+// Exact only for square viewports; non-square reads clamp and smear overflow.
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 

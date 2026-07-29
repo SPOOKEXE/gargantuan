@@ -63,8 +63,7 @@ namespace gargantuan {
 		info.vertex_shader = VertexShader;
 		info.fragment_shader = FragmentShader;
 
-		// A pipeline that declares mesh attributes expects a vertex buffer to be
-		// bound; one generating geometry from gl_VertexIndex must declare none
+		// gl_VertexIndex pipelines must declare no mesh input.
 		if (VertexInputEnabled) {
 			info.vertex_input_state.vertex_attributes = Vertex::Attributes->data();
 			info.vertex_input_state.num_vertex_attributes = static_cast<Uint32>(Vertex::Attributes->size());
@@ -83,9 +82,7 @@ namespace gargantuan {
 
 		ColorTargets[0].format = ColorFormat;
 
-		// The same blend state on every attachment. A pass writing more than
-		// one writes measurements alongside its picture, and those are never
-		// blended, so the two have not yet needed to differ.
+		// All attachments share one blend state; measurement passes disable it.
 		for (size_t index = 0; index <= ExtraColorTargets; index++) {
 			auto &blend = ColorTargets[index].blend_state;
 			blend.enable_blend = BlendingEnabled;

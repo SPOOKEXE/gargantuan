@@ -21,84 +21,40 @@
 namespace gargantuan {
 	class Camera;
 
-	// Base for the shaders a Camera can run over its output.
-	//
-	// Source names a shader that glslc compiled at build time from
-	// assets/shaders, without the extension: "vignette" finds vignette.frag
-	// for a PostProcessShader and vignette.comp for a ComputeShader. The engine
-	// does not compile GLSL at runtime -- SDL's GPU API only accepts bytecode.
+	// Camera shader base. Source names a build-time asset without its extension.
+	// Runtime GLSL must be compiled to bytecode before SDL can use it.
 	class ShaderScript : public Instance {
 	  public:
 		static const ClassDefinition DEFINITION;
 
-		// One uniform buffer's worth of parameters is plenty, and keeping a
-		// bound means a bad script cannot grow it without limit
+		// Maximum parameter slots in one uniform buffer.
 		static constexpr size_t MAXIMUM_PARAMETERS = 64;
 
-		// Shader asset name, no extension and no directory. Ignored when Code
-		// has been set and compiled.
+		// Asset name without directory or extension; compiled Code takes precedence.
 		std::string Source;
 
-		// Forces this pass to be treated as producing a different picture every
-		// frame. Rarely needed by hand: a pass that reads builtin.Time is
-		// detected from its own SPIR-V, so noise, scanlines and tape wobble
-		// animate whether or not a script says anything.
-		//
-		// Left settable for the cases reflection cannot see -- a shader whose
-		// animation comes from somewhere the bytecode does not name -- and
-		// because it only ever forces the flag on. Turning it off cannot
-		// override what the shader was found to read, since that is how a pass
-		// freezes.
-		//
-		// NeedsRedrawEveryFrame is the answer the renderer acts on.
+		// Forces redraws; cannot override reflected builtin.Time reads.
 		bool RedrawEveryFrame = false;
 
-		// Whether this pass must run again even on a scene that has not moved:
-		// what RedrawEveryFrame was set to, or what the shader turned out to
-		// read, whichever says yes.
-		//
-		// It is the guard on the camera's cascading cache. Everything ahead of
-		// the first pass answering true is deterministic in its input, so on a
-		// still scene the engine reuses the image it kept from last time and
-		// starts work here instead of redrawing the world. A chain with none of
-		// these is cached whole, and a still scene costs nothing.
+		// True when forced or builtin.Time is read; guards the cascading frame cache.
 		bool NeedsRedrawEveryFrame();
-		// Whether the shader reads builtin.Time, read out of its SPIR-V.
-		// Declaring the Builtin block is not enough -- every shader declares
-		// the whole of it -- so this is about the members actually loaded.
+		// True only when SPIR-V loads builtin.Time, not merely declares it.
 		bool ReadsBuiltinTime();
 
-		// Forces the camera running this pass to offset its projection by a
-		// sub-pixel amount each frame, a different offset every time.
-		//
-		// That is what turns a temporal pass into antialiasing rather than a
-		// blur: each frame samples the scene at a slightly different point
-		// inside the pixel, so a pass blending frames together averages real
-		// coverage instead of the same aliased sample over and over. On its own
-		// it only makes the picture shimmer, which is why a camera jitters for a
-		// pass that asks and for no other.
-		//
-		// Rarely needed by hand, for the same reason RedrawEveryFrame is not: a
-		// pass that reads builtin.Jitter is detected from its own SPIR-V. It is
-		// here for a pass that wants the offset without reading the value.
-		//
-		// NeedsJitteredProjection is the answer the renderer acts on.
+		// Forces per-frame sub-pixel projection jitter; reflected Jitter reads also force it.
 		bool JitterProjection = false;
 
 		bool NeedsJitteredProjection();
 		// Whether the shader reads builtin.Jitter, read out of its SPIR-V
 		bool ReadsBuiltinJitter();
 
-		// GLSL source compiled at runtime. Setting it marks the script dirty;
-		// Compile() then turns it into bytecode, or fills CompileError.
+		// Runtime GLSL; Compile() produces bytecode or CompileError.
 		std::string GetCode() const;
 		void SetCode(std::string code);
 
-		// Compiles Code, returning whether it worked. The diagnostics land in
-		// CompileError either way, so warnings survive a success.
+		// Compiles Code; CompileError retains diagnostics, including warnings.
 		bool Compile();
-		// Compiles without keeping the result, for checking a shader before
-		// handing it to a camera
+		// Compiles for validation without retaining bytecode.
 		bool Validate();
 		std::string GetCompileError() const;
 
@@ -108,46 +64,27 @@ namespace gargantuan {
 		// Bumped every time the bytecode changes, so the renderer knows when to
 		// rebuild the pipeline it cached
 		uint64_t GetRevision() const;
-		// Unique for the run, and never reused. The renderer keys its pipeline
-		// cache on this rather than on the address, because a destroyed script
-		// frees an address a later one can be handed straight back -- and
-		// revisions start again from zero with it, so the two together would
-		// name a cache entry belonging to a shader that no longer exists.
+		// Process-unique, never reused; prevents pipeline-cache aliasing after destruction.
 		uint64_t GetSerial() const;
 
 		// Which stage this kind of shader compiles as
 		virtual ShaderCompiler::Stage GetStage() const = 0;
 
-		// Each parameter occupies one 16-byte slot, which is what std140 wants
-		// for a vec4 anyway. Slots are ordered by when the parameter was first
-		// set, so a shader's uniform block members must be declared in that
-		// same order; ListParameters reports it.
+		// Parameters use 16-byte std140 slots in first-set order.
 		void SetNumber(std::string name, float value);
 		void SetVector2(std::string name, Vector2 value);
 		void SetVector3(std::string name, glm::vec3 value);
 		void SetColor3(std::string name, Color3 value);
 		void SetBool(std::string name, bool value);
-		// Images the shader can sample alongside the camera's own output. They
-		// are bound in the order they were first set, starting at sampler slot
-		// 1 because slot 0 is always SourceTexture.
+		// Images bind in first-set order after SourceTexture at sampler slot 0.
 		static constexpr size_t MAXIMUM_IMAGES = 8;
 
 		void SetImage(std::string name, std::shared_ptr<EditableImage> image);
 		std::shared_ptr<EditableImage> GetImage(std::string name) const;
-		// Binds another camera's rendered output straight from the GPU, with no
-		// trip through the CPU. That camera has to have rendered already this
-		// frame, which offscreen cameras do before the window one.
+		// Binds another camera's GPU output; that camera must render first.
 		void SetCameraTexture(std::string name, std::shared_ptr<Camera> camera);
 		std::shared_ptr<Camera> GetCameraTexture(std::string name) const;
-		// Binds one of the buffers the renderer keeps for whichever camera is
-		// running this pass -- its own last frame, or its motion vectors --
-		// rather than a texture the script names.
-		//
-		// The camera is not named because it cannot be: the antialias pass is
-		// one shared script that runs on every camera with Antialiasing on, so
-		// "my own history" is the only way it can say what it means. Asking is
-		// also what makes the engine produce the buffer at all; a camera nothing
-		// asks pays for neither.
+		// Binds a buffer owned by the camera running the pass; requesting it enables production.
 		void SetRenderTexture(std::string name, Enums::RenderTexture texture);
 		Enums::RenderTexture GetRenderTexture(std::string name) const;
 		std::vector<std::string> ListImages();
@@ -164,9 +101,7 @@ namespace gargantuan {
 		std::vector<std::shared_ptr<EditableImage>> GetImages() const;
 		std::vector<TextureSource> GetTextureSources() const;
 
-		// Names the shader actually declares, read out of its SPIR-V. Empty
-		// until the shader has been reflected, which Compile and Validate do,
-		// and which happens automatically for a named asset.
+		// SPIR-V names. Compile/Validate reflect runtime code; assets reflect lazily.
 		std::vector<std::string> GetExpectedParameters();
 		// Reads the shader's declared layout. Safe to call repeatedly.
 		bool Reflect();
@@ -177,8 +112,7 @@ namespace gargantuan {
 		std::vector<std::string> ListParameters();
 		void ClearParameters();
 
-		// Bound by hand rather than through the generic wrapper, so setting a
-		// name the shader never declared can be reported as an error
+		// Manual bindings validate names against reflection.
 		static int LSetNumber(lua_State *L, Instance *instance);
 		static int LSetVector2(lua_State *L, Instance *instance);
 		static int LSetVector3(lua_State *L, Instance *instance);
@@ -211,10 +145,7 @@ namespace gargantuan {
 		ShaderReflection::BlockLayout DeclaredParameters;
 		bool Reflected = false;
 
-		// Asking costs a file read for a shader that came from an asset, and
-		// the renderer asks once a frame, so the answer is kept until the
-		// bytecode changes under it. Checked separately from Reflected because
-		// a shader with no parameter block at all still has to be answered for.
+		// Cached until bytecode changes; independent of parameter-block reflection.
 		bool ReadsTime = false;
 		bool ReadsJitter = false;
 		bool BuiltinsChecked = false;

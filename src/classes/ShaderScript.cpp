@@ -1,6 +1,5 @@
 #include "gargantuan/classes/ShaderScript.hpp"
-// Camera.hpp includes this header back, so it is pulled in here rather than
-// there; SetCameraTexture needs the complete type to marshal it
+// Kept here to break the Camera.hpp cycle while providing the complete type.
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/render/Shader.hpp"
 #include "gargantuan/render/ShaderPresets.hpp"
@@ -11,8 +10,7 @@
 #include <algorithm>
 #include <lualib.h>
 
-// A shader's parameters and texture bindings are named the same way whatever
-// their type, so the two signatures are written once here
+// Shared reflected signatures for parameter and texture names.
 #define G_SHADER_NAME_TYPE "string | Enum.ShaderProperty"
 #define SET_SIGNATURE(valueType) "(self, name: " G_SHADER_NAME_TYPE ", value: " valueType "): ()"
 #define GET_SIGNATURE(returnType) "(self, name: " G_SHADER_NAME_TYPE "): " returnType
@@ -84,9 +82,7 @@ namespace gargantuan {
 				},
 			},
 		.Methods = {
-			// Every name here reads through CheckShaderPropertyArgument, so it
-			// takes a plain string as well as an Enum.ShaderProperty item; a
-			// shader compiled from Code declares names no enum could know
+			// Names accept strings or ShaderProperty; runtime shaders may add names.
 			{"SetNumber", {&ShaderScript::LSetNumber, []() -> std::string { return SET_SIGNATURE("number"); }}},
 			{"SetVector2", {&ShaderScript::LSetVector2, []() -> std::string { return SET_SIGNATURE("Vector2"); }}},
 			{"SetVector3", {&ShaderScript::LSetVector3, []() -> std::string { return SET_SIGNATURE("Vector3"); }}},
@@ -125,15 +121,13 @@ namespace gargantuan {
 		}
 
 		Code = std::move(code);
-		// The declared parameters, and what the old code was found to read,
-		// both belong to the code being replaced
+		// Invalidate reflection derived from the replaced code.
 		Reflected = false;
 		DeclaredParameters = {};
 		BuiltinsChecked = false;
 		ReadsTime = false;
 		ReadsJitter = false;
-		// The old bytecode no longer matches the source, so drop it and make
-		// the renderer notice
+		// Drop stale bytecode and invalidate the renderer's pipeline key.
 		Bytecode.clear();
 		CompileError.clear();
 		Revision++;
@@ -194,9 +188,7 @@ namespace gargantuan {
 	}
 
 	namespace {
-		// Rejects a name the shader never declared, listing what it does take.
-		// Only enforced once the layout is known; before that anything goes,
-		// because the shader may not have been compiled yet.
+		// Enforce declared names only after reflection succeeds.
 		ShaderScript *CheckParameterName(lua_State *L, Instance *instance, const std::string &name) {
 			auto *shader = instance->Cast<ShaderScript>();
 			if (!shader) {
@@ -271,8 +263,7 @@ namespace gargantuan {
 	}
 
 	namespace {
-		// Texture bindings are keyed by name for ordering only, so unlike a
-		// parameter there is nothing reflected to check the name against
+		// Texture names preserve binding order but are not reflected here.
 		ShaderScript *CheckShader(lua_State *L, Instance *instance) {
 			auto *shader = instance->Cast<ShaderScript>();
 			if (!shader) {
@@ -338,8 +329,7 @@ namespace gargantuan {
 			return DeclaredParameters.Found;
 		}
 
-		// Runtime code is already in hand; a named asset has to be read back off
-		// disk, the same file the renderer would load
+		// Runtime bytecode is in memory; named assets are reflected from disk.
 		if (HasBytecode()) {
 			DeclaredParameters = ShaderReflection::ReflectUniformBlock(Bytecode.data(), Bytecode.size(), 1);
 			CheckBuiltins(Bytecode.data(), Bytecode.size());
@@ -348,8 +338,7 @@ namespace gargantuan {
 		}
 
 		if (Source.empty()) {
-			// Nothing to read now and nothing that would arrive later without
-			// going through SetCode or Source, both of which clear this again
+			// No source can appear without invalidating this result.
 			BuiltinsChecked = true;
 			return false;
 		}
@@ -358,17 +347,14 @@ namespace gargantuan {
 		SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
 		std::string bytecodeExtension, entrypoint;
 
-		// Without a GPU there is no way to know which bytecode flavour to read,
-		// so assume SPIR-V, which is what the build produces everywhere but Apple
+		// Reflection reads build-produced SPIR-V; Apple uses another runtime format.
 		bytecodeExtension = ".spv";
 
 		auto path = GetShaderPath(Source + stageExtension).string() + bytecodeExtension;
 		size_t size = 0;
 		void *code = SDL_LoadFile(path.c_str(), &size);
 		if (!code) {
-			// A name that does not resolve will not start resolving on its own,
-			// and the renderer asks once a frame; retrying the read every time
-			// would turn a typo into a per-frame file miss
+			// Cache unresolved assets to avoid a file miss each frame.
 			BuiltinsChecked = true;
 			return false;
 		}
@@ -381,9 +367,7 @@ namespace gargantuan {
 	}
 
 	void ShaderScript::CheckBuiltins(const void *spirv, size_t bytes) {
-		// Binding 0 in the shader's own uniform set, which is where the engine
-		// puts Resolution and Time. A sampler can sit at binding 0 of another
-		// set, so the reflection matches on storage class as well.
+		// Builtins use uniform binding 0; reflection also checks storage class.
 		auto usage = ShaderReflection::ReflectBlockUsage(spirv, bytes, 0);
 		ReadsTime = usage.Reads("Time");
 		ReadsJitter = usage.Reads("Jitter");
@@ -405,14 +389,12 @@ namespace gargantuan {
 	}
 
 	bool ShaderScript::NeedsRedrawEveryFrame() {
-		// The script's flag only ever forces it on, so a shader found to read
-		// Time animates whatever the script says
+		// Reflection can force redraws; the script flag cannot suppress them.
 		return RedrawEveryFrame || ReadsBuiltinTime();
 	}
 
 	bool ShaderScript::NeedsJitteredProjection() {
-		// Same rule as RedrawEveryFrame: the flag forces it on, and a shader
-		// found to read the offset gets it whether or not a script asked
+		// Reflection can force jitter; the script flag cannot suppress it.
 		return JitterProjection || ReadsBuiltinJitter();
 	}
 
@@ -443,8 +425,7 @@ namespace gargantuan {
 			return;
 		}
 
-		// Silently growing past the uniform buffer would corrupt the ones that
-		// fit, so refuse the new parameter instead
+		// Refuse overflow rather than corrupting the fixed uniform buffer.
 		if (ParameterOrder.size() >= MAXIMUM_PARAMETERS) {
 			return;
 		}
@@ -475,8 +456,7 @@ namespace gargantuan {
 	}
 
 	namespace {
-		// Replacing a binding keeps its position, so the ones after it do not
-		// silently shift to a different sampler slot
+		// Replacement preserves sampler position.
 		bool AssignTextureSource(
 			std::vector<std::string> &order,
 			std::unordered_map<std::string, ShaderScript::TextureSource> &sources,

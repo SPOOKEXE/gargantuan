@@ -58,9 +58,7 @@ namespace gargantuan {
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(context.Commands, nullptr, 0, &depthTarget);
 			SDL_BindGPUGraphicsPipeline(pass, Pipeline);
 
-			// The wider of the two lists: a caster off screen still belongs here
-			// when the shadow it throws lands in the picture. Already filtered
-			// by CastShadow when the walk built it.
+			// Includes offscreen casters whose shadows reach view; already filtered.
 			std::vector<BasePart *> everything;
 			const std::vector<BasePart *> *castList = nullptr;
 			if (context.Visible) {

@@ -68,7 +68,7 @@ namespace gargantuan {
 				<< " ms/frame&#10;" << Fixed(zone.CallsPerFrame, 1) << " calls/frame\"><span>"
 				<< Escape(zone.Name) << "</span></div>\n";
 
-			// End to end inside the parent; the gap left is its own time
+			// Pack children in tree order; the trailing gap is parent self-time.
 			double childOffset = offset;
 			for (size_t child : zone.Children) {
 				WriteHtmlZone(out, snapshot, child, childOffset);
@@ -145,7 +145,7 @@ namespace gargantuan {
 			<< " frames averaged over " << Fixed(snapshot.Seconds, 2) << " s &middot; widths are share of a frame"
 			<< "</p>\n";
 
-		// One chart per root: the roots are not slices of each other
+		// Render roots separately; they are not sibling time slices.
 		for (size_t root : snapshot.Roots) {
 			const Profiler::Zone &zone = snapshot.Zones[root];
 

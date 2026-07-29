@@ -4,7 +4,7 @@
 #include <SDL3/SDL.h>
 #include <filesystem>
 
-// The one translation unit that compiles stb_image itself
+// Sole stb_image implementation unit.
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_STDIO
 #define STBI_FAILURE_USERMSG

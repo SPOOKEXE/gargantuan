@@ -1,12 +1,6 @@
 #version 450
 
-// Built-in antialiasing, an FXAA-style edge blur. Cameras run this last unless
-// Camera.Antialiasing is turned off, and it can also be added by hand as a
-// PostProcessShader with Source = "antialias".
-//
-// It leaves flat areas bit-for-bit untouched: where the local contrast is below
-// the threshold the original sample is returned unchanged, so only edges move.
-// That matters because a camera's picture is often read back and compared.
+// FXAA-style final pass. Flat areas below threshold remain bit-for-bit unchanged.
 
 layout(location = 0) in vec2 FragmentUV;
 layout(location = 0) out vec4 OutputColor;
@@ -48,8 +42,7 @@ void main() {
         return;
     }
 
-    // Blur along the edge rather than across it: whichever direction has the
-    // larger luma gradient is the one to step perpendicular to
+    // Step perpendicular to the larger luma gradient, along the edge.
     float horizontal = abs(lumaWest + lumaEast - 2.0 * lumaCentre);
     float vertical = abs(lumaNorth + lumaSouth - 2.0 * lumaCentre);
     vec2 direction = vertical >= horizontal ? vec2(texel.x, 0.0) : vec2(0.0, texel.y);

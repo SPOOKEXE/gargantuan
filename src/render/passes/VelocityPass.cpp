@@ -9,16 +9,8 @@
 #include <memory>
 
 namespace gargantuan {
-	// Draws the scene again, writing where each pixel came from and how far
-	// away it is. Only recorded for a camera whose chain asked for one of them.
-	//
-	// Both attachments always: the depth is the w a perspective projection has
-	// already produced, so splitting them would mean drawing twice to save
-	// writing one float.
-	//
-	// A separate pass rather than a second target on the opaque one, because a
-	// SurfaceShader replaces that fragment stage entirely and would leave the
-	// second attachment undefined.
+	// Writes velocity and view depth together when requested. Kept separate
+	// because SurfaceShader replaces the opaque fragment stage.
 	class VelocityPass final : public RenderPass {
 	  public:
 		struct alignas(16) WorldUniforms {
@@ -46,10 +38,7 @@ namespace gargantuan {
 						   .SetColorEnabled(true)
 						   .SetColorFormat(RenderProvider::VELOCITY_FORMAT)
 						   .AddColorFormat(RenderProvider::VIEW_DEPTH_FORMAT)
-						   // Both are measurements, not pictures: blending a
-						   // transparent part's motion or distance into the one
-						   // behind it would average two answers into a third
-						   // that is neither
+						   // Blending would invent motion and depth values.
 						   .SetBlendingEnabled(false)
 						   .SetDepthEnabled(true)
 						   .SetDepthFormat(SDL_GPU_TEXTUREFORMAT_D16_UNORM)
@@ -58,16 +47,14 @@ namespace gargantuan {
 
 		SDL_GPURenderPass *Draw(SDL_GPUDevice *gpu, FrameContext &context) override {
 			SDL_GPUColorTargetInfo colorTargets[2] = {
-				// Zero is "did not move": an empty pixel reads the same place
-				// in its history and the other tests decide
+				// Empty pixels report no motion.
 				{
 					.texture = context.VelocityTarget,
 					.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f},
 					.load_op = SDL_GPU_LOADOP_CLEAR,
 					.store_op = SDL_GPU_STOREOP_STORE,
 				},
-				// The far plane is how far away nothing is. Zero would put the
-				// background in front of everything.
+				// Empty pixels lie at the far plane.
 				{
 					.texture = context.ViewDepthTarget,
 					.clear_color = SDL_FColor{Camera::FAR_PLANE, 0.0f, 0.0f, 0.0f},
@@ -76,8 +63,7 @@ namespace gargantuan {
 				},
 			};
 
-			// The opaque pass threw its depth away when it finished, so this
-			// starts from a clear of its own rather than reusing what is there
+			// Opaque discards depth, so this pass clears its own.
 			SDL_GPUDepthStencilTargetInfo depthTarget{
 				.texture = context.DepthTexture,
 				.clear_depth = 1.0f,
@@ -90,14 +76,11 @@ namespace gargantuan {
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(context.Commands, colorTargets, 2, &depthTarget);
 			SDL_BindGPUGraphicsPipeline(pass, Pipeline);
 
-			// Unjittered on both sides: the offset describes how the picture
-			// was sampled, not where anything is
+			// Motion uses unjittered matrices; jitter changes sampling, not position.
 			glm::mat4 viewProjection = context.Camera->GetProjectionMatrix() * context.Camera->GetViewMatrix();
 			WorldUniforms worldUniforms{
 				.ViewProjection = viewProjection,
-				// Before the first draw there is no previous frame; standing
-				// still against itself reports no motion, which is what a
-				// camera that has only ever existed at one place should say
+				// First draw compares against itself and reports no motion.
 				.PreviousViewProjection =
 					context.Camera->HasPreviousViewProjection ? context.Camera->PreviousViewProjection : viewProjection,
 			};

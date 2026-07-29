@@ -24,7 +24,7 @@ namespace gargantuan::ShaderReflection {
 		constexpr uint16_t OP_DECORATE = 71;
 		constexpr uint16_t OP_MEMBER_DECORATE = 72;
 
-		// Enough to follow a `builtin.Time` read back to the member it names
+		// Opcodes needed to trace builtin member reads.
 		constexpr uint16_t OP_CONSTANT = 43;
 		constexpr uint16_t OP_LOAD = 61;
 		constexpr uint16_t OP_ACCESS_CHAIN = 65;
@@ -49,7 +49,7 @@ namespace gargantuan::ShaderReflection {
 			uint32_t Stride = 0;
 		};
 
-		// Reads a NUL-terminated, word-padded SPIR-V literal string
+		// Read a NUL-terminated, word-padded SPIR-V literal.
 		std::string ReadString(const uint32_t *words, size_t wordCount, size_t &at) {
 			std::string text;
 			while (at < wordCount) {
@@ -99,7 +99,7 @@ namespace gargantuan::ShaderReflection {
 			uint16_t opcode = (uint16_t)(instruction & 0xFFFF);
 			uint16_t length = (uint16_t)(instruction >> 16);
 
-			// A zero length would spin forever on a malformed module
+			// Reject malformed lengths that would stall or overrun parsing.
 			if (length == 0 || at + length > wordCount) {
 				break;
 			}
@@ -206,8 +206,7 @@ namespace gargantuan::ShaderReflection {
 			at += length;
 		}
 
-		// Find the uniform variable sitting at the requested binding, and walk
-		// its pointer back to the struct type it points at
+		// Resolve the requested uniform binding to its struct type.
 		uint32_t blockStruct = 0;
 		for (const auto &[variableId, pointerAndStorage] : variables) {
 			auto bindingIt = variableBindings.find(variableId);
@@ -230,7 +229,7 @@ namespace gargantuan::ShaderReflection {
 			return layout;
 		}
 
-		// How many bytes a member's own type occupies
+		// Compute the reflected member size.
 		std::function<uint32_t(uint32_t, uint32_t)> sizeOf = [&](uint32_t typeId, uint32_t stride) -> uint32_t {
 			auto it = types.find(typeId);
 			if (it == types.end()) {
@@ -248,8 +247,7 @@ namespace gargantuan::ShaderReflection {
 				// std140 pads every column out to the matrix stride
 				return (stride ? stride : 16) * type.ComponentCount;
 			default:
-				// Anything else is treated as one full slot, which is the most
-				// a Set* call ever writes
+				// Unknown types conservatively occupy one writable slot.
 				return 16;
 			}
 		};
@@ -415,9 +413,7 @@ namespace gargantuan::ShaderReflection {
 		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> variables;
 		std::unordered_map<uint32_t, uint32_t> constants;
 
-		// SPIR-V puts names, decorations, types and globals ahead of the
-		// function bodies, so the structure is known by the time the second
-		// pass reaches the code that reads it
+		// First pass records declarations; the second follows reads.
 		for (size_t at = HEADER_WORDS; at < wordCount;) {
 			uint32_t instruction = words[at];
 			uint16_t opcode = (uint16_t)(instruction & 0xFFFF);
@@ -469,9 +465,7 @@ namespace gargantuan::ShaderReflection {
 			at += length;
 		}
 
-		// The same walk ReflectUniformBlock makes: binding alone is ambiguous,
-		// since a sampler can sit at binding 0 of another set, so the storage
-		// class and a struct pointee are what actually identify the block
+		// Identify the block by binding, uniform storage class, and struct pointee.
 		uint32_t blockVariable = 0;
 		uint32_t blockStruct = 0;
 		for (const auto &[variableId, pointerAndStorage] : variables) {
@@ -505,8 +499,7 @@ namespace gargantuan::ShaderReflection {
 			}
 		};
 
-		// Ids that stand for the block itself, so a copy of the pointer is
-		// followed rather than losing the trail
+		// Track block-pointer aliases through copies.
 		std::unordered_set<uint32_t> aliases{blockVariable};
 
 		for (size_t at = HEADER_WORDS; at < wordCount;) {
@@ -528,8 +521,7 @@ namespace gargantuan::ShaderReflection {
 					break;
 				}
 
-				// A chain into the block with no index at all aliases the whole
-				// thing rather than selecting a member
+				// An unindexed chain aliases the whole block.
 				if (operandCount < 4) {
 					aliases.insert(operands[1]);
 					break;
@@ -537,14 +529,12 @@ namespace gargantuan::ShaderReflection {
 
 				auto constantIt = constants.find(operands[3]);
 				if (constantIt == constants.end()) {
-					// A computed member index cannot be pinned to one member,
-					// so every member has to count as read
+					// Computed indices conservatively read every member.
 					readEverything();
 					break;
 				}
 
-				// An unnamed member cannot be matched by name either way, so
-				// there is nothing to record for one
+				// Unnamed members cannot be reported by name.
 				auto nameIt = names.find(constantIt->second);
 				if (nameIt != names.end()) {
 					usage.ReadMembers.insert(nameIt->second);

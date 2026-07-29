@@ -10,8 +10,7 @@
 namespace gargantuan::ShaderReflection {
 	struct Member {
 		uint32_t Offset = 0;
-		// Bytes the member occupies. Writes are clamped to this so setting a
-		// float cannot spill into whatever follows it.
+		// Write bound in bytes; prevents spill into the next member.
 		uint32_t Size = 0;
 	};
 
@@ -26,19 +25,10 @@ namespace gargantuan::ShaderReflection {
 		const Member *Find(const std::string &name) const;
 	};
 
-	// Reads the uniform block at `binding` out of a SPIR-V module. Gargantuan
-	// puts a shader's own parameters at binding 1, with the engine builtins at
-	// binding 0.
-	//
-	// Reflecting rather than trusting declaration order is what lets
-	// SetNumber("Intensity", ...) land on the member actually called
-	// Intensity, whatever position it sits in.
+	// Reflects a SPIR-V uniform block by binding and declared member name.
 	BlockLayout ReflectUniformBlock(const void *spirv, size_t bytes, uint32_t binding);
 
-	// What a shader actually asks the pipeline for. Building a pipeline from
-	// these rather than from a guess means a shader that declares two samplers
-	// gets two, and a script that supplies the wrong number is told so instead
-	// of failing somewhere inside the driver.
+	// Reflected resource counts used to build the exact pipeline layout.
 	struct ResourceCounts {
 		// sampler2D and friends
 		uint32_t SampledImages = 0;
@@ -52,26 +42,15 @@ namespace gargantuan::ShaderReflection {
 
 	ResourceCounts ReflectResources(const void *spirv, size_t bytes);
 
-	// Which members of the block at `binding` a shader actually reads, as
-	// opposed to merely declares. The two differ constantly: every gargantuan
-	// shader declares the whole Builtin block because it is one layout, and
-	// most of them only ever touch Resolution.
-	//
-	// Reading is what matters for the frame cache. A pass that reads Time
-	// paints a different picture every frame and can never be cached; one that
-	// only reads Resolution is as still as the scene it draws.
+	// Members actually read from the block; declarations alone do not invalidate caching.
 	struct BlockUsage {
 		std::unordered_set<std::string> ReadMembers;
-		// False when the SPIR-V could not be read, or had no block at that
-		// binding. Both mean nothing is known to be read, which is the same
-		// answer the engine had before it looked.
+		// False when SPIR-V is unreadable or the binding has no block.
 		bool Found = false;
 
 		bool Reads(const std::string &name) const;
 	};
 
-	// Conservative upwards: an access it cannot follow counts as reading
-	// everything, because over-reporting costs a cache that was not needed
-	// while under-reporting freezes the picture.
+	// Unresolved accesses conservatively mark every member read to prevent stale frames.
 	BlockUsage ReflectBlockUsage(const void *spirv, size_t bytes, uint32_t binding);
 }

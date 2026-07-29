@@ -28,16 +28,12 @@ namespace gargantuan::ShaderCompiler {
 			return ".frag";
 		}
 
-		// Shell metacharacters in a path would let a filename run commands, so
-		// every path handed to the shell is quoted and any quote escaped.
-		// cmd.exe has no single-quoting and its own escaping rules, hence the
-		// split.
+		// Quote untrusted paths with platform-specific shell rules.
 		std::string QuoteForShell(const std::string &value) {
 #ifdef _WIN32
 			std::string quoted = "\"";
 			for (char character : value) {
-				// cmd.exe cannot quote these at all; a path containing one is
-				// refused rather than passed through
+				// Drop characters this cmd.exe quoting scheme cannot represent safely.
 				if (character == '"' || character == '%' || character == '\n') {
 					continue;
 				}
@@ -78,8 +74,7 @@ namespace gargantuan::ShaderCompiler {
 			return directory;
 		}
 
-		// FNV-1a over the source and stage. Two different shaders colliding
-		// would serve the wrong bytecode, so the stage is folded in too.
+		// FNV-1a cache key covers source and stage.
 		std::string CacheKey(const std::string &source, Stage stage) {
 			uint64_t hash = 1469598103934665603ull;
 			auto mix = [&hash](unsigned char byte) {
@@ -203,8 +198,7 @@ namespace gargantuan::ShaderCompiler {
 #ifdef GARGANTUAN_HAVE_SHADERC
 		return true;
 #else
-		// Probing spawns a process, so remember the answer per command rather
-		// than paying for it on every compile
+		// Cache the process probe per compiler command.
 		static std::string probedCommand;
 		static bool probedResult = false;
 
@@ -274,8 +268,7 @@ namespace gargantuan::ShaderCompiler {
 							  QuoteForShell(outputPath.string()) + " 2> " + QuoteForShell(errorPath.string());
 		int status = std::system(command.c_str());
 
-		// glslc reports errors on stderr with real line numbers, so pass them
-		// straight through rather than inventing our own
+		// Preserve glslc stderr and source line numbers.
 		std::string diagnostics;
 		{
 			std::ifstream errorFile{errorPath, std::ios::binary};
@@ -286,8 +279,7 @@ namespace gargantuan::ShaderCompiler {
 			}
 		}
 
-		// The compiler names the scratch file it was given; swap that for the
-		// shader's own name so the reported errors mean something to a script
+		// Replace scratch paths with the shader name in diagnostics.
 		std::string scratchName = sourcePath.string();
 		for (size_t at = diagnostics.find(scratchName); at != std::string::npos;
 			 at = diagnostics.find(scratchName, at + name.size())) {

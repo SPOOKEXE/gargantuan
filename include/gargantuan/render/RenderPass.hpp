@@ -15,19 +15,14 @@ namespace gargantuan {
 		std::shared_ptr<WorldRoot> WorldRoot;
 		std::shared_ptr<Camera> Camera;
 
-		// Direction TOWARDS the light. Defaults to a fixed afternoon sun so a
-		// draw without a Lighting service still shades sensibly.
+		// Points toward the light; default preserves lighting without a service.
 		glm::vec3 LightDirection = glm::normalize(glm::vec3(0.75f, 1.0f, 0.5f));
 
-		// Reuse the existing target when this camera's cadence skips a frame.
+		// Reuse the target when camera cadence skips this frame.
 		bool NotDueYet = false;
 	};
 
-	// What one camera's frustum walk found, kept rather than discarded so the
-	// passes can submit what is on screen instead of the whole world.
-	//
-	// Two sets: the opaque pass wants what lands in the picture, the shadow
-	// pass also wants what is off screen but throwing a shadow into it.
+	// One camera's cached frustum result. Shadows include offscreen casters.
 	struct VisibleSet {
 		uint64_t Signature = 0;
 		uint64_t SceneStamp = 0;
@@ -37,10 +32,7 @@ namespace gargantuan {
 		std::unordered_set<const BasePart *> InView;
 		std::unordered_set<const BasePart *> ShadowsIntoView;
 
-		// The same two answers as flat lists, so a pass walks what it draws
-		// instead of walking the world and paying a hash lookup per part that
-		// is not there. Kept as well as the sets, since the redraw check does
-		// ask about one part at a time.
+		// Lists serve passes; sets serve per-part redraw checks.
 		std::vector<BasePart *> InViewList;
 		std::vector<BasePart *> ShadowList;
 
@@ -55,8 +47,7 @@ namespace gargantuan {
 	struct FrameContext : DrawContext {
 		SDL_GPUCommandBuffer *Commands;
 
-		// Where the opaque pass draws. Either the window's swapchain texture
-		// or an offscreen camera target, so passes must not assume a window.
+		// Swapchain or offscreen target; passes must not assume a window.
 		SDL_GPUTexture *ColorTarget;
 		SDL_GPUTexture *DepthTexture;
 
@@ -64,10 +55,7 @@ namespace gargantuan {
 		SDL_GPUSampler *ShadowSampler;
 		glm::mat4 ShadowMatrix;
 
-		// Where motion vectors and view distances go. Null unless the chain
-		// asked for one of them, and the velocity pass is only recorded when
-		// they are set: drawing the scene twice for buffers nothing reads is
-		// not worth it. Set together, because one pass writes both.
+		// Both null or both set; one optional pass writes both measurements.
 		SDL_GPUTexture *VelocityTarget = nullptr;
 		SDL_GPUTexture *ViewDepthTarget = nullptr;
 
@@ -80,8 +68,7 @@ namespace gargantuan {
 		const SDL_GPUTextureSamplerBinding *SurfaceSamplers = nullptr;
 		uint32_t SurfaceSamplerCount = 0;
 
-		// Resolved once per frame: which texture, if any, each part shows on
-		// its surface. Parts absent from the map use WhiteTexture.
+		// Resolved once per frame; missing parts use WhiteTexture.
 		const std::unordered_map<const BasePart *, SDL_GPUTexture *> *PartTextures = nullptr;
 		SDL_GPUTexture *WhiteTexture = nullptr;
 		SDL_GPUSampler *SurfaceTextureSampler = nullptr;

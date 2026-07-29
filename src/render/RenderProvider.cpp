@@ -1,4 +1,3 @@
-// #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
 #include <algorithm>
 #include <cmath>
@@ -95,12 +94,10 @@ namespace gargantuan {
 	void RenderProvider::BeginFrame(int maximumFramesInFlight) {
 		RedrawnThisFrame.clear();
 		VelocityInUse = false;
-		// Only moves here, so everything recorded between this and EndFrame
-		// counts as the same frame and is safe from eviction
+		// Fixed through EndFrame so current-frame resources cannot be evicted.
 		FrameIndex++;
 
-		// Zero would mean nothing is ever waited on, which is the unbounded
-		// backlog this whole mechanism exists to stop
+		// Clamp to one to prevent an unbounded backlog.
 		size_t maximum = (size_t)glm::max(maximumFramesInFlight, 1);
 		while (FramesInFlight.size() >= maximum) {
 			RetireFrame(FramesInFlight.front());
@@ -109,9 +106,7 @@ namespace gargantuan {
 	}
 
 	void RenderProvider::EndFrame() {
-		// Every camera has had its turn, so this frame's positions are now the
-		// previous ones. Doing it here rather than as each camera draws is what
-		// makes them all measure motion against the same frame.
+		// Stamp after all cameras so motion shares one previous frame.
 		StampPreviousTransforms();
 
 		if (!FrameFences.empty()) {
@@ -121,8 +116,7 @@ namespace gargantuan {
 	}
 
 	void RenderProvider::SubmitTracked(SDL_GPUCommandBuffer *commands) {
-		// Falling back to a plain submit keeps the picture correct if a fence
-		// cannot be had; only the pacing is lost
+		// Fence failure loses pacing, not the submitted picture.
 		if (SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands)) {
 			FrameFences.push_back(fence);
 		}
@@ -131,7 +125,7 @@ namespace gargantuan {
 	void RenderProvider::Destroy() {
 		SDL_WaitForGPUIdle(Gpu);
 
-		// The GPU is idle, so every fence has signalled and only needs releasing
+		// GPU idle guarantees every fence has signalled.
 		for (auto &fences : FramesInFlight) {
 			for (auto *fence : fences) {
 				SDL_ReleaseGPUFence(Gpu, fence);
@@ -143,7 +137,7 @@ namespace gargantuan {
 		}
 		FrameFences.clear();
 
-		// Anything still waiting on a fence will never be resumed now
+		// Pending readbacks cannot resume after teardown.
 		for (auto &pending : PendingRenders) {
 			if (pending.Fence) SDL_ReleaseGPUFence(Gpu, pending.Fence);
 			if (pending.TransferBuffer) SDL_ReleaseGPUTransferBuffer(Gpu, pending.TransferBuffer);
@@ -257,8 +251,7 @@ namespace gargantuan {
 		CameraTargets.erase(it);
 	}
 
-	// Camera targets double as shader inputs and outputs, so they need every
-	// usage the chain might ask of them
+	// Camera targets serve every shader-chain input and output role.
 	static constexpr SDL_GPUTextureUsageFlags CAMERA_TARGET_USAGE =
 		SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER |
 		SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
@@ -322,7 +315,7 @@ namespace gargantuan {
 			target.ScratchTexture = SDL_CreateGPUTexture(Gpu, &colorInfo);
 		}
 
-		// Must match the depth format the opaque pipeline was built with
+		// Must match the opaque pipeline's depth format.
 		SDL_GPUTextureCreateInfo depthInfo{
 			.type = SDL_GPU_TEXTURETYPE_2D,
 			.format = SDL_GPU_TEXTUREFORMAT_D16_UNORM,
@@ -359,9 +352,7 @@ namespace gargantuan {
 				return nullptr;
 			}
 
-			// An edge that closes a cycle cannot see this frame's picture,
-			// because the camera it reads has not been drawn yet. Give it the
-			// finished previous frame rather than a half-written target.
+			// Cycle-closing edges read the finished prior frame.
 			if (HistoryEdges.count({reader, source.Camera.get()}) && it->second.HistoryTexture) {
 				return it->second.HistoryTexture;
 			}
@@ -369,8 +360,7 @@ namespace gargantuan {
 			return it->second.ColorTexture;
 		}
 
-		// No camera is named because none can be: the antialias pass is one
-		// script shared by every camera.
+		// The shared antialias pass cannot name one owning camera.
 		if (source.Render != Enums::RenderTexture::None) {
 			auto it = CameraTargets.find(reader);
 			if (it == CameraTargets.end()) {
@@ -417,7 +407,7 @@ namespace gargantuan {
 		}
 
 		if (!WindowOverlayPipeline) {
-			// Complained about once rather than every frame
+			// Report pipeline failure once.
 			WindowOverlayFailed = true;
 
 			SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
@@ -480,9 +470,7 @@ namespace gargantuan {
 										.SetCullingEnabled(false)
 										.SetColorEnabled(true)
 										.SetColorFormat(SwapchainFormat)
-										// Over what is already there, rather
-										// than replacing the window with a
-										// small picture and a lot of nothing
+										// Composite over the existing window.
 										.SetBlendingEnabled(true)
 										.SetDepthEnabled(false)
 										.Build(Gpu);
@@ -496,8 +484,7 @@ namespace gargantuan {
 			WindowOverlayFailed = false;
 		}
 
-		// Point sampled: the readout is drawn a pixel at a time and smoothing
-		// it would turn three-pixel-wide letters into smears
+		// Point-sample pixel text to avoid smearing narrow glyphs.
 		EnsurePointSampler();
 		if (!PointSampler) {
 			return;
@@ -508,8 +495,7 @@ namespace gargantuan {
 			glm::vec4 Rect;
 		};
 
-		// Loaded rather than cleared, because the window's picture is already
-		// there and this is going on top of it
+		// Preserve the window picture beneath overlays.
 		SDL_GPUColorTargetInfo colorTarget{
 			.texture = target,
 			.load_op = SDL_GPU_LOADOP_LOAD,
@@ -519,7 +505,7 @@ namespace gargantuan {
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(commands, &colorTarget, 1, nullptr);
 		SDL_BindGPUGraphicsPipeline(pass, WindowOverlayPipeline);
 
-		// One draw per panel; a pass each would cost more than the triangles
+		// One pass for all panels; per-panel passes cost more than their triangles.
 		for (const auto &entry : WindowOverlays) {
 			if (!entry.Image) {
 				continue;
@@ -566,8 +552,7 @@ namespace gargantuan {
 	}
 
 	SDL_GPUSampler *RenderProvider::GetSourceSampler(const ShaderScript::TextureSource &source) {
-		// Averaging two measurements invents a third neither surface reported.
-		// Only the pictures are smoothed.
+		// Point-sample measurements; only pictures may interpolate.
 		switch (source.Render) {
 		case Enums::RenderTexture::Velocity:
 		case Enums::RenderTexture::Depth:
@@ -603,9 +588,7 @@ namespace gargantuan {
 				case Enums::RenderTexture::History:
 					needs.History = true;
 					break;
-				// All three come out of the one geometry pass, and the copy is
-				// of what that pass wrote, so asking for the copy asks for the
-				// pass as well
+				// Velocity, depth, and depth history share one geometry pass.
 				case Enums::RenderTexture::DepthHistory:
 					needs.DepthHistory = true;
 					needs.Motion = true;
@@ -620,13 +603,11 @@ namespace gargantuan {
 			}
 		};
 
-		// The antialias pass is in here, which is the whole point: swapping in a
-		// temporal one through RenderSettings is what turns these on
+		// Include active antialiasing when deriving temporal needs.
 		for (const auto &shader : BuildShaderChain(camera)) {
 			consider(shader);
 		}
-		// A surface shader can ask too, which is why the velocity pass is
-		// recorded ahead of the opaque one
+		// Surface shaders may require velocity before opaque rendering.
 		consider(camera->SurfaceShader);
 
 		return needs;
@@ -640,8 +621,7 @@ namespace gargantuan {
 		}
 
 		if (needs.History) {
-			// RecordHistoryCopy is what keeps it current; this is only about it
-			// existing before the chain first samples it
+			// Allocate here; RecordHistoryCopy keeps it current.
 			if (!target.HistoryTexture) {
 				SDL_GPUTextureCreateInfo info{
 					.type = SDL_GPU_TEXTURETYPE_2D,
@@ -654,8 +634,7 @@ namespace gargantuan {
 				};
 				target.HistoryTexture = SDL_CreateGPUTexture(Gpu, &info);
 
-				// A pass reads it a moment before the frame that fills it.
-				// Black is at least defined, and gets rejected anyway.
+				// Initialize before first read; black history is rejected.
 				if (target.HistoryTexture && commands) {
 					SDL_GPUColorTargetInfo clear{
 						.texture = target.HistoryTexture,
@@ -668,8 +647,7 @@ namespace gargantuan {
 			}
 		}
 
-		// Written and read, never drawn into by a shader chain, so they want
-		// less than a camera's own picture does
+		// Measurement textures need only geometry writes and shader reads.
 		auto measurement = [&](SDL_GPUTexture *&texture, SDL_GPUTextureFormat format, const char *what) {
 			if (texture) {
 				return;
@@ -690,8 +668,7 @@ namespace gargantuan {
 			}
 		};
 
-		// Both, whichever was asked for: one pass writes them together, and a
-		// render pass has to be given every attachment its pipeline declares
+		// Allocate both attachments because one pass declares and writes both.
 		if (needs.Motion) {
 			measurement(target.VelocityTexture, VELOCITY_FORMAT, "motion vector");
 			measurement(target.ViewDepthTexture, VIEW_DEPTH_FORMAT, "view depth");
@@ -700,8 +677,7 @@ namespace gargantuan {
 		if (needs.DepthHistory && !target.ViewDepthHistoryTexture) {
 			measurement(target.ViewDepthHistoryTexture, VIEW_DEPTH_FORMAT, "previous view depth");
 
-			// Far plane, like the buffer it copies, for the one frame it is
-			// read before it is ever written
+			// Seed first depth history with the far plane.
 			if (target.ViewDepthHistoryTexture && commands) {
 				SDL_GPUColorTargetInfo clear{
 					.texture = target.ViewDepthHistoryTexture,
@@ -728,10 +704,7 @@ namespace gargantuan {
 		}
 
 		if (!VelocityInUse) {
-			// Nothing wanted motion vectors this frame. What is being carried
-			// belongs to whenever the last camera stopped asking, so drop it:
-			// a camera that starts asking again should read no motion for a
-			// frame rather than the distance everything moved in between.
+			// Drop stale transforms when velocity demand stops.
 			if (!TransformsStamped) {
 				return;
 			}
@@ -764,7 +737,7 @@ namespace gargantuan {
 
 		TemporalNeeds needs = GetTemporalNeeds(camera);
 
-		// Taken after the chain, so what just ran read the previous copy
+		// Copy after the chain reads the previous depth history.
 		if (needs.DepthHistory && target.ViewDepthTexture && target.ViewDepthHistoryTexture) {
 			SDL_GPUBlitInfo blit{
 				.source = {.texture = target.ViewDepthTexture, .w = target.Width, .h = target.Height},
@@ -775,8 +748,7 @@ namespace gargantuan {
 			SDL_BlitGPUTexture(commands, &blit);
 		}
 
-		// Two reasons, expiring differently: a camera loop is remembered until
-		// the camera goes away, a binding is re-asked every frame
+		// Cycles persist; ordinary history bindings are recomputed each frame.
 		if (!NeedsHistory.count(camera) && !needs.History) {
 			return;
 		}
@@ -798,7 +770,7 @@ namespace gargantuan {
 			}
 		}
 
-		// Taken after the chain has run, so the copy is the finished picture
+		// Copy only the finished chain output.
 		SDL_GPUBlitInfo blit{
 			.source = {.texture = target.ColorTexture, .w = target.Width, .h = target.Height},
 			.destination = {.texture = mutableTarget.HistoryTexture, .w = target.Width, .h = target.Height},
@@ -880,8 +852,7 @@ namespace gargantuan {
 	void RenderProvider::ResolvePartTextures(const std::shared_ptr<WorldRoot> &worldRoot) {
 		G_PROFILE("Part Textures");
 
-		// Same for every camera and between frames until something it is built
-		// from changes. Was rebuilt once per camera pass regardless.
+		// Reuse until its inputs change; it is camera-independent.
 		if (PartTexturesResolved && ResolvedSurfaceSignature == SurfaceSignature) {
 			return;
 		}
@@ -1000,8 +971,7 @@ namespace gargantuan {
 		const auto &layout = compiled.ParameterLayout;
 
 		if (!layout.Found) {
-			// No reflection, so fall back to one slot per parameter in the
-			// order they were set
+			// Without reflection, pack one slot per parameter in set order.
 			const auto &slots = shader->GetPackedParameters();
 			std::vector<uint8_t> packed(slots.size() * sizeof(glm::vec4));
 			if (!slots.empty()) {
@@ -1017,8 +987,7 @@ namespace gargantuan {
 				continue;
 			}
 
-			// Clamp to the member's own size so setting a float cannot spill
-			// into whatever was declared after it
+			// Clamp writes to the reflected member size.
 			uint32_t writable = std::min<uint32_t>(member->Size, (uint32_t)sizeof(glm::vec4));
 			writable = std::min<uint32_t>(writable, (uint32_t)(packed.size() - member->Offset));
 			std::memcpy(packed.data() + member->Offset, &value, writable);
@@ -1072,8 +1041,7 @@ namespace gargantuan {
 			return;
 		}
 
-		// Revisions only ever go up, so nothing can ask for the old one again.
-		// Both the plain entry and the per-format surface ones belong to it.
+		// Revisions are monotonic; remove all entries for the old revision.
 		std::string stem = "code:" + std::to_string(serial) + ":" + std::to_string(it->second);
 		for (auto entry = ShaderCache.begin(); entry != ShaderCache.end();) {
 			if (entry->first.rfind(stem, 0) != 0) {
@@ -1081,9 +1049,7 @@ namespace gargantuan {
 				continue;
 			}
 
-			// Recompiling partway through a frame would otherwise release a
-			// pipeline already bound into a command buffer waiting to be
-			// submitted. Left behind, it ages out through the trim instead.
+			// Keep current-frame pipelines alive until unsubmitted buffers finish.
 			if (entry->second.LastUsedFrame == FrameIndex) {
 				++entry;
 				continue;
@@ -1103,9 +1069,7 @@ namespace gargantuan {
 			uint64_t oldestFrame = 0;
 
 			for (const auto &[key, compiled] : ShaderCache) {
-				// Anything already handed out this frame may be bound into a
-				// command buffer that has not been submitted, and releasing it
-				// would leave that binding pointing at nothing
+				// Never evict pipelines handed to this frame.
 				if (compiled.LastUsedFrame == FrameIndex) {
 					continue;
 				}
@@ -1116,8 +1080,7 @@ namespace gargantuan {
 				}
 			}
 
-			// Everything left belongs to this frame, so the bound gives way
-			// until the next one rather than the picture doing so
+			// Exceed the bound temporarily when every entry is in use this frame.
 			if (!oldestKey) {
 				return;
 			}
@@ -1134,10 +1097,7 @@ namespace gargantuan {
 		CompiledShader &compiled = ShaderCache[key];
 		compiled.LastUsedFrame = FrameIndex;
 
-		// Trimming afterwards is what makes the bound the real ceiling rather
-		// than one below it. Safe because this entry is stamped with the
-		// current frame, so the trim will not pick it, and erasing any other
-		// entry leaves the reference alone.
+		// Insert then trim to the true ceiling; the returned current entry is safe.
 		TrimShaderCache();
 		return compiled;
 	}
@@ -1158,8 +1118,7 @@ namespace gargantuan {
 		std::string extension, entrypoint;
 		GetShaderFormat(Gpu, format, extension, entrypoint);
 
-		// A surface shader replaces only the fragment stage, so it reuses the
-		// engine's own vertex stage and must match what that stage emits
+		// Surface shaders replace only the fragment stage.
 		if (!OpaqueVertexShader) {
 			size_t size = 0;
 			void *code = LoadShaderBytes("opaque", ".vert", size);
@@ -1206,7 +1165,7 @@ namespace gargantuan {
 			.entrypoint = entrypoint.c_str(),
 			.format = format,
 			.stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
-			// the shadow map, then any images the script supplies
+			// Shadow map followed by script images.
 			.num_samplers = compiled.Resources.Found ? compiled.Resources.SampledImages : 1,
 			.num_storage_textures = 0,
 			.num_storage_buffers = 0,
@@ -1278,7 +1237,7 @@ namespace gargantuan {
 			}
 		}
 
-		// Runtime bytecode wins; otherwise fall back to the named build asset
+		// Prefer runtime bytecode; fall back to the built asset.
 		size_t size = shader->HasBytecode() ? shader->GetBytecode().size() : 0;
 		void *code = nullptr;
 		if (shader->HasBytecode()) {
@@ -1307,7 +1266,7 @@ namespace gargantuan {
 			.num_uniform_buffers = uniformCount,
 		};
 		SDL_GPUShader *fragment = SDL_CreateGPUShader(Gpu, &fragmentInfo);
-		// Parameters live at binding 1, with the engine builtins at binding 0
+		// Parameters use binding 1; engine builtins use binding 0.
 		compiled.ParameterLayout = ShaderReflection::ReflectUniformBlock(code, size, 1);
 		SDL_free(code);
 
@@ -1316,8 +1275,7 @@ namespace gargantuan {
 			return nullptr;
 		}
 
-		// The fullscreen triangle comes out of gl_VertexIndex, so no vertex
-		// buffer is bound and its winding must not be culled
+		// gl_VertexIndex supplies the fullscreen triangle; disable vertex input and culling.
 		compiled.GraphicsPipeline = PipelineBuilder()
 										.SetVertexShader(FullscreenVertexShader)
 										.SetFragmentShader(fragment)
@@ -1328,7 +1286,7 @@ namespace gargantuan {
 										.SetDepthEnabled(false)
 										.Build(Gpu);
 
-		// The pipeline holds its own reference to the shader module
+		// Pipeline retains the shader module.
 		SDL_ReleaseGPUShader(Gpu, fragment);
 
 		if (!compiled.GraphicsPipeline) {
@@ -1401,8 +1359,7 @@ namespace gargantuan {
 			return {};
 		}
 
-		// The built-in antialias pass runs last, after whatever the camera's
-		// own chain did
+		// Built-in antialiasing runs after the camera chain.
 		std::vector<std::shared_ptr<ShaderScript>> chain = camera->Shaders;
 		if (camera->Antialiasing) {
 			chain.push_back(GetAntialiasShader());
@@ -1416,7 +1373,7 @@ namespace gargantuan {
 				return index;
 			}
 		}
-		// Nothing animates, so the whole chain is cacheable
+		// No always-redraw pass: cache the whole chain.
 		return chain.size();
 	}
 
@@ -1456,14 +1413,12 @@ namespace gargantuan {
 			.Jitter = glm::vec4(camera->Jitter, camera->PreviousJitter),
 		};
 
-		// The chain bounces between the two textures; `source` always holds
-		// what has been produced so far
+		// source always names the latest ping-pong output.
 		SDL_GPUTexture *source = target.ColorTexture;
 		SDL_GPUTexture *destination = target.ScratchTexture;
 
 		for (size_t index = firstShader; index < chain.size(); index++) {
-			// Snapshot what the cacheable half produced, just before the first
-			// pass that has to run again every frame
+			// Snapshot immediately before the always-redraw tail.
 			if (index == cut && writeCache && target.CacheTexture) {
 				SDL_GPUBlitInfo snapshot{
 					.source = {.texture = source, .w = target.Width, .h = target.Height},
@@ -1475,7 +1430,7 @@ namespace gargantuan {
 			}
 
 			auto &shader = chain[index];
-			// A script with neither compiled code nor an asset name has nothing to run
+			// Skip scripts with no code source.
 			if (!shader || (shader->Source.empty() && !shader->HasBytecode())) {
 				continue;
 			}
@@ -1487,7 +1442,7 @@ namespace gargantuan {
 				}
 
 				auto parameters = PackParameters(post, *compiled);
-				// SDL rejects a zero-length uniform push, so always send a slot
+				// SDL rejects zero-length uniform pushes.
 				if (parameters.empty()) {
 					parameters.resize(sizeof(glm::vec4), 0);
 				}
@@ -1498,8 +1453,7 @@ namespace gargantuan {
 					.load_op = SDL_GPU_LOADOP_DONT_CARE,
 					.store_op = SDL_GPU_STOREOP_STORE,
 				};
-				// Slot 0 is always the camera's own output; the script's images
-				// follow in the order they were set
+				// Slot 0 is camera output; script images follow set order.
 				SDL_GPUTextureSamplerBinding bindings[1 + ShaderScript::MAXIMUM_IMAGES];
 				bindings[0] = {.texture = source, .sampler = ShaderSampler};
 				uint32_t bindingCount = 1;
@@ -1512,8 +1466,7 @@ namespace gargantuan {
 					bindings[bindingCount++] = {.texture = texture, .sampler = GetSourceSampler(bound)};
 				}
 
-				// The shader declared how many samplers it wants; anything else
-				// would fail inside the driver with no explanation
+				// Validate sampler count before the driver does.
 				uint32_t declared = compiled->Resources.Found ? compiled->Resources.SampledImages : 1;
 				if (bindingCount != declared) {
 					SDL_Log(
@@ -1531,7 +1484,6 @@ namespace gargantuan {
 				SDL_BindGPUFragmentSamplers(pass, 0, bindings, bindingCount);
 				SDL_PushGPUFragmentUniformData(commands, 0, &builtin, sizeof(BuiltinUniforms));
 				SDL_PushGPUFragmentUniformData(commands, 1, parameters.data(), parameterBytes);
-				// The fullscreen triangle needs no vertex buffer
 				SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 				SDL_EndGPURenderPass(pass);
 			} else if (auto *compute = shader->Cast<ComputeShader>()) {
@@ -1553,8 +1505,7 @@ namespace gargantuan {
 				SDL_PushGPUComputeUniformData(commands, 0, &builtin, sizeof(BuiltinUniforms));
 				SDL_PushGPUComputeUniformData(commands, 1, parameters.data(), parameterBytes);
 
-				// Round up so the edge groups still cover the last pixels; the
-				// shader discards the invocations that land outside
+				// Round up edge groups; the shader discards out-of-bounds lanes.
 				uint32_t groupX = (uint32_t)glm::max(compute->ThreadGroupSize.x, 1.0f);
 				uint32_t groupY = (uint32_t)glm::max(compute->ThreadGroupSize.y, 1.0f);
 				SDL_DispatchGPUCompute(
@@ -1562,15 +1513,14 @@ namespace gargantuan {
 				);
 				SDL_EndGPUComputePass(pass);
 			} else {
-				// A bare ShaderScript has no stage to run
+				// Bare ShaderScript has no executable stage.
 				continue;
 			}
 
 			std::swap(source, destination);
 		}
 
-		// Whatever ran last, the camera's own texture has to end up holding the
-		// result so readback and sampling stay simple
+		// Normalize final output into the camera texture.
 		if (source != target.ColorTexture) {
 			SDL_GPUBlitInfo blit{
 				.source = {.texture = source, .w = target.Width, .h = target.Height},
@@ -1582,8 +1532,7 @@ namespace gargantuan {
 		}
 	}
 
-	// Shared by both draw paths: point the frame at a camera's surface shader,
-	// its parameters, and any images it samples after the shadow map
+	// Prepare surface pipeline, parameters, and post-shadow-map images.
 	bool RenderProvider::PrepareSurfaceShader(
 		FrameContext &frameContext,
 		Camera *camera,
@@ -1605,8 +1554,7 @@ namespace gargantuan {
 			parameterStorage.resize(sizeof(glm::vec4), 0);
 		}
 
-		// Before the bindings, not after: the first surface shader to bind an
-		// image was binding it with no sampler at all
+		// Create sampler before constructing bindings.
 		if (!ShaderSampler) {
 			SDL_GPUSamplerCreateInfo samplerInfo{
 				.min_filter = SDL_GPU_FILTER_LINEAR,
@@ -1619,7 +1567,7 @@ namespace gargantuan {
 			ShaderSampler = SDL_CreateGPUSampler(Gpu, &samplerInfo);
 		}
 
-		// Slot 0 is always the shadow map the engine's vertex stage set up
+		// Slot 0 is always the shadow map.
 		samplerStorage.clear();
 		samplerStorage.push_back({.texture = frameContext.ShadowMapTexture, .sampler = ShadowSampler});
 
@@ -1662,8 +1610,7 @@ namespace gargantuan {
 		TemporalNeeds needs = GetTemporalNeeds(camera);
 		if (camera) {
 			EnsureTemporalTargets(commands, camera, CameraTargets[camera], needs);
-			// Only where the world is about to be redrawn, so the offset and
-			// the pixels always describe each other
+			// Advance jitter only with the world pixels it samples.
 			camera->AdvanceJitter(needs.Jitter);
 		}
 
@@ -1676,8 +1623,7 @@ namespace gargantuan {
 		frameContext.ShadowSampler = ShadowSampler;
 		frameContext.ColorTarget = target.ColorTexture;
 		frameContext.DepthTexture = target.DepthTexture;
-		// Both or neither: the pass declares two attachments and a render pass
-		// must be handed every one of them
+		// Velocity pass requires both declared attachments.
 		bool motion = needs.Motion && target.VelocityTexture && target.ViewDepthTexture;
 		frameContext.VelocityTarget = motion ? target.VelocityTexture : nullptr;
 		frameContext.ViewDepthTarget = motion ? target.ViewDepthTexture : nullptr;
@@ -1688,9 +1634,7 @@ namespace gargantuan {
 		frameContext.SurfaceTextureSampler = PartSurfaceSampler ? PartSurfaceSampler : ShadowSampler;
 		frameContext.Width = target.Width;
 		frameContext.Height = target.Height;
-		// Usually the walk PlanRedraw already made. The readback path reaches
-		// here without one, so this is where it is guaranteed rather than
-		// assumed.
+		// Guarantee visibility here for paths that bypass PlanRedraw.
 		frameContext.Visible = &EnsureVisibleSet(
 			drawContext.Camera.get(),
 			drawContext.WorldRoot,
@@ -1698,23 +1642,20 @@ namespace gargantuan {
 			ComputeCameraSignature(drawContext.Camera.get())
 		);
 
-		// A camera's SurfaceShader replaces the opaque pass's fragment stage
+		// SurfaceShader replaces the opaque fragment stage.
 		std::vector<uint8_t> surfaceParameters;
 		std::vector<SDL_GPUTextureSamplerBinding> surfaceSamplers;
 		PrepareSurfaceShader(
 			frameContext, drawContext.Camera.get(), OFFSCREEN_FORMAT, surfaceParameters, surfaceSamplers
 		);
 
-		// The shadow map only depends on the light, but it has to be recorded
-		// into this command buffer for the opaque pass to sample it
+		// Record shadow production before opaque sampling in this buffer.
 		{
 			G_PROFILE("Shadow");
 			SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
 		}
 
-		// Ahead of the opaque pass, so a SurfaceShader binding the motion
-		// vectors reads this frame's. It clears depth and discards it, which
-		// costs nothing: the opaque pass clears for itself.
+		// Record velocity first so SurfaceShader reads this frame's values.
 		if (frameContext.VelocityTarget) {
 			if (RenderPass *velocity = GetVelocityPass()) {
 				G_PROFILE("Motion");
@@ -1728,7 +1669,7 @@ namespace gargantuan {
 			SDL_EndGPURenderPass(OffscreenOpaquePass->Draw(Gpu, frameContext));
 		}
 
-		// Unjittered: the offset describes the sampling, not where it is
+		// Store unjittered motion; jitter changes sampling, not position.
 		if (camera && needs.Motion) {
 			camera->PreviousViewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
 			camera->HasPreviousViewProjection = true;
@@ -1742,9 +1683,7 @@ namespace gargantuan {
 	}
 
 	std::shared_ptr<ShaderScript> RenderProvider::GetAntialiasShader() {
-		// A swapped-in pass stands in for the built-in entirely. The built-in
-		// is kept rather than dropped, so turning the swap off again does not
-		// have to rebuild it.
+		// Override replaces but does not destroy the reusable built-in pass.
 		if (AntialiasOverride) {
 			return AntialiasOverride;
 		}
@@ -1753,7 +1692,7 @@ namespace gargantuan {
 			AntialiasShader = std::make_shared<PostProcessShader>();
 			AntialiasShader->Name = "Antialias";
 			AntialiasShader->Source = "antialias";
-			// Below this much local contrast a pixel is passed through untouched
+			// Preserve pixels below this local-contrast threshold.
 			AntialiasShader->SetNumber("Threshold", 0.0625f);
 		}
 		return AntialiasShader;
@@ -1789,16 +1728,14 @@ namespace gargantuan {
 		std::unordered_set<Camera *> finished;
 		std::unordered_set<Camera *> visiting;
 
-		// Post-order depth first, so a camera lands after everything it reads
+		// Post-order DFS draws every input before its reader.
 		std::function<void(Camera *)> visit = [&](Camera *camera) {
 			if (!camera || finished.count(camera)) {
 				return;
 			}
 
 			if (visiting.count(camera)) {
-				// Two cameras sampling each other cannot both be current. The
-				// edge that closes the loop reads a previous-frame copy, which
-				// is kept for exactly this reason.
+				// Break sampling cycles with a prior-frame read.
 				NeedsHistory.insert(camera);
 				if (ReportedCycles.insert(camera).second) {
 					SDL_Log(
@@ -1814,7 +1751,7 @@ namespace gargantuan {
 			visiting.insert(camera);
 			for (Camera *dependency : GetSampledCameras(camera)) {
 				if (visiting.count(dependency)) {
-					// Remember which reader takes the previous-frame path
+					// Record the reader that must use prior-frame data.
 					HistoryEdges.insert({camera, dependency});
 				}
 				visit(dependency);
@@ -1842,7 +1779,7 @@ namespace gargantuan {
 		region.Width = (int)glm::round(camera.WindowSize.X.Scale * windowWidth) + camera.WindowSize.X.Offset;
 		region.Height = (int)glm::round(camera.WindowSize.Y.Scale * windowHeight) + camera.WindowSize.Y.Offset;
 
-		// Trim anything hanging off the top or left, keeping the far edge put
+		// Clip top/left while preserving the far edge.
 		if (region.X < 0) {
 			region.Width += region.X;
 			region.X = 0;
@@ -1862,7 +1799,7 @@ namespace gargantuan {
 			return;
 		}
 
-		// Panes can sample each other, so draw them in dependency order
+		// Draw panes in sampling-dependency order.
 		std::vector<Camera *> roots;
 		roots.reserve(cameras.size());
 		for (const auto &drawContext : cameras) {
@@ -1888,14 +1825,12 @@ namespace gargantuan {
 			return;
 		}
 
-		// Every camera is drawn offscreen first, because a swapchain texture
-		// cannot be sampled by a shader chain or blitted from
+		// Draw offscreen because swapchain textures cannot be sampled or blitted from.
 		std::vector<std::pair<const CameraTarget *, const Camera *>> ready;
 		for (const auto &drawContext : ordered) {
 			auto *camera = drawContext.Camera.get();
 
-			// Same as the single-camera window path: a pane whose corner of the
-			// world has not moved is blitted from what it drew last time
+			// Reuse a still pane's prior target.
 			DrawContext copy = drawContext;
 			bool recorded = false;
 			CameraTarget *target = RecordCamera(commands, copy, recorded);
@@ -1930,8 +1865,7 @@ namespace gargantuan {
 						.w = (uint32_t)region.Width,
 						.h = (uint32_t)region.Height,
 					},
-				// The first blit clears whatever the window held; the rest must
-				// not wipe the panes drawn before them
+				// Only the first pane clears the window.
 				.load_op = first ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD,
 				.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f},
 				.filter = SDL_GPU_FILTER_LINEAR,
@@ -1945,16 +1879,13 @@ namespace gargantuan {
 	}
 
 	namespace {
-		// FNV-1a, mixed a word at a time. Only ever compared against itself, so
-		// a collision costs a skipped redraw for one frame, not correctness
-		// across the board -- and 64 bits makes that vanishingly unlikely.
+		// 64-bit FNV-1a; a collision can skip one redraw.
 		inline void MixBits(uint64_t &hash, uint64_t value) {
 			hash ^= value + 0x9E3779B97F4A7C15ull + (hash << 6) + (hash >> 2);
 		}
 
 		inline void MixFloat(uint64_t &hash, float value) {
-			// Through the bit pattern, so -0.0 and 0.0 are the same and a NaN
-			// is at least stable rather than never equal to itself
+			// Hash canonical bits so signed zero and NaN remain stable.
 			uint32_t bits;
 			std::memcpy(&bits, &value, sizeof(bits));
 			MixBits(hash, bits);
@@ -1970,23 +1901,15 @@ namespace gargantuan {
 			MixBits(hash, (uint64_t)(uintptr_t)pointer);
 		}
 
-		// The four side planes of a camera's frustum in world space, each held
-		// as (normal, distance) with the inside on the positive side
+		// World-space side planes; positive distance is inside.
 		struct SidePlanes {
 			glm::vec4 Planes[4];
 		};
 
-		// Near and far are deliberately left out. Near is 0.1 and far is
-		// 100000, so neither culls anything worth culling, and leaving them
-		// out means only rows 0, 1 and 3 of the matrix are read. Those are the
-		// same whether the projection maps depth to 0..1 or to -1..1, so this
-		// does not care which convention glm was built with -- one less thing
-		// to get quietly wrong.
-		//
-		// The four alone still reject everything behind the camera: they meet
-		// at the eye, and the pyramid running backwards from it fails all four.
+		// Omit ineffective near/far planes and stay depth-convention independent.
+		// Side planes still reject geometry behind the eye.
 		SidePlanes ExtractSidePlanes(const glm::mat4 &viewProjection) {
-			// glm is column major, so a row is the nth component of each column
+			// GLM rows are the nth component of each column.
 			auto row = [&](int index) {
 				return glm::vec4(
 					viewProjection[0][index],
@@ -1999,8 +1922,7 @@ namespace gargantuan {
 			glm::vec4 x = row(0), y = row(1), w = row(3);
 			SidePlanes planes{{w + x, w - x, w + y, w - y}};
 
-			// Normalised, so a plane distance comes out in world units and can
-			// be compared against a radius
+			// Normalize for world-unit radius comparisons.
 			for (auto &plane : planes.Planes) {
 				float length = glm::length(glm::vec3(plane));
 				if (length > 0.0f) {
@@ -2010,16 +1932,9 @@ namespace gargantuan {
 			return planes;
 		}
 
-		// Whether the segment from `from` to `to`, fattened by `radius`, is
-		// anywhere on the inside. A capsule rather than a sphere because a
-		// part throws its shadow along a line, and that line has to be tested
-		// too; passing the same point twice makes it a plain sphere test.
-		// The capsule test with both ends at the same point, written out so it
-		// does half the dot products. Every part in the world goes through this
-		// one, and only the casters go through the swept version below.
+		// Sphere test is specialized because every part uses it; casters use capsules.
 		bool SphereInside(const SidePlanes &planes, glm::vec3 centre, float radius) {
-			// Plain floats: glm::dot and the vec3 built from the plane are
-			// calls until something inlines them, four times per part
+			// Plain floats avoid four per-part temporary/call pairs.
 			for (const auto &plane : planes.Planes) {
 				float distance = plane.x * centre.x + plane.y * centre.y + plane.z * centre.z + plane.w;
 				if (distance < -radius) {
@@ -2031,9 +1946,7 @@ namespace gargantuan {
 
 		bool CapsuleInside(const SidePlanes &planes, glm::vec3 from, glm::vec3 to, float radius) {
 			for (const auto &plane : planes.Planes) {
-				// Out only when both ends are out, or a capsule lying across
-				// the frustum would be thrown away by the plane each end
-				// happens to be behind
+				// Reject only when both capsule ends lie outside one plane.
 				float near = plane.x * from.x + plane.y * from.y + plane.z * from.z + plane.w;
 				float far = plane.x * to.x + plane.y * to.y + plane.z * to.z + plane.w;
 				if (near < -radius && far < -radius) {
@@ -2043,14 +1956,7 @@ namespace gargantuan {
 			return true;
 		}
 
-		// How far a shadow can reach past the part throwing it. ShadowPass
-		// renders into an orthographic box 200 units deep, so nothing can be
-		// projected further than that; a part further from the frustum than
-		// this cannot darken anything inside it.
-		//
-		// Without this a part stepping out of view would stop counting as
-		// changed, and the shadow it was casting into the view would freeze
-		// where it stood.
+		// Matches ShadowPass depth; include offscreen casters to prevent frozen shadows.
 		constexpr float SHADOW_CAST_REACH = 200.0f;
 	} // namespace
 
@@ -2064,20 +1970,17 @@ namespace gargantuan {
 			return hash;
 		}
 
-		// The count matters on its own: a part appearing and another vanishing
-		// in the same frame would otherwise leave the rest hashing identically
+		// Count distinguishes simultaneous removal and insertion.
 		MixBits(hash, world->Parts.size());
 
-		// Last frame's answer is safe to trust: a part is given a surface
-		// through the property path, which bumps QuickHash, which is always
-		// mixed. An appearing surface changes the signature by that route.
+		// QuickHash invalidates the prior surface-presence answer.
 		const bool hadSurfaces = WorldHasSurfaces;
 
-		// Answered here because this walk already reads the fields they depend on
+		// Derive while these fields are already hot.
 		WorldHasSurfaceCameras = false;
 		WorldHasSurfaces = false;
 
-		// Hashed here because this walk already reads the fields
+		// Hash while these fields are already read.
 		uint64_t surfaces = 0x9E3779B97F4A7C15ull;
 		MixBits(surfaces, TargetGeneration);
 		MixBits(surfaces, world->Parts.size());
@@ -2088,16 +1991,10 @@ namespace gargantuan {
 				continue;
 			}
 
-			// Two words per part, and neither of them touches a property. The
-			// QuickHash says whether anything about the part was written since
-			// last frame; the pointer catches one part being swapped for
-			// another. Reading every transform and colour instead would make
-			// this cost scale with how much a part has rather than with how
-			// many there are.
+			// Pointer catches replacement; QuickHash catches property writes.
 			MixPointer(hash, part.get());
 			MixBits(hash, part->QuickHash);
-			// Both need the count or the revision as well as the pointer: the
-			// pointer only says which one is being shown
+			// Pointer identifies the source; revision/count identifies its content.
 			if (hadSurfaces) {
 				MixPointer(hash, part->SurfaceCamera.get());
 				MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
@@ -2105,9 +2002,7 @@ namespace gargantuan {
 				MixBits(hash, part->SurfaceImage ? part->SurfaceImage->GetRevision() : 0);
 			}
 
-			// Noticed here, where the fields are already being read, so the
-			// per-camera walk and the texture resolve can skip them entirely in
-			// a world that has neither
+			// Detect here so later walks skip absent surface sources.
 			if (part->SurfaceCamera) {
 				WorldHasSurfaceCameras = true;
 				WorldHasSurfaces = true;
@@ -2144,13 +2039,12 @@ namespace gargantuan {
 		out.InViewList.clear();
 		out.ShadowList.clear();
 
-		// Only the redraw check asks the sets anything, and only about a part
-		// showing a camera
+		// Only surface-camera redraw checks require lookup sets.
 		const bool needSets = WorldHasSurfaceCameras;
 		const bool worldHasSurfaces = WorldHasSurfaces;
 
 		if (world) {
-			// One allocation each rather than a dozen on the way to 100k
+			// Reserve once for large worlds.
 			out.InViewList.reserve(world->Parts.size());
 			out.ShadowList.reserve(world->Parts.size());
 		}
@@ -2164,15 +2058,12 @@ namespace gargantuan {
 		}
 
 		SidePlanes planes = ExtractSidePlanes(camera->GetProjectionMatrix() * camera->GetViewMatrix());
-		// LightDirection points towards the light, so a shadow falls the other
-		// way: from the part, away from the light
+		// Shadows extend opposite the toward-light vector.
 		glm::vec3 shadowStep = -glm::normalize(lightDirection) * SHADOW_CAST_REACH;
 
 		uint64_t visible = 0;
 
-		// Chunked so the phases can be timed at all: a zone per part would
-		// cost more than the part. Also kinder to the cache -- each phase
-		// touches one set of fields across a whole chunk.
+		// Chunking keeps probes cheaper than work and improves field locality.
 		constexpr size_t CHUNK = 256;
 		Profiler *profiler = Profiler::GetCurrent();
 		const bool measuring = profiler && profiler->IsEnabled();
@@ -2180,7 +2071,7 @@ namespace gargantuan {
 		uint64_t gatherNanoseconds = 0;
 		uint64_t signatureNanoseconds = 0;
 
-		// Reused between chunks and between frames
+		// Reused across chunks and frames.
 		CullScratch.resize(CHUNK);
 
 		const size_t total = world->Parts.size();
@@ -2197,16 +2088,13 @@ namespace gargantuan {
 					continue;
 				}
 
-				// Half the box diagonal, so the sphere holds the part however
-				// it is turned. Loose is the safe way round.
+				// Half-diagonal bounds every box rotation conservatively.
 				const glm::vec3 &size = part->Size;
 				float radius = std::sqrt(size.x * size.x + size.y * size.y + size.z * size.z) * 0.5f;
 				const glm::vec3 &centre = part->CFrame.Position;
 
 				result.InView = SphereInside(planes, centre, radius);
-				// Swept along the shadow, so a caster off screen still counts.
-				// Not asked of one already on screen: the sweep starts at the
-				// part, so a sphere that passed cannot fail a test containing it.
+				// Sweep only offscreen casters along their shadow reach.
 				result.ShadowReaches = !result.InView && part->CastShadow &&
 					CapsuleInside(planes, centre, centre + shadowStep, radius);
 			}
@@ -2228,7 +2116,7 @@ namespace gargantuan {
 					}
 					out.InViewList.push_back(part.get());
 				}
-				// The wider of the two: it never drops one InViewList holds
+				// ShadowList is a superset of visible shadow casters.
 				if (part->CastShadow && (result.InView || result.ShadowReaches)) {
 					if (needSets) {
 						out.ShadowsIntoView.insert(part.get());
@@ -2248,8 +2136,7 @@ namespace gargantuan {
 				}
 
 				const CullResult &result = CullScratch[index - start];
-				// Anything that can change the picture: by being in it, or by
-				// darkening something that is
+				// Hash visible parts and offscreen casters affecting view.
 				if (!result.InView && !result.ShadowReaches) {
 					continue;
 				}
@@ -2257,8 +2144,7 @@ namespace gargantuan {
 				visible++;
 				MixPointer(hash, part.get());
 				MixBits(hash, part->QuickHash);
-				// Only the parts that carry one. A part gaining a surface bumps
-				// its QuickHash, mixed above, so the change is still noticed.
+				// QuickHash detects newly added surfaces omitted here.
 				if (worldHasSurfaces && (part->SurfaceCamera || part->SurfaceImage)) {
 					MixPointer(hash, part->SurfaceCamera.get());
 					MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
@@ -2277,8 +2163,7 @@ namespace gargantuan {
 			profiler->AddZoneTime("Signature", signatureNanoseconds, total);
 		}
 
-		// Cheap insurance on how many were in view, since the loop above
-		// contributes nothing at all for a frame where none of them are
+		// Include visible count, especially for empty views.
 		MixBits(hash, visible);
 		out.Signature = hash;
 	}
@@ -2288,10 +2173,7 @@ namespace gargantuan {
 	) {
 		VisibleSet &set = VisibleSets[camera];
 
-		// The walk depends on the world and on where the camera is pointing,
-		// and on nothing else. While neither has moved the previous answer is
-		// still the right one, so the redraw check and the passes share a
-		// single walk rather than taking one each.
+		// Reuse one walk while scene and camera stamps match.
 		if (set.Walked && set.SceneStamp == SceneSignature && set.CameraStamp == cameraSignature) {
 			return set;
 		}
@@ -2336,14 +2218,12 @@ namespace gargantuan {
 				MixFloat(hash, value.w);
 			}
 
-			// A bound image changes the picture when it is drawn into, and a
-			// bound camera when it redraws
+			// Include image revisions and camera draw counts.
 			for (const auto &bound : shader->GetTextureSources()) {
 				MixPointer(hash, bound.Image.get());
 				MixBits(hash, bound.Image ? bound.Image->GetRevision() : 0);
 				MixPointer(hash, bound.Camera.get());
-				// Rebinding a slot from an image to the camera's own history
-				// changes what the pass reads without changing anything above
+				// Include render source kind to detect same-pointer rebinding.
 				MixBits(hash, (uint64_t)bound.Render);
 			}
 		};
@@ -2365,20 +2245,14 @@ namespace gargantuan {
 
 		auto chain = BuildShaderChain(camera);
 		size_t cut = FindCacheCut(chain);
-		// Only worth keeping a cache when something after it has to rerun
+		// Cache only when an always-redraw tail exists.
 		bool hasDynamicTail = cut < chain.size();
 		plan.WriteCache = hasDynamicTail;
 
 		uint64_t cameraSignature = ComputeCameraSignature(camera);
 		bool cameraMatches = camera->HasDrawn && camera->LastCameraSignature == cameraSignature;
 
-		// Two checks, wide then narrow. The wide one is already computed and
-		// costs a comparison: when nothing anywhere moved and the camera did
-		// not either, the subset this camera can see cannot have changed and
-		// there is no reason to work out what that subset is. Only when
-		// something did move is the frustum walked, and then the answer is
-		// about this camera alone -- a part shuffling about behind it, or off
-		// the side of the screen, leaves its picture exactly as it was.
+		// Check whole scene first; walk this camera only after a global change.
 		bool sceneMatches;
 		if (cameraMatches && camera->LastSceneSignature == SceneSignature) {
 			sceneMatches = true;
@@ -2390,15 +2264,12 @@ namespace gargantuan {
 			camera->LastVisibleSignature = visibleSignature;
 		}
 
-		// A camera reading its own previous frame is animated by construction,
-		// and one whose input redrew has to follow it
+		// History readers and redrawn inputs force a redraw.
 		if (NeedsHistory.count(camera)) {
 			sceneMatches = false;
 		}
 
-		// So is one that jitters or reads its own last frame: both paint
-		// something different from a scene that has not moved, and a temporal
-		// pass converges by being run
+		// Temporal needs redraw to vary samples and converge history.
 		if (GetTemporalNeeds(camera).Any()) {
 			sceneMatches = false;
 		}
@@ -2413,8 +2284,7 @@ namespace gargantuan {
 		camera->LastCameraSignature = cameraSignature;
 
 		if (!sceneMatches) {
-			// Moving again, so the settle count starts over and the cache that
-			// was taken of the old picture is worthless
+			// Movement resets settling and invalidates the old cache.
 			camera->StillFrames = 0;
 			camera->HasDrawn = true;
 			plan.WriteCache = false;
@@ -2424,7 +2294,7 @@ namespace gargantuan {
 
 		camera->StillFrames++;
 
-		// Still settling: draw it properly and do not pay for a copy yet
+		// Draw while settling; delay the cache copy.
 		if (camera->StillFrames < CACHE_AFTER_STILL_FRAMES) {
 			plan.WriteCache = false;
 			RedrawnThisFrame.insert(camera);
@@ -2432,14 +2302,12 @@ namespace gargantuan {
 		}
 
 		if (!hasDynamicTail) {
-			// Nothing animates and nothing moved, so the target already holds
-			// the finished picture and there is nothing to copy or rerun
+			// Static complete target needs no copy or rerun.
 			plan.Skip = true;
 			return plan;
 		}
 
-		// The frame it settles on is the one that takes the copy; from the next
-		// frame on only the animated tail runs
+		// Snapshot on settle; later frames run only the dynamic tail.
 		if (camera->StillFrames == CACHE_AFTER_STILL_FRAMES || !target.CacheTexture) {
 			plan.WriteCache = true;
 			RedrawnThisFrame.insert(camera);
@@ -2464,18 +2332,14 @@ namespace gargantuan {
 			return nullptr;
 		}
 
-		// Not due yet: hand back what it drew last time, as the cache path
-		// below does when nothing moved
+		// Cadence skips reuse the previous target.
 		if (drawContext.NotDueYet && camera->HasDrawn) {
 			return target;
 		}
 
 		RedrawPlan plan = PlanRedraw(drawContext, *target);
 		if (plan.Skip) {
-			// Its target already holds the finished picture, so there is
-			// nothing to record. Handing it back anyway is what lets a camera
-			// drawing to the window present the same pixels again instead of
-			// rendering the world a second time to arrive at them.
+			// Return the complete cached target without recording work.
 			return target;
 		}
 
@@ -2488,8 +2352,7 @@ namespace gargantuan {
 				return nullptr;
 			}
 		} else if (target->CacheTexture) {
-			// Put the cached half back where the chain expects to find it, then
-			// pick up at the first pass that has to run again
+			// Restore cached prefix, then run the dynamic tail.
 			SDL_GPUBlitInfo restore{
 				.source = {.texture = target->CacheTexture, .w = target->Width, .h = target->Height},
 				.destination = {.texture = target->ColorTexture, .w = target->Width, .h = target->Height},
@@ -2498,7 +2361,7 @@ namespace gargantuan {
 			};
 			SDL_BlitGPUTexture(commands, &restore);
 		} else {
-			// No cache to restore from, so fall back to drawing it properly
+			// Missing cache falls back to a full draw.
 			if (!RecordCameraPasses(commands, drawContext, *target)) {
 				return nullptr;
 			}
@@ -2508,8 +2371,7 @@ namespace gargantuan {
 
 		RecordShaderChain(commands, camera, *target, plan.FirstShader, plan.WriteCache);
 		RecordHistoryCopy(commands, camera, *target);
-		// The plan.Skip path returns before here on purpose: nothing was
-		// rewritten, so nothing looking at it needs to redraw
+		// Skipped targets do not advance their draw revision.
 		CountCameraDraw(camera);
 		outRecorded = true;
 		return target;
@@ -2549,8 +2411,7 @@ namespace gargantuan {
 			return;
 		}
 
-		// A camera that cannot be recorded is skipped rather than sinking the
-		// whole batch; the others have nothing to do with its failure
+		// One camera failure does not cancel unrelated cameras.
 		bool recorded = false;
 		for (const auto &drawContext : cameras) {
 			DrawContext copy = drawContext;
@@ -2568,21 +2429,13 @@ namespace gargantuan {
 	bool RenderProvider::RequestRender(DrawContext drawContext, lua_State *thread, ThreadEngine *threadEngine) {
 		auto *camera = drawContext.Camera.get();
 
-		// This runs from a script, which may well have moved something since
-		// the engine last took the hash at the top of the frame. Everything
-		// below compares against it -- what each camera can see, and whether
-		// a dependency may keep its cached picture -- so it has to describe
-		// the world being drawn now rather than the world one frame ago.
+		// Script-driven renders recompute the scene hash after possible mutations.
 		SceneSignature = ComputeSceneSignature(drawContext.WorldRoot, drawContext.LightDirection);
 
-		// Anything this camera samples has to be drawn first, or it would read
-		// whatever was in that target from a previous frame. They go into the
-		// same command buffer as the readback, ahead of it, so recording order
-		// is what puts them first.
+		// Record sampled cameras first in the same command buffer.
 		std::vector<Camera *> roots{camera};
 
-		// A part showing another camera on its surface is a dependency too,
-		// even though nothing in this camera's own shaders mentions it
+		// Surface cameras are dependencies even when shaders omit them.
 		if (drawContext.WorldRoot) {
 			for (const auto &part : drawContext.WorldRoot->Parts) {
 				if (part && part->SurfaceCamera && part->SurfaceCamera.get() != camera) {
@@ -2634,8 +2487,7 @@ namespace gargantuan {
 			return false;
 		}
 
-		// Ahead of this camera in the same command buffer, so their targets
-		// hold this frame's picture by the time the shader chain samples them
+		// Record dependencies first so sampling sees this frame.
 		for (auto &dependency : dependencies) {
 			RecordOffscreenCamera(commands, dependency);
 		}
@@ -2646,11 +2498,10 @@ namespace gargantuan {
 			return false;
 		}
 
-		// The readback has to see what the shaders produced, not the raw render
+		// Read back the finished shader-chain output.
 		RecordShaderChain(commands, camera, *target, 0, false);
 		RecordHistoryCopy(commands, camera, *target);
-		// An explicit Render() rewrites the target like any other draw, so a
-		// part showing this camera has to hear about it too
+		// Explicit renders advance the target revision.
 		CountCameraDraw(camera);
 
 		SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commands);
@@ -2696,8 +2547,7 @@ namespace gargantuan {
 			return;
 		}
 
-		// Resuming a thread can start another render, so work from a snapshot
-		// and keep whatever is still outstanding
+		// Resume from a snapshot because callbacks may enqueue renders.
 		std::vector<PendingRender> stillPending;
 		std::vector<PendingRender> ready;
 
@@ -2732,9 +2582,7 @@ namespace gargantuan {
 	void RenderProvider::Draw(DrawContext drawContext) {
 		auto *camera = drawContext.Camera.get();
 
-		// With shaders in play the world has to land somewhere the chain can
-		// read, so it renders offscreen first and the result is blitted across.
-		// Without them the swapchain is drawn straight into, exactly as before.
+		// Shader chains require offscreen input; plain draws target the swapchain.
 		bool useShaderChain = camera != nullptr && (!camera->Shaders.empty() || camera->Antialiasing);
 
 		SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(Gpu);
@@ -2744,10 +2592,7 @@ namespace gargantuan {
 		}
 
 		if (useShaderChain) {
-			// The window has to show something every frame, but that is a
-			// blit, not a redraw. A still scene records nothing here and the
-			// blit below sends last frame's picture again -- same pixels,
-			// none of the work.
+			// Still scenes re-blit the cached target without redrawing.
 			bool recorded = false;
 			CameraTarget *target = RecordCamera(commands, drawContext, recorded);
 			if (!target) {
@@ -2777,11 +2622,7 @@ namespace gargantuan {
 			return;
 		}
 
-		// No offscreen target on this path, so there is nowhere to keep a
-		// history or motion vectors -- but a SurfaceShader can still ask to
-		// jitter, and a camera that was jittering and then had its whole chain
-		// taken away has to be told to stop, or it keeps the last offset for
-		// good.
+		// Direct draws lack temporal buffers but must still reset stale jitter.
 		if (camera) {
 			camera->AdvanceJitter(GetTemporalNeeds(camera).Jitter);
 		}
@@ -2799,8 +2640,7 @@ namespace gargantuan {
 		frameContext.PartTextures = &PartTextures;
 		frameContext.WhiteTexture = WhiteTexture;
 		frameContext.SurfaceTextureSampler = PartSurfaceSampler ? PartSurfaceSampler : ShadowSampler;
-		// Drawing straight to the swapchain skips PlanRedraw entirely, so this
-		// path pays for its own walk
+		// Direct swapchain draws must compute their own visible set.
 		frameContext.Visible = &EnsureVisibleSet(
 			camera, drawContext.WorldRoot, drawContext.LightDirection, ComputeCameraSignature(camera)
 		);
@@ -2846,7 +2686,6 @@ namespace gargantuan {
 		if (width < 1 || height < 1) {
 			return;
 		}
-		// SDL_SetGPUSwapchainParameters(Gpu, Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_IMMEDIATE);
 		SDL_SetGPUSwapchainParameters(Gpu, Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC);
 
 		if (DepthTexture != nullptr) {

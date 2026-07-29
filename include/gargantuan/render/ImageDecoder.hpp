@@ -17,8 +17,7 @@ namespace gargantuan::ImageDecoder {
 	// Decodes PNG, JPEG, BMP, TGA, GIF, or PSD into RGBA8 pixels.
 	Image Decode(const void *bytes, size_t size);
 
-	// Reads a file and decodes it. Relative paths resolve against the
-	// executable's directory, which is where the engine's assets live.
+	// Relative paths resolve from the executable directory.
 	Image DecodeFile(const std::string &path);
 
 	bool WritePng(const std::string &path, int width, int height, const uint8_t *rgba);

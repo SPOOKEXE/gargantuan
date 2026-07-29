@@ -1,11 +1,7 @@
 #version 450
 
-// A small picture over the finished window, for the engine's debug readouts.
-// Runs after the camera's picture is on the swapchain, so it is in no camera's
-// target, not in what Camera:Render() returns, and invisible to the cache.
-//
-// A fullscreen triangle with everything outside the rectangle discarded: the
-// shared vertex stage takes no vertex buffer, so there is nothing to size.
+// Swapchain-only debug overlay; excluded from camera outputs and caches.
+// Discards the fullscreen triangle outside the target rectangle.
 
 layout(location = 0) in vec2 FragmentUV;
 layout(location = 0) out vec4 OutputColor;

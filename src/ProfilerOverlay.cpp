@@ -85,8 +85,7 @@ namespace gargantuan {
 				}
 			}
 
-			// End to end inside the parent; the gap left at the right is the
-			// parent's own time
+			// Pack children in tree order; the trailing gap is parent self-time.
 			float childLeft = left;
 			for (size_t child : zone.Children) {
 				DrawZone(image, snapshot, child, childLeft, top, rootDepth);
@@ -100,7 +99,7 @@ namespace gargantuan {
 	) {
 		ProfilerPanelLayout layout;
 
-		// Before anything is drawn: the image has to be sized first
+		// Size the renderer image before drawing.
 		int height = PADDING + LINE;
 		for (size_t root : snapshot.Roots) {
 			height += LINE;

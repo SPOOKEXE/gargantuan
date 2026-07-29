@@ -6,29 +6,16 @@
 #include <vector>
 
 namespace gargantuan::PrimitiveMeshes {
-	// NOTE: the names are (u, v). UV_00 used to carry UV_01's value, which put
-	// two corners of every quad on the same texel and skewed whatever was drawn
-	// on a face across the triangle between them.
+	// Names are (u, v); all four corners must remain distinct.
 	static constexpr glm::vec2 UV_00{0.0f, 0.0f};
 	static constexpr glm::vec2 UV_01{0.0f, 1.0f};
 	static constexpr glm::vec2 UV_10{1.0f, 0.0f};
 	static constexpr glm::vec2 UV_11{1.0f, 1.0f};
 
-	// The wedge's slope runs from the top of the back edge down to the bottom
-	// of the front one, so it leans along Y and Z and not at all along X. It
-	// used to carry 0.707 in X as well, which is a direction the face does not
-	// point in: the slope lit as though it were turned a third of the way
-	// towards the right-hand side.
-	//
-	// NOTE: BasePart::GetSurfaceMatch has to answer with this same vector, or
-	// NormalId.Slope would be comparing against a face that is not there.
+	// Must match BasePart::GetSurfaceMatch for NormalId.Slope.
 	static constexpr glm::vec3 SLOPE_NORMAL{0.0f, 0.70710678f, 0.70710678f};
 
-	// NOTE: the UV on each face is chosen so a picture put on it reads upright
-	// when looked at from outside: u runs to the viewer's right, v downwards to
-	// match image space. The four side faces used to carry the top face's
-	// assignment, which put u up the wall and turned every picture a quarter
-	// turn. Only the UVs moved -- positions, normals and winding are untouched.
+	// Seen outside, u runs right and v down so images stay upright.
 	Mesh Block() {
 		return Mesh{
 			std::vector<Vertex>{
@@ -105,9 +92,7 @@ namespace gargantuan::PrimitiveMeshes {
 		constexpr int SPHERE_STACKS = 16;
 		constexpr int CYLINDER_SEGMENTS = 24;
 
-		// Everything here is built inside the same half unit box the block
-		// occupies, so Size scales a ball or a cylinder the way it scales a
-		// block rather than by some other factor
+		// All primitives occupy the block's unit box for consistent Size scaling.
 		constexpr float RADIUS = 0.5f;
 	} // namespace
 
@@ -116,8 +101,7 @@ namespace gargantuan::PrimitiveMeshes {
 		std::vector<uint32_t> indices;
 		vertices.reserve((SPHERE_STACKS + 1) * (SPHERE_SEGMENTS + 1));
 
-		// The seam is walked twice, once at u = 0 and once at u = 1, because a
-		// single column of vertices cannot hold both ends of the picture
+		// Duplicate the seam to hold both u = 0 and u = 1.
 		for (int stack = 0; stack <= SPHERE_STACKS; stack++) {
 			float v = (float)stack / (float)SPHERE_STACKS;
 			float phi = v * glm::pi<float>();
@@ -128,8 +112,7 @@ namespace gargantuan::PrimitiveMeshes {
 				float u = (float)segment / (float)SPHERE_SEGMENTS;
 				float theta = u * glm::two_pi<float>();
 
-				// Starts at +Z and turns towards +X, so u runs to the right of
-				// anyone looking at the front of the ball
+				// Start at +Z toward +X so front-facing u runs right.
 				glm::vec3 normal{ring * glm::sin(theta), y, ring * glm::cos(theta)};
 				vertices.push_back(Vertex{normal * RADIUS, normal, {u, v}});
 			}
@@ -141,9 +124,7 @@ namespace gargantuan::PrimitiveMeshes {
 				uint32_t top = (uint32_t)(stack * stride + segment);
 				uint32_t bottom = top + (uint32_t)stride;
 
-				// Counter-clockwise seen from outside, which is what the
-				// pipeline treats as front facing. The two triangles at a pole
-				// come out zero area and cost nothing.
+				// Outside winding is counter-clockwise; pole triangles are degenerate.
 				indices.insert(indices.end(), {bottom, bottom + 1, top + 1});
 				indices.insert(indices.end(), {bottom, top + 1, top});
 			}
@@ -156,8 +137,7 @@ namespace gargantuan::PrimitiveMeshes {
 		std::vector<Vertex> vertices;
 		std::vector<uint32_t> indices;
 
-		// Lying along X, so the flat ends land on Right and Left the way
-		// Roblox stands a cylinder. NormalId.Circumference reads the same axis.
+		// Axis is X, matching Right/Left and NormalId.Circumference.
 		for (int segment = 0; segment <= CYLINDER_SEGMENTS; segment++) {
 			float u = (float)segment / (float)CYLINDER_SEGMENTS;
 			float theta = u * glm::two_pi<float>();
@@ -177,8 +157,7 @@ namespace gargantuan::PrimitiveMeshes {
 			indices.insert(indices.end(), {nextLow, nextHigh, high});
 		}
 
-		// Each end is a fan around its own middle. The two run opposite ways
-		// round so both wind counter-clockwise seen from outside their own end.
+		// Cap fans wind counter-clockwise when viewed from outside.
 		auto addCap = [&](float x, float facing) {
 			uint32_t centre = (uint32_t)vertices.size();
 			vertices.push_back(Vertex{{x, 0.0f, 0.0f}, {facing, 0.0f, 0.0f}, {0.5f, 0.5f}});
@@ -188,8 +167,7 @@ namespace gargantuan::PrimitiveMeshes {
 				float y = glm::cos(theta) * RADIUS;
 				float z = glm::sin(theta) * RADIUS;
 
-				// Matches how the block lays out its own Right and Left faces:
-				// looking at +X, right is -Z; looking at -X, right is +Z
+				// Match block UVs: +X right is -Z; -X right is +Z.
 				float u = 0.5f + (facing > 0.0f ? -z : z);
 				vertices.push_back(Vertex{{x, y, z}, {facing, 0.0f, 0.0f}, {u, 0.5f - y}});
 			}

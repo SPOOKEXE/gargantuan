@@ -9,9 +9,7 @@
 namespace gargantuan {
 	struct PipelineBuilder {
 	  public:
-		// More than one only when a pass writes several pictures at once from
-		// the same geometry, which is worth doing where the second one is
-		// nearly free: drawing the scene again to get it would not be
+		// Extra outputs share one geometry pass.
 		static constexpr size_t MAXIMUM_COLOR_TARGETS = 4;
 
 		SDL_GPUShader *VertexShader = nullptr;
@@ -24,8 +22,7 @@ namespace gargantuan {
 		SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
 		bool DepthEnabled = false;
 
-		// Off for shaders that generate their own geometry from the vertex
-		// index, like a fullscreen triangle, which bind no vertex buffer
+		// Disable for gl_VertexIndex geometry with no vertex buffer.
 		bool VertexInputEnabled = true;
 		bool CullingEnabled = true;
 
@@ -35,10 +32,8 @@ namespace gargantuan {
 		PipelineBuilder &SetCullingEnabled(bool enabled);
 		PipelineBuilder &SetShaderFromCache(SDL_GPUDevice *gpu, std::string_view alias);
 		PipelineBuilder &SetColorFormat(SDL_GPUTextureFormat format);
-		// A further attachment, in the order the fragment shader's outputs are
-		// laid out: SetColorFormat is location 0, the first added is location 1.
-		// The shader has to write every one of them -- an attachment its
-		// outputs do not cover is left undefined, not left alone.
+		// Adds the next fragment-output location after SetColorFormat's location 0.
+		// The shader must write every declared attachment.
 		PipelineBuilder &AddColorFormat(SDL_GPUTextureFormat format);
 		PipelineBuilder &SetColorEnabled(bool enabled);
 		PipelineBuilder &SetBlendingEnabled(bool enabled);
@@ -49,16 +44,8 @@ namespace gargantuan {
 		SDL_GPUGraphicsPipeline *Build(SDL_GPUDevice *gpu);
 
 	  private:
-		// ?????? Fuck you Sdl3?????????? Fuck you mean "Invalid blend factor enum!"
-		//
-		// Assertion failure at SDL_CreateGPUGraphicsPipeline_REAL (SDL_gpu.c:1062), triggered 1 time:
-		//   '!"Invalid blend factor enum!"'
-		//   Assertion failure at SDL_CreateGPUGraphicsPipeline_REAL (SDL_gpu.c:1062), triggered 1 time:
-		//     '!"Invalid blend factor enum!"'
-		//     Assertion failure at SDL_CreateGPUGraphicsPipeline_REAL (SDL_gpu.c:1062), triggered 1 time:
-		//       '!"Invalid blend factor enum!"'
 		std::array<SDL_GPUColorTargetDescription, MAXIMUM_COLOR_TARGETS> ColorTargets{};
-		// Attachments past the first, which SetColorFormat owns
+		// Count after location 0, owned by SetColorFormat.
 		size_t ExtraColorTargets = 0;
 	};
 } // namespace gargantuan

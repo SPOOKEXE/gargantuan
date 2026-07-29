@@ -10,11 +10,7 @@
 #include <string_view>
 
 namespace gargantuan {
-	// The shaders glslc compiles out of assets/shaders at build time, named for
-	// the look they produce rather than the file they live in. A script can
-	// still set Source to a plain string, which is what a shader outside this
-	// list needs, but spelling a built-in one as an enum gets it checked and
-	// autocompleted instead of silently missing at render time.
+	// Checked names for build-time assets; Source strings also support unlisted shaders.
 	G_ENUM(
 		PresetShaders,
 
@@ -42,52 +38,27 @@ namespace gargantuan {
 		Vignette
 	)
 
-	// Textures the renderer produces for whichever camera is running the pass,
-	// rather than anything a script hands it. SetCameraTexture names another
-	// camera; this names one of the reader's own buffers, which is the only way
-	// a shared pass -- RenderSettings.AntialiasShader runs on every camera --
-	// can reach the camera it happens to be running on.
+	// Renderer-owned textures for the camera currently running a shared pass.
 	G_ENUM(
 		RenderTexture,
 
 		None,
 
-		// This camera's finished picture from last frame. Asking for it is what
-		// makes the engine keep the copy, and a camera whose picture feeds back
-		// into itself can never sit still, so it redraws every frame.
+		// Prior finished frame; requesting it retains history and forces redraws.
 		History,
 
-		// Where each pixel was last frame, in texture coordinates: sample the
-		// history at `uv - velocity` to find the same surface point again.
-		// Written by a geometry pass the camera only pays for when a pass asks
-		// for it, and measured off the unjittered projection so the offset a
-		// jittering camera adds does not leak into it.
+		// Unjittered texture-space motion; reproject history at `uv - velocity`.
 		Velocity,
 
-		// How far the surface under each pixel is from the camera, in studs
-		// along the direction it faces. Linear, not the reciprocal curve a
-		// depth buffer stores, so it can be compared and interpolated without
-		// first being told the clip planes. Empty pixels read as the far plane.
-		//
-		// It comes off the same geometry pass as Velocity -- the distance is
-		// what a perspective projection already divides by, so writing it costs
-		// an output and no arithmetic -- which means asking for either produces
-		// both.
+		// Linear camera-forward distance in studs; empty pixels use the far plane.
+		// Depth and Velocity are produced together on demand.
 		Depth,
 
-		// The same depth, from last frame. What Velocity alone cannot answer:
-		// velocity says where a pixel was, not whether anything else was
-		// standing there at the time. A surface coming out from behind another
-		// has honest motion and a history belonging to whatever was covering
-		// it, and comparing the two depths is what tells them apart -- colour
-		// cannot, when the two are much the same shade.
+		// Prior linear depth used to reject occluded or disoccluded history.
 		DepthHistory
 	)
 
-	// Every parameter and texture binding the built-in shaders declare. The
-	// engine reads the real list out of a shader's SPIR-V, so this enum is a
-	// convenience rather than the authority -- SetNumber and friends still take
-	// a string, which is the only way to reach a name a runtime shader invents.
+	// Convenience names only; SPIR-V reflection is authoritative and strings allow runtime names.
 	G_ENUM(
 		ShaderProperty,
 
@@ -144,10 +115,7 @@ namespace gargantuan {
 	// A property's name as the shader declares it. Empty for None.
 	std::string_view GetShaderPropertyName(Enums::ShaderProperty property);
 
-	// Reads an argument that may be either an enum item of type E or something
-	// else entirely. Nothing when the value is not an EnumItem at all, so the
-	// caller can fall back to reading it as a string; an error when it is an
-	// EnumItem of the wrong enum, which is always a mistake.
+	// Returns null for non-enums and errors for an item from the wrong enum type.
 	template <typename E>
 		requires std::is_enum_v<E>
 	std::optional<E> TryEnumArgument(lua_State *L, int index) {

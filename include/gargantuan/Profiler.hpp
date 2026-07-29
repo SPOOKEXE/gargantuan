@@ -6,12 +6,8 @@
 #include <vector>
 
 namespace gargantuan {
-	// Where a frame's time went, as a tree of named zones.
-	//
-	// Samples accumulate for a second and are published as per-frame averages.
-	// A chart redrawn every frame moves faster than the eye reads it, and
-	// keeping every zone of every frame would cost more than it measures. The
-	// single bad frame is what the F3 counter's minimum is for.
+	// Named zone tree, averaged per frame over a one-second window.
+	// The F3 minimum captures isolated bad frames without retaining every frame.
 	class Profiler {
 	  public:
 		static constexpr size_t NONE = (size_t)-1;
@@ -23,13 +19,12 @@ namespace gargantuan {
 			size_t Parent = NONE;
 			int Depth = 0;
 			std::vector<size_t> Children;
-			// Per-frame average over the profiler window.
+			// Per-frame window average.
 			double Milliseconds = 0.0;
 			double CallsPerFrame = 0.0;
 		};
 
-		// Counted rather than timed. Timing one draw measures how long it took
-		// to write into a command buffer, which is not what a cylinder costs.
+		// Count draws; command-buffer write time is not renderer cost.
 		struct Counter {
 			std::string Name;
 			double PerFrame = 0.0;
@@ -38,13 +33,12 @@ namespace gargantuan {
 
 		struct Snapshot {
 			std::vector<Zone> Zones;
-			// In the order they were first opened, so rows keep a stable order
+			// First-open order keeps rows stable.
 			std::vector<size_t> Roots;
 			std::vector<Counter> Counters;
 			uint64_t Frames = 0;
 			double Seconds = 0.0;
-			// Wall clock. Zones are measured against this rather than the sum
-			// of the roots, which do not cover everything.
+			// Wall-clock frame time; roots do not cover the whole frame.
 			double FrameMilliseconds = 0.0;
 
 			bool Empty() const {
@@ -52,8 +46,7 @@ namespace gargantuan {
 			}
 		};
 
-		// Takes effect at the next frame boundary; switching mid-frame would
-		// leave the zone stack half measured
+		// Applies at the next frame boundary to preserve the zone stack.
 		void SetEnabled(bool enabled);
 		bool IsEnabled() const;
 
@@ -65,8 +58,7 @@ namespace gargantuan {
 
 		void Add(std::string_view name, uint64_t amount);
 
-		// Adds time without opening a zone, for a loop running thousands of
-		// times a frame where Begin and End would cost more than the work
+		// Adds nanoseconds and calls without per-iteration scope overhead.
 		void AddZoneTime(std::string_view name, uint64_t nanoseconds, uint64_t calls);
 
 		const Snapshot &Latest() const;
@@ -116,8 +108,7 @@ namespace gargantuan {
 		uint64_t WindowFrameNanoseconds = 0;
 	};
 
-	// Closes its zone however the scope is left, which several instrumented
-	// paths rely on
+	// Closes its zone on every scope exit path.
 	struct ProfileScope {
 		explicit ProfileScope(std::string_view name) : Owner(Profiler::GetCurrent()) {
 			if (Owner) {

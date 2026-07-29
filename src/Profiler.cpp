@@ -49,7 +49,7 @@ namespace gargantuan {
 		size_t index = Live.size();
 		Live.push_back(std::move(zone));
 
-		// After the push, which may have moved the vector
+		// Reacquire by index after vector relocation.
 		if (parent == NONE) {
 			LiveRoots.push_back(index);
 		} else {
@@ -60,13 +60,13 @@ namespace gargantuan {
 
 	void Profiler::Begin(std::string_view name) {
 		if (!MeasuringFrame || Stack.size() >= (size_t)MAXIMUM_DEPTH) {
-			// Still pushed, or the matching End reparents everything after it
+			// Keep stack balance without reparenting later zones.
 			Stack.push_back({NONE, 0});
 			return;
 		}
 
 		size_t parent = Stack.empty() ? NONE : Stack.back().Index;
-		// Skipped with its parent, or it attaches to its grandparent
+		// Skip descendants of depth-limited zones.
 		if (!Stack.empty() && parent == NONE) {
 			Stack.push_back({NONE, 0});
 			return;
@@ -97,7 +97,7 @@ namespace gargantuan {
 		}
 
 		size_t parent = Stack.empty() ? NONE : Stack.back().Index;
-		// Inside a zone that was skipped, so this one is skipped with it
+		// Skip timing inside a depth-limited zone.
 		if (!Stack.empty() && parent == NONE) {
 			return;
 		}
@@ -123,11 +123,11 @@ namespace gargantuan {
 	}
 
 	void Profiler::BeginFrame(double now) {
-		// The only place the switch is honoured, so a frame is whole
+		// Toggle only at frame boundaries.
 		if (PendingEnabled != Enabled) {
 			Enabled = PendingEnabled;
 
-			// Gathered under different conditions
+			// Discard the prior enable-state window.
 			Live.clear();
 			LiveRoots.clear();
 			LiveCounters.clear();
@@ -155,7 +155,7 @@ namespace gargantuan {
 			return;
 		}
 
-		// Anything left open returned without closing its scope
+		// Close leaked scopes at frame end.
 		while (!Stack.empty()) {
 			End();
 		}
@@ -193,7 +193,7 @@ namespace gargantuan {
 		for (const auto &live : LiveCounters) {
 			snapshot.Counters.push_back({live.Name, (double)live.Total / frames, live.Total});
 		}
-		// Alphabetical, so one appearing does not shuffle the rest
+		// Alphabetical order prevents row churn.
 		std::sort(snapshot.Counters.begin(), snapshot.Counters.end(), [](const Counter &a, const Counter &b) {
 			return a.Name < b.Name;
 		});
@@ -201,8 +201,7 @@ namespace gargantuan {
 		Published = std::move(snapshot);
 		Snapshotted = true;
 
-		// Only the numbers are cleared: rebuilding the tree would throw away
-		// the row order the chart depends on
+		// Preserve tree order; clear only window totals.
 		for (auto &live : Live) {
 			live.Nanoseconds = 0;
 			live.Calls = 0;
