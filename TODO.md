@@ -69,7 +69,21 @@ eyes. What is missing is the runtime that drives them.
 - [ ] Occlusion, so a part hidden behind a wall stops costing a redraw. The
       frustum test cannot see it; something depth-aware has to
 - [ ] Textures
+- [ ] Emissive, so a surface can be a source of colour rather than only a
+      receiver of it. The opaque shader multiplies a part's colour by the light
+      falling on it, so nothing can be brighter than what reaches it and an
+      unlit face is always its colour times the ambient fifth. Wants a term the
+      lighting is added to rather than multiplied into, and a texture channel to
+      drive it per pixel once there are textures at all.
+      examples/ConcertStage.luau switches its lamps between their colour and
+      black to fake a rig, which is as close as a multiply gets
 - [ ] Lighting service
+- [ ] Lights as instances -- point, spot and surface -- rather than the single
+      directional sun the shader has now. The stage in ConcertStage.luau is lit
+      by an afternoon sun swung round behind the audience because that is the
+      only light there is; a concert wants a dozen of them, coloured, aimed and
+      switchable. Needs somewhere to put them in the opaque pass's uniforms and
+      a decision about how many one draw can carry
 - [ ] PBR
 
 ## Scripting

@@ -104,9 +104,11 @@ block(
 	Color3.fromRGB(96, 94, 106)
 )
 
--- Lamps hanging off the beam. No lighting service yet, so these are coloured
--- rather than emitting; they read as a rig because of where they are, not
--- because of what they do.
+-- Lamps hanging off the beam. Nothing here emits light -- there is no lighting
+-- service yet, so a lamp cannot throw colour onto the stage the way a real one
+-- would. What it can do is be its colour or be black, and a rig that switches
+-- between the two in a run along the beam reads as lamps going on and off even
+-- though nothing around them changes.
 local LAMP_COLOURS = {
 	Color3.fromRGB(255, 90, 70),
 	Color3.fromRGB(255, 190, 80),
@@ -114,15 +116,28 @@ local LAMP_COLOURS = {
 	Color3.fromRGB(90, 170, 255),
 	Color3.fromRGB(190, 110, 255),
 }
+local LAMP_OFF = Color3.fromRGB(16, 16, 20)
+
+local lamps = {}
 for index = 0, 8 do
+	local lit = LAMP_COLOURS[index % #LAMP_COLOURS + 1]
 	local lamp = block(
 		"Lamp",
 		Vector3.new(1.4, 1.4, 1.4),
 		Vector3.new(-18 + index * 4.5, STAGE_TOP + 17.8, BACKDROP_Z + 2),
-		LAMP_COLOURS[index % #LAMP_COLOURS + 1]
+		lit
 	)
 	lamp.Shape = Enum.PartType.Ball
 	lamp.CastShadow = false
+
+	table.insert(lamps, {
+		Part = lamp,
+		Lit = lit,
+		-- Each lamp is a little further through the cycle than the one to its
+		-- left, so the run travels along the beam rather than the whole rig
+		-- blinking at once
+		Phase = index * 0.55,
+	})
 end
 
 -- Speaker stacks, one per wing, just inside where the cameras sit
@@ -245,4 +260,12 @@ RunService.PreRender:Connect(function()
 	end
 
 	performer.Orientation = Vector3.new(0, math.sin(now * 1.6) * 35, 0)
+
+	-- Hard on or hard off rather than faded between the two. A lamp dimming up
+	-- and down reads as a colour change on a ball; a lamp that is either its
+	-- colour or nearly black reads as a lamp being switched.
+	for _, lamp in lamps do
+		local lit = math.sin(now * 6.0 - lamp.Phase) > 0.1
+		lamp.Part.Color = lit and lamp.Lit or LAMP_OFF
+	end
 end)

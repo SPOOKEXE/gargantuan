@@ -197,6 +197,16 @@ namespace gargantuan {
 		// which is how the rest of RenderSettings already travels.
 		void SetAntialiasOverride(std::shared_ptr<ShaderScript> shader);
 
+		// A picture laid over the finished window, in pixels from its top left.
+		// Passing null takes it away again.
+		//
+		// It goes onto the swapchain after every camera has been blitted there,
+		// which is what keeps it out of everything else: no camera's target
+		// holds it, Camera:Render() does not hand it back, and nothing about it
+		// reaches the redraw signatures. A debug readout that changed what the
+		// engine decided to redraw would be measuring itself.
+		void SetWindowOverlay(std::shared_ptr<EditableImage> image, glm::vec2 position);
+
 		void Resize(int width, int height);
 		void Destroy();
 		// Drops the target belonging to a camera that is going away
@@ -419,6 +429,21 @@ namespace gargantuan {
 		// One per camera, kept between frames so a still scene is not walked
 		// again. Dropped with the camera's target.
 		std::unordered_map<Camera *, VisibleSet> VisibleSets;
+
+		// What SetWindowOverlay was last given, and where it goes
+		std::shared_ptr<EditableImage> WindowOverlay;
+		glm::vec2 WindowOverlayPosition = glm::vec2(0.0f);
+		// Built on the first frame something is actually laid over the window,
+		// and never at all in a place that shows no overlay. Its own pipeline
+		// rather than a PostProcessShader because it draws onto the swapchain,
+		// whose format is the window's rather than OFFSCREEN_FORMAT, and blends
+		// rather than replacing.
+		SDL_GPUGraphicsPipeline *WindowOverlayPipeline = nullptr;
+		bool WindowOverlayFailed = false;
+		// Composites it onto whatever is already on `target`
+		void RecordWindowOverlay(
+			SDL_GPUCommandBuffer *commands, SDL_GPUTexture *target, uint32_t width, uint32_t height
+		);
 
 		SDL_GPUShader *FullscreenVertexShader = nullptr;
 		SDL_GPUShader *OpaqueVertexShader = nullptr;

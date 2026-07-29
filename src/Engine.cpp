@@ -102,6 +102,37 @@ namespace gargantuan {
 		}
 	}
 
+	void Engine::UpdateStatistics(double now, float deltaTime) {
+		// Recorded even while hidden. The counter is turned on because
+		// something went wrong a moment ago, and a window that only starts
+		// filling at that point has nothing to say about it for twenty seconds.
+		Statistics.Record(now, deltaTime);
+
+		if (!ShowStatistics) {
+			// Handing over nothing is what takes it off the window; the panel
+			// itself is kept, so turning it back on does not have to build one
+			RenderProvider->SetWindowOverlay(nullptr, glm::vec2(0.0f));
+			return;
+		}
+
+		if (!StatisticsPanel) {
+			StatisticsPanel = std::make_shared<EditableImage>();
+			StatisticsPanel->Name = EditableImage::DEFINITION.Name;
+			// Nothing to draw from yet, so paint it now rather than leaving a
+			// blank rectangle on screen until the first refresh comes round
+			LastStatisticsRefresh = 0.0;
+		}
+
+		if (LastStatisticsRefresh == 0.0 || now - LastStatisticsRefresh >= STATISTICS_REFRESH_SECONDS) {
+			DrawStatisticsPanel(*StatisticsPanel, Statistics);
+			LastStatisticsRefresh = now;
+		}
+
+		RenderProvider->SetWindowOverlay(
+			StatisticsPanel, glm::vec2(STATISTICS_MARGIN, STATISTICS_MARGIN)
+		);
+	}
+
 	void Engine::Step() {
 		if (!IsRunning) {
 			return;
@@ -119,9 +150,19 @@ namespace gargantuan {
 				IsRunning = false;
 				return;
 			}
+
+			// Held down, F3 would repeat and flicker the panel on and off
+			if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F3 && !event.key.repeat) {
+				ShowStatistics = !ShowStatistics;
+			}
+
 			UserInputService->ProcessEvent(event);
 			Workspace->CurrentCamera->OnEvent(Window, event);
 		}
+
+		// Ahead of everything the frame does, so the reading belongs to the
+		// frame that has just been measured rather than to the one being set up
+		UpdateStatistics((double)CurrentTick / 1000000000.0, deltaTime);
 
 		RunService->FireSimulation(deltaTime);
 		Workspace->CurrentCamera->Step(deltaTime);

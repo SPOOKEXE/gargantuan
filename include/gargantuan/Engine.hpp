@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gargantuan/classes/DataModel.hpp"
+#include "gargantuan/DebugOverlay.hpp"
 #include "gargantuan/render/RenderProvider.hpp"
 #include "gargantuan/scripting/ScriptEngine.hpp"
 #include "gargantuan/services/Lighting.hpp"
@@ -53,5 +54,22 @@ namespace gargantuan {
 	  private:
 		uint64_t CurrentTick = 0;
 		uint64_t LastTick = 0;
+
+		// F3 shows the frame rate, the way it does in every other engine that
+		// has one. Measured whether or not it is on screen, so turning it on
+		// during a stutter shows what just happened rather than starting a
+		// twenty second wait for the window to fill.
+		FrameStatistics Statistics;
+		bool ShowStatistics = false;
+		std::shared_ptr<EditableImage> StatisticsPanel;
+		// Redrawn a few times a second rather than every frame. The numbers are
+		// unreadable changing sixty times a second, and repainting the panel is
+		// work the thing being measured would be charged for.
+		static constexpr double STATISTICS_REFRESH_SECONDS = 0.2;
+		double LastStatisticsRefresh = 0.0;
+		// Where it sits, in pixels from the window's top left
+		static constexpr float STATISTICS_MARGIN = 8.0f;
+
+		void UpdateStatistics(double now, float deltaTime);
 	};
 } // namespace gargantuan

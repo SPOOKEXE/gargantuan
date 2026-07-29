@@ -183,6 +183,12 @@ namespace gargantuan {
 			FullscreenVertexShader = nullptr;
 		}
 
+		if (WindowOverlayPipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(Gpu, WindowOverlayPipeline);
+			WindowOverlayPipeline = nullptr;
+		}
+		WindowOverlay = nullptr;
+
 		if (OpaqueVertexShader) {
 			SDL_ReleaseGPUShader(Gpu, OpaqueVertexShader);
 			OpaqueVertexShader = nullptr;
@@ -389,6 +395,144 @@ namespace gargantuan {
 		}
 
 		return nullptr;
+	}
+
+	void RenderProvider::SetWindowOverlay(std::shared_ptr<EditableImage> image, glm::vec2 position) {
+		WindowOverlay = std::move(image);
+		WindowOverlayPosition = position;
+	}
+
+	void RenderProvider::RecordWindowOverlay(
+		SDL_GPUCommandBuffer *commands, SDL_GPUTexture *target, uint32_t width, uint32_t height
+	) {
+		if (!WindowOverlay || !commands || !target || width == 0 || height == 0 || WindowOverlayFailed) {
+			return;
+		}
+
+		SDL_GPUTexture *texture = AcquireImageTexture(WindowOverlay.get());
+		if (!texture) {
+			return;
+		}
+
+		if (!WindowOverlayPipeline) {
+			// Complained about once rather than every frame, which is what the
+			// flag is for
+			WindowOverlayFailed = true;
+
+			SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
+			std::string extension, entrypoint;
+			GetShaderFormat(Gpu, format, extension, entrypoint);
+
+			if (!FullscreenVertexShader) {
+				size_t vertexSize = 0;
+				void *vertexCode = LoadShaderBytes("fullscreen", ".vert", vertexSize);
+				if (!vertexCode) {
+					return;
+				}
+
+				SDL_GPUShaderCreateInfo vertexInfo{
+					.code_size = vertexSize,
+					.code = static_cast<const Uint8 *>(vertexCode),
+					.entrypoint = entrypoint.c_str(),
+					.format = format,
+					.stage = SDL_GPU_SHADERSTAGE_VERTEX,
+				};
+				FullscreenVertexShader = SDL_CreateGPUShader(Gpu, &vertexInfo);
+				SDL_free(vertexCode);
+
+				if (!FullscreenVertexShader) {
+					SDL_Log("Failed to create the fullscreen vertex shader: %s", SDL_GetError());
+					return;
+				}
+			}
+
+			size_t size = 0;
+			void *code = LoadShaderBytes("window_overlay", ".frag", size);
+			if (!code) {
+				SDL_Log("Failed to load the window overlay shader");
+				return;
+			}
+
+			SDL_GPUShaderCreateInfo fragmentInfo{
+				.code_size = size,
+				.code = static_cast<const Uint8 *>(code),
+				.entrypoint = entrypoint.c_str(),
+				.format = format,
+				.stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
+				.num_samplers = 1,
+				.num_storage_textures = 0,
+				.num_storage_buffers = 0,
+				.num_uniform_buffers = 1,
+			};
+			SDL_GPUShader *fragment = SDL_CreateGPUShader(Gpu, &fragmentInfo);
+			SDL_free(code);
+
+			if (!fragment) {
+				SDL_Log("Failed to create the window overlay shader: %s", SDL_GetError());
+				return;
+			}
+
+			WindowOverlayPipeline = PipelineBuilder()
+										.SetVertexShader(FullscreenVertexShader)
+										.SetFragmentShader(fragment)
+										.SetVertexInputEnabled(false)
+										.SetCullingEnabled(false)
+										.SetColorEnabled(true)
+										.SetColorFormat(SwapchainFormat)
+										// Over what is already there, rather
+										// than replacing the window with a
+										// small picture and a lot of nothing
+										.SetBlendingEnabled(true)
+										.SetDepthEnabled(false)
+										.Build(Gpu);
+			SDL_ReleaseGPUShader(Gpu, fragment);
+
+			if (!WindowOverlayPipeline) {
+				SDL_Log("Failed to build the window overlay pipeline: %s", SDL_GetError());
+				return;
+			}
+
+			WindowOverlayFailed = false;
+		}
+
+		// Point sampled: the readout is drawn a pixel at a time and smoothing
+		// it would turn three-pixel-wide letters into smears
+		EnsurePointSampler();
+		if (!PointSampler) {
+			return;
+		}
+
+		struct alignas(16) OverlayUniforms {
+			glm::vec4 Target;
+			glm::vec4 Rect;
+		};
+
+		OverlayUniforms uniforms{
+			.Target = glm::vec4((float)width, (float)height, 0.0f, 0.0f),
+			.Rect = glm::vec4(
+				WindowOverlayPosition.x,
+				WindowOverlayPosition.y,
+				(float)WindowOverlay->GetWidth(),
+				(float)WindowOverlay->GetHeight()
+			),
+		};
+
+		// Loaded rather than cleared, because the window's picture is already
+		// there and this is going on top of it
+		SDL_GPUColorTargetInfo colorTarget{
+			.texture = target,
+			.load_op = SDL_GPU_LOADOP_LOAD,
+			.store_op = SDL_GPU_STOREOP_STORE,
+		};
+
+		SDL_GPUTextureSamplerBinding binding{.texture = texture, .sampler = PointSampler};
+
+		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(commands, &colorTarget, 1, nullptr);
+		SDL_BindGPUGraphicsPipeline(pass, WindowOverlayPipeline);
+		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+		SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, sizeof(OverlayUniforms));
+		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+		SDL_EndGPURenderPass(pass);
 	}
 
 	void RenderProvider::EnsurePointSampler() {
@@ -1794,6 +1938,7 @@ namespace gargantuan {
 			first = false;
 		}
 
+		RecordWindowOverlay(commands, swapchainTexture, windowWidth, windowHeight);
 		SubmitTracked(commands);
 	}
 
@@ -2512,6 +2657,7 @@ namespace gargantuan {
 				.filter = SDL_GPU_FILTER_LINEAR,
 			};
 			SDL_BlitGPUTexture(commands, &blit);
+			RecordWindowOverlay(commands, swapchainTexture, swapchainWidth, swapchainHeight);
 			SubmitTracked(commands);
 			return;
 		}
@@ -2574,6 +2720,9 @@ namespace gargantuan {
 
 		SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
 		SDL_EndGPURenderPass(OpaquePass->Draw(Gpu, frameContext));
+		RecordWindowOverlay(
+			frameContext.Commands, frameContext.ColorTarget, frameContext.Width, frameContext.Height
+		);
 
 		SubmitTracked(frameContext.Commands);
 	}
