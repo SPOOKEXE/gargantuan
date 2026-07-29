@@ -3,6 +3,7 @@
 #include "gargantuan/Profiler.hpp"
 #include "gargantuan/classes/Part.hpp"
 #include "gargantuan/render/PipelineBuilder.hpp"
+#include "gargantuan/render/InstanceData.hpp"
 #include "gargantuan/render/RenderPass.hpp"
 #include "gargantuan/render/RenderProvider.hpp"
 #include "gargantuan/render/Shader.hpp"
@@ -67,15 +68,6 @@ namespace gargantuan {
 		};
 
 		// Matches the std430 block the instanced vertex stage reads
-		struct alignas(16) InstanceData {
-			glm::mat4 ModelMatrix;
-			glm::vec4 Color;
-			// Per instance because which face the picture lands on depends on
-			// how the part is turned. Whether there is one at all is per batch.
-			glm::vec4 SurfaceNormal;
-			glm::vec4 SurfaceTransform;
-		};
-
 		FileShader InstancedShader{
 			.VertexFilepath = GetShaderPath("opaque_instanced.vert"),
 			.VertexUniformBufferCount = 1,
@@ -177,6 +169,64 @@ namespace gargantuan {
 
 		// Buckets by mesh and texture, writes one buffer, uploads it. False
 		// when there is nothing to do or the buffer could not be had.
+		//   T * R * S  =  [ r0*sx  r1*sy  r2*sz  position ]
+		static void BuildInstance(BasePart *part, InstanceData &instance, bool withSurface) {
+			const float *rotation = &part->CFrame.Rotation[0][0];
+			const glm::vec3 &size = part->Size;
+			const glm::vec3 &position = part->CFrame.Position;
+			float *model = &instance.ModelMatrix[0][0];
+
+			model[0] = rotation[0] * size.x;
+			model[1] = rotation[1] * size.x;
+			model[2] = rotation[2] * size.x;
+			model[3] = 0.0f;
+			model[4] = rotation[3] * size.y;
+			model[5] = rotation[4] * size.y;
+			model[6] = rotation[5] * size.y;
+			model[7] = 0.0f;
+			model[8] = rotation[6] * size.z;
+			model[9] = rotation[7] * size.z;
+			model[10] = rotation[8] * size.z;
+			model[11] = 0.0f;
+			model[12] = position.x;
+			model[13] = position.y;
+			model[14] = position.z;
+			model[15] = 1.0f;
+
+			const Color3 &colour = part->Color;
+			instance.Color.x = colour.R;
+			instance.Color.y = colour.G;
+			instance.Color.z = colour.B;
+			instance.Color.w = 1.0f - part->Transparency;
+
+			if (!withSurface) {
+				return;
+			}
+
+			glm::vec4 match = part->GetSurfaceMatch();
+			float nx = match.x, ny = match.y, nz = match.z;
+			if (nx * nx + ny * ny + nz * nz > 0.0f) {
+				float wx = rotation[0] * nx + rotation[3] * ny + rotation[6] * nz;
+				float wy = rotation[1] * nx + rotation[4] * ny + rotation[7] * nz;
+				float wz = rotation[2] * nx + rotation[5] * ny + rotation[8] * nz;
+				float length = std::sqrt(wx * wx + wy * wy + wz * wz);
+				if (length > 0.0f) {
+					nx = wx / length;
+					ny = wy / length;
+					nz = wz / length;
+				}
+			}
+
+			instance.SurfaceNormal.x = nx;
+			instance.SurfaceNormal.y = ny;
+			instance.SurfaceNormal.z = nz;
+			instance.SurfaceNormal.w = match.w;
+			instance.SurfaceTransform.x = part->SurfaceTiling.GetX();
+			instance.SurfaceTransform.y = part->SurfaceTiling.GetY();
+			instance.SurfaceTransform.z = part->SurfaceOffset.GetX();
+			instance.SurfaceTransform.w = part->SurfaceOffset.GetY();
+		}
+
 		bool PrepareInstances(
 			SDL_GPUDevice *gpu,
 			FrameContext &context,
@@ -309,72 +359,9 @@ namespace gargantuan {
 				BasePart *part = partList[index];
 				InstanceData &instance = scratch[cursors[bucket]++];
 
-				// Written straight into the slot in plain floats. The same
-				// arithmetic as GetModelMatrix without the glm temporaries,
-				// which are calls until something inlines them. The rotation
-				// is read through a float pointer for the same reason: its
-				// columns are contiguous, so mat3[c][r] is rotation[c * 3 + r].
-				//
-				//   T * R * S  =  [ r0*sx  r1*sy  r2*sz  position ]
-				const float *rotation = &part->CFrame.Rotation[0][0];
-				const glm::vec3 &size = part->Size;
-				const glm::vec3 &position = part->CFrame.Position;
-				float *model = &instance.ModelMatrix[0][0];
-
-				model[0] = rotation[0] * size.x;
-				model[1] = rotation[1] * size.x;
-				model[2] = rotation[2] * size.x;
-				model[3] = 0.0f;
-				model[4] = rotation[3] * size.y;
-				model[5] = rotation[4] * size.y;
-				model[6] = rotation[5] * size.y;
-				model[7] = 0.0f;
-				model[8] = rotation[6] * size.z;
-				model[9] = rotation[7] * size.z;
-				model[10] = rotation[8] * size.z;
-				model[11] = 0.0f;
-				model[12] = position.x;
-				model[13] = position.y;
-				model[14] = position.z;
-				model[15] = 1.0f;
-
-				const Color3 &colour = part->Color;
-				instance.Color.x = colour.R;
-				instance.Color.y = colour.G;
-				instance.Color.z = colour.B;
-				instance.Color.w = 1.0f - part->Transparency;
-
-				// The shader reads these behind a flag that is off for the
-				// rest, so a matrix multiply and a normalise for nothing
-				if (batches[bucket].Texture == White) {
-					continue;
-				}
-
-				// The same transform the vertex stage puts the mesh's normals
-				// through, not the correct inverse transpose. Wrong the same
-				// way on both sides, which is all a match needs.
-				glm::vec4 match = part->GetSurfaceMatch();
-				float nx = match.x, ny = match.y, nz = match.z;
-				if (nx * nx + ny * ny + nz * nz > 0.0f) {
-					float wx = rotation[0] * nx + rotation[3] * ny + rotation[6] * nz;
-					float wy = rotation[1] * nx + rotation[4] * ny + rotation[7] * nz;
-					float wz = rotation[2] * nx + rotation[5] * ny + rotation[8] * nz;
-					float length = std::sqrt(wx * wx + wy * wy + wz * wz);
-					if (length > 0.0f) {
-						nx = wx / length;
-						ny = wy / length;
-						nz = wz / length;
-					}
-				}
-
-				instance.SurfaceNormal.x = nx;
-				instance.SurfaceNormal.y = ny;
-				instance.SurfaceNormal.z = nz;
-				instance.SurfaceNormal.w = match.w;
-				instance.SurfaceTransform.x = part->SurfaceTiling.GetX();
-				instance.SurfaceTransform.y = part->SurfaceTiling.GetY();
-				instance.SurfaceTransform.z = part->SurfaceOffset.GetX();
-				instance.SurfaceTransform.w = part->SurfaceOffset.GetY();
+				// The shader reads the surface fields behind a flag that is off
+				// for the rest, so a matrix multiply and a normalise for nothing
+				BuildInstance(part, instance, batches[bucket].Texture != White);
 			}
 
 			InstanceFillNanoseconds = SDL_GetTicksNS() - fillStarted;
