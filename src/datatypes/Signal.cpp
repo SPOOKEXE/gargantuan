@@ -259,6 +259,14 @@ namespace gargantuan {
 			lua_Debug info;
 			if (lua_getinfo(mainState, -1, "s", &info) && info.short_src) {
 				label = info.short_src;
+
+				// Luau reports a chunk loaded from a buffer as [string "Name"],
+				// which is three quarters punctuation in a chart row that is
+				// already short of width
+				constexpr std::string_view WRAPPER = "[string \"";
+				if (label.starts_with(WRAPPER) && label.ends_with("\"]")) {
+					label = label.substr(WRAPPER.size(), label.size() - WRAPPER.size() - 2);
+				}
 			} else {
 				label = "?";
 			}

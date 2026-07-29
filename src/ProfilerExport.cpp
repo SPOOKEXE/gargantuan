@@ -155,12 +155,6 @@ namespace gargantuan {
 		// and laying them end to end would claim otherwise
 		for (size_t root : snapshot.Roots) {
 			const Profiler::Zone &zone = snapshot.Zones[root];
-			int rows = 1;
-			for (const auto &candidate : snapshot.Zones) {
-				if (candidate.Depth >= zone.Depth) {
-					rows = std::max(rows, candidate.Depth - zone.Depth + 1);
-				}
-			}
 
 			out << "<h2>" << Escape(zone.Name) << " &mdash; " << Fixed(zone.Milliseconds, 3) << " ms</h2>\n"
 				<< "<div class=\"chart\" style=\"height:" << (DeepestDepth(snapshot) + 1) * 22 << "px\">\n";

@@ -133,6 +133,13 @@ namespace gargantuan {
 				);
 			}
 
+			// What is currently bound, so the loop below can tell a binding that
+			// would change something from one that would not. Reset per pass
+			// rather than kept, because a render pass starts with nothing bound.
+			SDL_GPUTexture *boundSurfaceTexture = nullptr;
+			SDL_GPUBuffer *boundVertexBuffer = nullptr;
+			SDL_GPUBuffer *boundIndexBuffer = nullptr;
+
 			for (auto part : context.WorldRoot->Parts) {
 				// Off the side of the screen, so every uniform push, binding
 				// and draw call below would be work the rasteriser discards
@@ -187,18 +194,35 @@ namespace gargantuan {
 						context.Commands, 1, &fragmentUniforms, sizeof(PartFragmentUniforms)
 					);
 
-					SDL_GPUTextureSamplerBinding partBindings[2] = {
-						shadowBinding,
-						{.texture = surfaceTexture, .sampler = context.SurfaceTextureSampler},
-					};
-					SDL_BindGPUFragmentSamplers(pass, 0, partBindings, 2);
+					// Only when it actually changed. Nearly every part shows the
+					// same white texture as the one before it, and rebinding
+					// the same pair for each of a few thousand parts is a
+					// driver call apiece for no difference in what is drawn.
+					if (surfaceTexture != boundSurfaceTexture) {
+						SDL_GPUTextureSamplerBinding partBindings[2] = {
+							shadowBinding,
+							{.texture = surfaceTexture, .sampler = context.SurfaceTextureSampler},
+						};
+						SDL_BindGPUFragmentSamplers(pass, 0, partBindings, 2);
+						boundSurfaceTexture = surfaceTexture;
+					}
 				}
 
-				SDL_GPUBufferBinding vertexBinding{.buffer = mesh->VertexBuffer, .offset = 0};
-				SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+				// Same again for the geometry. Every part of a given shape
+				// shares one primitive mesh, so a scene of blocks and balls
+				// binds two pairs of buffers however many parts it has -- as
+				// long as it only rebinds when the mesh changes.
+				if (mesh->VertexBuffer != boundVertexBuffer) {
+					SDL_GPUBufferBinding vertexBinding{.buffer = mesh->VertexBuffer, .offset = 0};
+					SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+					boundVertexBuffer = mesh->VertexBuffer;
+				}
 
-				SDL_GPUBufferBinding indexBinding{.buffer = mesh->IndexBuffer, .offset = 0};
-				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				if (mesh->IndexBuffer != boundIndexBuffer) {
+					SDL_GPUBufferBinding indexBinding{.buffer = mesh->IndexBuffer, .offset = 0};
+					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					boundIndexBuffer = mesh->IndexBuffer;
+				}
 
 				SDL_DrawGPUIndexedPrimitives(pass, mesh->IndexCount, 1, 0, 0, 0);
 
@@ -214,24 +238,45 @@ namespace gargantuan {
 		};
 
 	  private:
+		// The two counter names for a shape, formatted once for the run.
+		//
+		// Building them per part per frame is what this replaced, and it was
+		// not free: two string allocations for every part drawn, which at a few
+		// thousand parts was a measurable slice of this pass -- reported by the
+		// profiler, as part of the pass it was inflating.
+		static const std::pair<std::string, std::string> &CounterNames(Enums::PartType shape) {
+			static const std::vector<std::pair<std::string, std::string>> NAMES = [] {
+				std::vector<std::pair<std::string, std::string>> names;
+				for (auto value : magic_enum::enum_values<Enums::PartType>()) {
+					std::string base(magic_enum::enum_name(value));
+					names.emplace_back(base + " Draws", base + " Tris");
+				}
+				return names;
+			}();
+			static const std::pair<std::string, std::string> OTHER{"Other Draws", "Other Tris"};
+
+			auto index = magic_enum::enum_index(shape);
+			return index && *index < NAMES.size() ? NAMES[*index] : OTHER;
+		}
+
 		// Non-const, because Instance::Cast has a const overload set that is
 		// ambiguous on its own and only resolves from a mutable pointer
 		static void CountPrimitive(BasePart *part, uint32_t indexCount) {
 			Profiler *profiler = Profiler::GetCurrent();
-			if (!profiler) {
+			// Asked here rather than left to Add, so that a place with the
+			// panel closed pays nothing at all for counters nobody is reading
+			if (!profiler || !profiler->IsEnabled()) {
 				return;
 			}
 
 			// Everything of one shape lands on one pair of counters, which is
 			// the whole point: three hundred blocks are interesting as three
 			// hundred blocks and not as three hundred rows
-			std::string_view shape = "Other";
-			if (auto *primitive = part->Cast<Part>()) {
-				shape = magic_enum::enum_name(primitive->Shape);
-			}
+			auto *primitive = part->Cast<Part>();
+			const auto &names = CounterNames(primitive ? primitive->Shape : Enums::PartType::Block);
 
-			profiler->Add(std::string(shape) + " Draws", 1);
-			profiler->Add(std::string(shape) + " Tris", indexCount / 3);
+			profiler->Add(primitive ? names.first : "Other Draws", 1);
+			profiler->Add(primitive ? names.second : "Other Tris", indexCount / 3);
 		}
 	};
 

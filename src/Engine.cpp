@@ -137,13 +137,26 @@ namespace gargantuan {
 			return false;
 		}
 
-		float left = ProfilerLayout.ButtonPosition.GetX();
+		// SDL reports the pointer in window coordinates while the panel is
+		// placed in swapchain pixels, and on a display that scales those are
+		// not the same number. The window is created asking for high density,
+		// so this is the ordinary case rather than the exotic one.
+		int windowWidth = 0, windowHeight = 0;
+		int pixelWidth = 0, pixelHeight = 0;
+		SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
+		SDL_GetWindowSizeInPixels(Window, &pixelWidth, &pixelHeight);
+		if (windowWidth > 0 && windowHeight > 0) {
+			x *= (float)pixelWidth / (float)windowWidth;
+			y *= (float)pixelHeight / (float)windowHeight;
+		}
+
+		// Both offsets, because the panel is inset from the left as well as
+		// pushed down under the frame rate counter
+		float left = STATISTICS_MARGIN + ProfilerLayout.ButtonPosition.GetX();
 		float top = PROFILER_TOP + ProfilerLayout.ButtonPosition.GetY();
 		float right = left + ProfilerLayout.ButtonSize.GetX();
 		float bottom = top + ProfilerLayout.ButtonSize.GetY();
 
-		// The panel is drawn at the window's left edge, so the button's window
-		// position is its panel position with only the top offset added
 		if (x < left || x > right || y < top || y > bottom) {
 			return false;
 		}
