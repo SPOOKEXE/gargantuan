@@ -25,6 +25,10 @@ namespace gargantuan {
 		Multiply
 	)
 
+	// What a Save writes. PNG and BMP keep the alpha channel; JPEG has nowhere
+	// to put it and flattens to opaque colour.
+	G_ENUM(SaveFormat, PNG, JPG, BMP)
+
 	// A CPU-side RGBA8 image that Luau can read and write. Camera:Render()
 	// produces one; later on the same object is what a Decal or ImageLabel
 	// will point at, which is why it is an Instance rather than a datatype.
@@ -75,10 +79,16 @@ namespace gargantuan {
 			Enums::ImageCombineType combine
 		);
 
-		// Writes the image out as a PNG. Relative paths resolve against the
-		// executable's directory, the same as Load.
-		bool Save(std::string path);
+		// Writes the image out. Relative paths resolve against the executable's
+		// directory, the same as Load.
+		bool Save(std::string path, Enums::SaveFormat format);
+		// The format the path's own extension asks for, or PNG when it asks for
+		// nothing this engine writes
+		static Enums::SaveFormat GuessSaveFormat(const std::string &path);
 		std::string GetSaveError() const;
+
+		// Hand-written so the format can be left off and read from the path
+		static int LSave(lua_State *L, Instance *instance);
 
 		// Decodes a PNG, JPEG or other stb-supported file into this image.
 		// Relative paths resolve against the executable's directory.

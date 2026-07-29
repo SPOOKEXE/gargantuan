@@ -56,6 +56,8 @@ declare class Enum_PresetShaders extends EnumItem
 end
 declare class Enum_RotationOrder extends EnumItem
 end
+declare class Enum_SaveFormat extends EnumItem
+end
 declare class Enum_ShaderProperty extends EnumItem
 end
 declare class Enum_SignalType extends EnumItem
@@ -398,6 +400,11 @@ declare Enum: {
 		ZXY: Enum_RotationOrder,
 		ZYX: Enum_RotationOrder,
 	},
+	SaveFormat: Enum & {
+		PNG: Enum_SaveFormat,
+		JPG: Enum_SaveFormat,
+		BMP: Enum_SaveFormat,
+	},
 	ShaderProperty: Enum & {
 		None: Enum_ShaderProperty,
 		Background: Enum_ShaderProperty,
@@ -628,6 +635,10 @@ declare class Instance
 	function IsDescendantOf(self, a1: Instance?): boolean
 end
 
+declare class AssetService extends Instance
+	function CreateEditableImage(self, a1: Vector2): EditableImage?
+end
+
 declare class BasePart extends Instance
 	Anchored: boolean
 	CFrame: CFrame
@@ -689,7 +700,7 @@ declare class EditableImage extends Instance
 	function Load(self, a1: string): boolean
 	function ReadPixelsBuffer(self, position: Vector2, size: Vector2): buffer
 	function Resize(self, a1: Vector2): ()
-	function Save(self, a1: string): boolean
+	function Save(self, path: string, format: Enum_SaveFormat?): boolean
 	function WritePixelsBuffer(self, position: Vector2, size: Vector2, pixels: buffer): ()
 end
 

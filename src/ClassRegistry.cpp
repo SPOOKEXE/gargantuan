@@ -14,6 +14,7 @@
 #include "gargantuan/classes/WorldRoot.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/services/Lighting.hpp"
+#include "gargantuan/services/AssetService.hpp"
 #include "gargantuan/services/RenderSettings.hpp"
 #include "gargantuan/services/RunService.hpp"
 #include "gargantuan/services/TweenService.hpp"
@@ -32,6 +33,7 @@
 namespace gargantuan::ClassRegistry {
 	std::unordered_map<std::type_index, Instance::ClassDefinition> &GetDefinitionsMap() {
 		static auto *CLASS_DEFINITIONS = new std::unordered_map<std::type_index, Instance::ClassDefinition>{
+			USE_INSTANCE_DEFINITION(AssetService),
 			USE_INSTANCE_DEFINITION(BasePart),
 			USE_INSTANCE_DEFINITION(Camera),
 			USE_INSTANCE_DEFINITION(ComputeShader),

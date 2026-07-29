@@ -51,6 +51,22 @@ namespace gargantuan::ImageDecoder {
 		return stbi_write_png(path.c_str(), width, height, 4, rgba, width * 4) != 0;
 	}
 
+	bool WriteJpg(const std::string &path, int width, int height, const uint8_t *rgba) {
+		if (!rgba || width <= 0 || height <= 0) {
+			return false;
+		}
+
+		return stbi_write_jpg(path.c_str(), width, height, 4, rgba, JPEG_QUALITY) != 0;
+	}
+
+	bool WriteBmp(const std::string &path, int width, int height, const uint8_t *rgba) {
+		if (!rgba || width <= 0 || height <= 0) {
+			return false;
+		}
+
+		return stbi_write_bmp(path.c_str(), width, height, 4, rgba) != 0;
+	}
+
 	Image DecodeFile(const std::string &path) {
 		Image image;
 

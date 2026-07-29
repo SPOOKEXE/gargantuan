@@ -61,7 +61,9 @@ namespace gargantuan {
 			{"DrawCircle", Method::Wrap<&EditableImage::DrawCircle>()},
 			{"DrawLine", Method::Wrap<&EditableImage::DrawLine>()},
 			{"Load", Method::Wrap<&EditableImage::Load>()},
-			{"Save", Method::Wrap<&EditableImage::Save>()},
+			{"Save",
+			 {&EditableImage::LSave,
+			  []() -> std::string { return "(self, path: string, format: Enum.SaveFormat?): boolean"; }}},
 			{"ReadPixelsBuffer",
 			 {&EditableImage::LReadPixelsBuffer,
 			  []() -> std::string { return "(self, position: Vector2, size: Vector2): buffer"; }}},
@@ -461,7 +463,24 @@ namespace gargantuan {
 		}
 	}
 
-	bool EditableImage::Save(std::string path) {
+	Enums::SaveFormat EditableImage::GuessSaveFormat(const std::string &path) {
+		std::string extension = std::filesystem::path(path).extension().string();
+		for (char &character : extension) {
+			character = (char)std::tolower((unsigned char)character);
+		}
+
+		if (extension == ".jpg" || extension == ".jpeg") {
+			return Enums::SaveFormat::JPG;
+		}
+		if (extension == ".bmp") {
+			return Enums::SaveFormat::BMP;
+		}
+		// Anything else, including no extension at all, gets the format that
+		// loses nothing
+		return Enums::SaveFormat::PNG;
+	}
+
+	bool EditableImage::Save(std::string path, Enums::SaveFormat format) {
 		if (Width <= 0 || Height <= 0) {
 			SaveError = "The image is empty";
 			return false;
@@ -475,13 +494,45 @@ namespace gargantuan {
 		std::error_code ignored;
 		std::filesystem::create_directories(resolved.parent_path(), ignored);
 
-		if (!ImageDecoder::WritePng(resolved.string(), Width, Height, Pixels.data())) {
+		bool written = false;
+		switch (format) {
+		case Enums::SaveFormat::JPG:
+			written = ImageDecoder::WriteJpg(resolved.string(), Width, Height, Pixels.data());
+			break;
+		case Enums::SaveFormat::BMP:
+			written = ImageDecoder::WriteBmp(resolved.string(), Width, Height, Pixels.data());
+			break;
+		case Enums::SaveFormat::PNG:
+		default:
+			written = ImageDecoder::WritePng(resolved.string(), Width, Height, Pixels.data());
+			break;
+		}
+
+		if (!written) {
 			SaveError = "Could not write " + resolved.string();
 			return false;
 		}
 
 		SaveError.clear();
 		return true;
+	}
+
+	int EditableImage::LSave(lua_State *L, Instance *instance) {
+		auto *image = instance->Cast<EditableImage>();
+		if (!image) {
+			luaL_error(L, "Save must be called on an EditableImage");
+			return 0;
+		}
+
+		std::string path = CheckStackValue<std::string>(L, 2);
+		// Left off, the path is asked what it wants. Given, it is obeyed even
+		// when the extension disagrees, since naming the format is a clearer
+		// statement of intent than naming the file.
+		Enums::SaveFormat format =
+			lua_isnoneornil(L, 3) ? GuessSaveFormat(path) : CheckStackValue<Enums::SaveFormat>(L, 3);
+
+		StackValue<bool>::Push(L, image->Save(path, format));
+		return 1;
 	}
 
 	std::string EditableImage::GetSaveError() const {

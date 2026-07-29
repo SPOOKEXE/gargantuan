@@ -24,7 +24,6 @@
 
 ## Platforms
 
-- [x] Linux, x11 and Vulkan
 - [ ] Windows: nothing POSIX-only is left in the engine and CMake copies the
       DLLs, but it has never been built or run. glslc comes from the Vulkan SDK
       there rather than a package.
@@ -69,12 +68,6 @@ eyes. What is missing is the runtime that drives them.
 
 - [ ] Occlusion, so a part hidden behind a wall stops costing a redraw. The
       frustum test cannot see it; something depth-aware has to
-- [ ] Keep a fixed-size list of the parts worth looking at rather than walking
-      all of them. Anything written to goes to the front and pushes the
-      longest-still one off the back, so the sweep is over what moves rather
-      than over the world. Order it by a LastUpdate stamp with a threshold
-      before a swap, or a part sitting on the boundary thrashes in and out
-      every frame and costs more than it saves
 - [ ] Textures
 - [ ] Lighting service
 - [ ] PBR
