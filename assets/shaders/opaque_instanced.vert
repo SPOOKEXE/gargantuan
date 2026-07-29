@@ -27,6 +27,13 @@ layout(set = 1, binding = 0) uniform WorldUniforms {
 struct Instance {
     mat4 ModelMatrix;
     vec4 Color;
+    // The face a picture lands on, in world space, and the rule that
+    // recognises it. Per part because it depends on how the part is turned,
+    // which is the reason a part showing a picture could not be batched before
+    // this rode along in the buffer.
+    vec4 SurfaceNormal;
+    // xy tiles the picture across that face, zw slides it
+    vec4 SurfaceTransform;
 };
 
 // std430 explicitly: the default packing for a buffer block is not it,
@@ -40,6 +47,10 @@ layout(location = 1) out vec4 FragmentColor;
 layout(location = 2) out vec4 WorldPosition;
 layout(location = 3) out vec4 ShadowPosition;
 layout(location = 4) out vec2 FragmentUV;
+// Flat: they are per instance, so interpolating them across a triangle would
+// only blur one constant into itself
+layout(location = 5) flat out vec4 SurfaceNormal;
+layout(location = 6) flat out vec4 SurfaceTransform;
 
 void main() {
     // NOTE: as in opaque.vert, writing any output before gl_Position renders
@@ -53,4 +64,6 @@ void main() {
     WorldPosition = (model * vec4(VertexPosition, 1.0f)).xyzw;
     ShadowPosition = world.ShadowBiasMatrix * WorldPosition;
     FragmentUV = VertexUV;
+    SurfaceNormal = instances[gl_InstanceIndex].SurfaceNormal;
+    SurfaceTransform = instances[gl_InstanceIndex].SurfaceTransform;
 }

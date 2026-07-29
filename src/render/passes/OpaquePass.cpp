@@ -10,6 +10,7 @@
 #include <SDL3/SDL.h>
 #include <magic_enum/magic_enum.hpp>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <memory>
 
@@ -71,13 +72,19 @@ namespace gargantuan {
 		struct alignas(16) InstanceData {
 			glm::mat4 ModelMatrix;
 			glm::vec4 Color;
+			// Carried per instance so a part showing a picture can be batched
+			// too. Which face the picture lands on depends on how the part is
+			// turned, so it is genuinely per part; whether there is a picture
+			// at all is per batch and pushed as a uniform.
+			glm::vec4 SurfaceNormal;
+			glm::vec4 SurfaceTransform;
 		};
 
 		FileShader InstancedShader{
 			.VertexFilepath = GetShaderPath("opaque_instanced.vert"),
 			.VertexUniformBufferCount = 1,
 			.VertexStorageBufferCount = 1,
-			.FragmentFilepath = GetShaderPath("opaque.frag"),
+			.FragmentFilepath = GetShaderPath("opaque_instanced.frag"),
 			.FragmentUniformBufferCount = 2,
 			.FragmentSamplerCount = 2,
 		};
@@ -91,6 +98,9 @@ namespace gargantuan {
 		std::vector<InstanceData> InstanceScratch;
 		struct Batch {
 			GpuMesh *Mesh = nullptr;
+			// Batched on the texture as well as the mesh, because the texture
+			// is bound once for the whole batch
+			SDL_GPUTexture *Texture = nullptr;
 			Enums::PartType Shape = Enums::PartType::Block;
 			uint32_t First = 0;
 			uint32_t Count = 0;
@@ -216,20 +226,25 @@ namespace gargantuan {
 					continue;
 				}
 
-				// A part showing a picture needs its own fragment uniforms and
-				// its own texture bound, so it cannot ride in a batch. It is
-				// set aside and drawn one at a time afterwards -- which is what
-				// every part used to be. A scene that mixes the two gets both:
-				// the plain parts still batch, and only the decorated ones pay.
-				if (anyPartTextures && context.PartTextures->count(part) != 0) {
-					PartBatch.push_back(SKIPPED);
-					Individual.push_back(part);
-					continue;
+				// A part showing a picture batches with the others that show the
+				// same one. It used to be drawn on its own, because the face
+				// the picture lands on differs per part and that lived in a
+				// uniform; it rides in the instance buffer now.
+				// Two pointer tests before the map. The map holds only the parts
+				// that show something, but it was being asked about every part
+				// of every camera -- a hash of a pointer to answer "no" for the
+				// great majority, when the part is carrying the answer itself.
+				SDL_GPUTexture *texture = context.WhiteTexture;
+				if (anyPartTextures && (part->SurfaceCamera || part->SurfaceImage)) {
+					auto found = context.PartTextures->find(part);
+					if (found != context.PartTextures->end() && found->second) {
+						texture = found->second;
+					}
 				}
 
 				uint32_t bucket = SKIPPED;
 				for (uint32_t candidate = 0; candidate < (uint32_t)Batches.size(); candidate++) {
-					if (Batches[candidate].Mesh == mesh.get()) {
+					if (Batches[candidate].Mesh == mesh.get() && Batches[candidate].Texture == texture) {
 						bucket = candidate;
 						break;
 					}
@@ -238,7 +253,7 @@ namespace gargantuan {
 					auto *primitive = part->Cast<Part>();
 					bucket = (uint32_t)Batches.size();
 					Batches.push_back(
-						{mesh.get(), primitive ? primitive->Shape : Enums::PartType::Block, 0, 0}
+						{mesh.get(), texture, primitive ? primitive->Shape : Enums::PartType::Block, 0, 0}
 					);
 				}
 
@@ -267,6 +282,7 @@ namespace gargantuan {
 				Cursors[index] = Batches[index].First;
 			}
 
+			SDL_GPUTexture *White = context.WhiteTexture;
 			for (size_t index = 0; index < parts.size(); index++) {
 				uint32_t bucket = PartBatch[index];
 				if (bucket == SKIPPED) {
@@ -310,6 +326,40 @@ namespace gargantuan {
 				instance.Color.y = colour.y;
 				instance.Color.z = colour.z;
 				instance.Color.w = 1.0f - part->Transparency;
+
+				// Only for the parts that actually show something. The shader
+				// reads these two behind a flag that is off for the rest, and
+				// working them out for every part meant a matrix multiply and a
+				// normalise apiece for the great majority that never look.
+				if (Batches[bucket].Texture == White) {
+					continue;
+				}
+
+				// Carried through the same transform the vertex stage puts the
+				// mesh's own normals through, rather than the correct inverse
+				// transpose. Wrong the same way on both sides, so the two still
+				// line up, which is all a match needs.
+				glm::vec4 match = part->GetSurfaceMatch();
+				float nx = match.x, ny = match.y, nz = match.z;
+				if (nx * nx + ny * ny + nz * nz > 0.0f) {
+					float wx = rotation[0][0] * nx + rotation[1][0] * ny + rotation[2][0] * nz;
+					float wy = rotation[0][1] * nx + rotation[1][1] * ny + rotation[2][1] * nz;
+					float wz = rotation[0][2] * nx + rotation[1][2] * ny + rotation[2][2] * nz;
+					float length = std::sqrt(wx * wx + wy * wy + wz * wz);
+					if (length > 0.0f) {
+						nx = wx / length;
+						ny = wy / length;
+						nz = wz / length;
+					}
+				}
+
+				instance.SurfaceNormal = glm::vec4(nx, ny, nz, match.w);
+				instance.SurfaceTransform = glm::vec4(
+					part->SurfaceTiling.GetX(),
+					part->SurfaceTiling.GetY(),
+					part->SurfaceOffset.GetX(),
+					part->SurfaceOffset.GetY()
+				);
 			}
 
 			InstanceFillNanoseconds = SDL_GetTicksNS() - fillStarted;
@@ -486,21 +536,26 @@ namespace gargantuan {
 				// runs when a scene has pictures on its surfaces.
 				SDL_BindGPUVertexStorageBuffers(pass, 0, &InstanceBuffer, 1);
 
-				PartFragmentUniforms bare{
-					.HasSurfaceTexture = glm::vec4(0.0f),
-					.SurfaceNormal = glm::vec4(0.0f),
-					.SurfaceTransform = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f),
-				};
-				SDL_PushGPUFragmentUniformData(context.Commands, 1, &bare, sizeof(PartFragmentUniforms));
-
-				SDL_GPUTextureSamplerBinding partBindings[2] = {
-					shadowBinding,
-					{.texture = context.WhiteTexture, .sampler = context.SurfaceTextureSampler},
-				};
-				SDL_BindGPUFragmentSamplers(pass, 0, partBindings, 2);
-
 				uint64_t submitStart = measuring ? SDL_GetTicksNS() : 0;
 				for (const Batch &batch : Batches) {
+					// Per batch, not per part: everything in it shares a
+					// texture, so it shares the answer to whether it has one
+					PartFragmentUniforms shared{
+						.HasSurfaceTexture =
+							glm::vec4(batch.Texture != context.WhiteTexture ? 1.0f : 0.0f, 0, 0, 0),
+						.SurfaceNormal = glm::vec4(0.0f),
+						.SurfaceTransform = glm::vec4(0.0f),
+					};
+					SDL_PushGPUFragmentUniformData(
+						context.Commands, 1, &shared, sizeof(PartFragmentUniforms)
+					);
+
+					SDL_GPUTextureSamplerBinding partBindings[2] = {
+						shadowBinding,
+						{.texture = batch.Texture, .sampler = context.SurfaceTextureSampler},
+					};
+					SDL_BindGPUFragmentSamplers(pass, 0, partBindings, 2);
+
 					SDL_GPUBufferBinding vertexBinding{.buffer = batch.Mesh->VertexBuffer, .offset = 0};
 					SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
 
