@@ -65,10 +65,33 @@ namespace gargantuan {
 		// state comparison that would avoid it.
 		uint16_t QuickHash = 0;
 
+		std::vector<Instance *> *ChangeList = nullptr;
+		uint32_t ChangeIndex = 0;
+		bool InChangeList = false;
+
 		// Call after changing this instance from C++, where the write did not
 		// go through the property path that bumps it automatically
 		void MarkChanged() {
 			QuickHash++;
+			if (ChangeList && !InChangeList) {
+				InChangeList = true;
+				ChangeIndex = (uint32_t)ChangeList->size();
+				ChangeList->push_back(this);
+			}
+		}
+
+		void LeaveChangeList() {
+			if (!InChangeList) {
+				return;
+			}
+			std::vector<Instance *> &list = *ChangeList;
+			uint32_t last = (uint32_t)list.size() - 1;
+			if (ChangeIndex != last) {
+				list[ChangeIndex] = list[last];
+				list[ChangeIndex]->ChangeIndex = ChangeIndex;
+			}
+			list.pop_back();
+			InChangeList = false;
 		}
 		std::vector<std::shared_ptr<Instance>> Children;
 		Instance *Parent = nullptr;

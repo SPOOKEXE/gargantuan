@@ -12,7 +12,9 @@ namespace gargantuan {
 		static const ClassDefinition DEFINITION;
 		std::vector<std::shared_ptr<BasePart>> Parts;
 		std::vector<BasePart *> RawParts;
+		std::vector<Instance *> DirtyParts;
 
 		WorldRoot();
+		~WorldRoot();
 	};
 } // namespace gargantuan

@@ -19,6 +19,8 @@ namespace gargantuan {
 				part->WorldIndex = (uint32_t)this->Parts.size();
 				this->Parts.push_back(part);
 				this->RawParts.push_back(part.get());
+				part->ChangeList = &this->DirtyParts;
+				part->MarkChanged();
 			}
 		});
 
@@ -33,14 +35,25 @@ namespace gargantuan {
 				return;
 			}
 
+			part->LeaveChangeList();
+			part->ChangeList = nullptr;
+
 			uint32_t last = (uint32_t)this->RawParts.size() - 1;
 			if (index != last) {
 				this->Parts[index] = std::move(this->Parts[last]);
 				this->RawParts[index] = this->RawParts[last];
 				this->RawParts[index]->WorldIndex = index;
+				this->RawParts[index]->MarkChanged();
 			}
 			this->Parts.pop_back();
 			this->RawParts.pop_back();
 		});
+	}
+
+	WorldRoot::~WorldRoot() {
+		for (BasePart *part : RawParts) {
+			part->InChangeList = false;
+			part->ChangeList = nullptr;
+		}
 	}
 } // namespace gargantuan

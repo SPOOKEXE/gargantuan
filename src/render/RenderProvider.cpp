@@ -2053,24 +2053,34 @@ namespace gargantuan {
 
 	void RenderProvider::SyncPartRows(const std::shared_ptr<WorldRoot> &world) const {
 		const size_t count = world ? world->RawParts.size() : 0;
-		if (PartRows.size() != count) {
+		const size_t previous = PartRows.size();
+		if (previous != count) {
+			for (size_t index = count; index < previous; index++) {
+				PartsMix -= PartRows[index].StaticMix;
+			}
 			PartRows.resize(count);
 			PartInstances.resize(count);
-			// Zero is a real QuickHash, so a resized row has to look stale.
-			PartRowHash.assign(count, 0xFFFFu);
+			SurfaceRowsStale = true;
 		}
-		if (count == 0) {
+		if (!world) {
+			return;
+		}
+
+		std::vector<Instance *> &dirty = world->DirtyParts;
+		if (dirty.empty()) {
 			return;
 		}
 
 		BasePart *const *rawParts = world->RawParts.data();
 		PartRow *rows = PartRows.data();
 		InstanceData *instances = PartInstances.data();
-		uint16_t *hashes = PartRowHash.data();
 
-		for (size_t index = 0; index < count; index++) {
-			BasePart *part = rawParts[index];
-			if (hashes[index] == part->QuickHash) {
+		for (Instance *changed : dirty) {
+			changed->InChangeList = false;
+
+			BasePart *part = static_cast<BasePart *>(changed);
+			const size_t index = part->WorldIndex;
+			if (index >= count || rawParts[index] != part) {
 				continue;
 			}
 
@@ -2082,19 +2092,67 @@ namespace gargantuan {
 			row.Radius = std::sqrt(size.x * size.x + size.y * size.y + size.z * size.z) * 0.5f;
 			row.CastShadow = part->CastShadow;
 
-			row.SurfaceCamera = part->SurfaceCamera.get();
-			row.SurfaceImage = part->SurfaceImage.get();
-			row.HasSurfaceCamera = row.SurfaceCamera != nullptr;
-			row.HasSurface = row.HasSurfaceCamera || row.SurfaceImage != nullptr;
+			Camera *camera = part->SurfaceCamera.get();
+			EditableImage *image = part->SurfaceImage.get();
+			if (camera != row.SurfaceCamera || image != row.SurfaceImage) {
+				SurfaceRowsStale = true;
+			}
+			row.SurfaceCamera = camera;
+			row.SurfaceImage = image;
+			row.HasSurfaceCamera = camera != nullptr;
+			row.HasSurface = row.HasSurfaceCamera || image != nullptr;
 
 			// Pointer catches replacement; QuickHash catches property writes.
-			row.StaticMix = 0xCBF29CE484222325ull;
-			MixPointer(row.StaticMix, part);
-			MixBits(row.StaticMix, part->QuickHash);
+			uint64_t mix = 0xCBF29CE484222325ull;
+			MixPointer(mix, part);
+			MixBits(mix, part->QuickHash);
+			PartsMix += mix - row.StaticMix;
+			row.StaticMix = mix;
 
 			BuildInstance(part, instances[index]);
-			hashes[index] = part->QuickHash;
 		}
+
+		dirty.clear();
+	}
+
+	void RenderProvider::RebuildSurfaceRows() const {
+		SurfaceCameras.clear();
+		SurfaceImages.clear();
+
+		uint64_t surfaces = 0x9E3779B97F4A7C15ull;
+		MixBits(surfaces, TargetGeneration);
+		MixBits(surfaces, PartRows.size());
+
+		for (size_t index = 0; index < PartRows.size(); index++) {
+			const PartRow &row = PartRows[index];
+			if (!row.HasSurface) {
+				continue;
+			}
+
+			// Which part reads which source, so the resolved texture table is
+			// thrown away when that changes
+			MixBits(surfaces, index);
+			MixPointer(surfaces, row.SurfaceCamera);
+			MixPointer(surfaces, row.SurfaceImage);
+
+			if (row.SurfaceCamera) {
+				SurfaceCameras.push_back(row.SurfaceCamera);
+			}
+			if (row.SurfaceImage) {
+				SurfaceImages.push_back(row.SurfaceImage);
+			}
+		}
+
+		// Sharing is the normal case, so this is where the list gets short
+		std::sort(SurfaceCameras.begin(), SurfaceCameras.end());
+		SurfaceCameras.erase(std::unique(SurfaceCameras.begin(), SurfaceCameras.end()), SurfaceCameras.end());
+		std::sort(SurfaceImages.begin(), SurfaceImages.end());
+		SurfaceImages.erase(std::unique(SurfaceImages.begin(), SurfaceImages.end()), SurfaceImages.end());
+
+		WorldHasSurfaceCameras = !SurfaceCameras.empty();
+		SurfaceSignature = surfaces;
+		SurfaceRowsGeneration = TargetGeneration;
+		SurfaceRowsStale = false;
 	}
 
 	uint64_t RenderProvider::ComputeSceneSignature(
@@ -2110,51 +2168,32 @@ namespace gargantuan {
 		// Count distinguishes simultaneous removal and insertion.
 		MixBits(hash, world->RawParts.size());
 
-		// QuickHash invalidates the prior surface-presence answer.
-		const bool hadSurfaces = WorldHasSurfaces;
 
-		// Derive while these fields are already hot.
-		WorldHasSurfaceCameras = false;
-		WorldHasSurfaces = false;
-
-		// Hash while these fields are already read.
-		uint64_t surfaces = 0x9E3779B97F4A7C15ull;
-		MixBits(surfaces, TargetGeneration);
 		MixBits(surfaces, world->RawParts.size());
 
 		SyncPartRows(world);
 
-		const size_t partCount = world->RawParts.size();
-		const PartRow *rows = PartRows.data();
+		// Every part's fixed share of the hash, summed as the rows were built
+		MixBits(hash, PartsMix);
 
-		for (size_t index = 0; index < partCount; index++) {
-			const PartRow &row = rows[index];
-			MixBits(hash, row.StaticMix);
-
-			if (!row.HasSurface) {
-				continue;
-			}
-
-			// Detect here so later walks skip absent surface sources.
-			WorldHasSurfaces = true;
-			WorldHasSurfaceCameras = WorldHasSurfaceCameras || row.HasSurfaceCamera;
-
-			// The source is fixed until the part changes, but what it holds is
-			// not, so this part cannot be cached with the rest of the row.
-			MixPointer(surfaces, rows + index);
-			MixPointer(surfaces, row.SurfaceCamera);
-			MixPointer(surfaces, row.SurfaceImage);
-
-			if (hadSurfaces) {
-				MixPointer(hash, row.SurfaceCamera);
-				MixBits(hash, GetCameraDrawCount(row.SurfaceCamera));
-				MixPointer(hash, row.SurfaceImage);
-				MixBits(hash, row.SurfaceImage ? row.SurfaceImage->GetRevision() : 0);
-			}
+		if (SurfaceRowsStale || SurfaceRowsGeneration != TargetGeneration) {
+			RebuildSurfaceRows();
 		}
 
-		SurfaceSignature = surfaces;
-		SyncPartRows(world);
+		// Lets later walks skip absent surface sources.
+		WorldHasSurfaces = !SurfaceCameras.empty() || !SurfaceImages.empty();
+
+		// Which source a part reads is fixed until the part changes, but what
+		// that source holds is not, so this cannot be cached with the rows.
+		for (Camera *camera : SurfaceCameras) {
+			MixPointer(hash, camera);
+			MixBits(hash, GetCameraDrawCount(camera));
+		}
+		for (EditableImage *image : SurfaceImages) {
+			MixPointer(hash, image);
+			MixBits(hash, image->GetRevision());
+		}
+
 		return hash;
 	}
 
@@ -2227,7 +2266,7 @@ namespace gargantuan {
 
 		const size_t total = world->RawParts.size();
 		// A world mutated since the signature pass, or one drawn without one.
-		if (PartRows.size() != total) {
+		if (PartRows.size() != total || !world->DirtyParts.empty()) {
 			SyncPartRows(world);
 		}
 

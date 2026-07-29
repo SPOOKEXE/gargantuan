@@ -162,10 +162,17 @@ namespace gargantuan {
 			uint64_t StaticMix = 0;
 		};
 		mutable std::vector<PartRow> PartRows;
-		mutable std::vector<uint16_t> PartRowHash;
 		// The built instance, so the opaque pass copies rather than computes
 		mutable std::vector<InstanceData> PartInstances;
 		void SyncPartRows(const std::shared_ptr<WorldRoot> &world) const;
+
+		mutable uint64_t PartsMix = 0;
+
+		mutable std::vector<Camera *> SurfaceCameras;
+		mutable std::vector<EditableImage *> SurfaceImages;
+		mutable bool SurfaceRowsStale = true;
+		mutable uint64_t SurfaceRowsGeneration = 0;
+		void RebuildSurfaceRows() const;
 
 		// Reused culling chunk storage.
 		struct CullResult {
