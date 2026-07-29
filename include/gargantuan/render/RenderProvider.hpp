@@ -174,6 +174,41 @@ namespace gargantuan {
 		mutable uint64_t SurfaceRowsGeneration = 0;
 		void RebuildSurfaceRows() const;
 
+		// A uniform grid over the rows, so the walk asks about boxes of parts
+		// rather than parts. Rows keep their world order; this only decides
+		// what order the walk visits them in, and lets a box that is wholly
+		// inside or wholly outside the view answer for all of its parts at
+		// once. Only the cells holding something are kept.
+		struct PartGrid {
+			glm::vec3 Origin{0.0f};
+			float CellSize = 1.0f;
+			int32_t Counts[3] = {1, 1, 1};
+
+			// Row indices grouped by cell, and where each group starts
+			std::vector<uint32_t> Rows;
+			std::vector<uint32_t> Starts;
+			std::vector<glm::vec3> Centres;
+			// Half a cell plus the largest radius inside it, since a part
+			// reaches past the cell its centre landed in
+			std::vector<float> Extents;
+			std::vector<uint8_t> Casts;
+			size_t Largest = 0;
+		};
+		mutable PartGrid Grid;
+		mutable bool GridStale = true;
+		// The same instances again in grid order, which is the order the walk
+		// hands out, so the opaque pass reads a cell's parts as a run rather
+		// than as a hundred jumps through the world-ordered set
+		mutable std::vector<InstanceData> DrawInstances;
+		mutable std::vector<BasePart *> DrawParts;
+		// Where a row sits in that order, so a row rebuilt on its own can put
+		// itself in both
+		mutable std::vector<uint32_t> RowPositions;
+		// Which cell each row landed in, so a row that moved can say whether
+		// it left its cell without the grid being rebuilt to find out
+		mutable std::vector<uint32_t> RowCells;
+		void RebuildGrid(const std::shared_ptr<WorldRoot> &world) const;
+
 		// Reused culling chunk storage.
 		struct CullResult {
 			bool InView = false;

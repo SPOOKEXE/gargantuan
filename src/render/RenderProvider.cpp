@@ -1654,7 +1654,7 @@ namespace gargantuan {
 		EnsureWhiteTexture();
 		ResolvePartTextures(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
-		frameContext.PartInstances = &PartInstances;
+		frameContext.PartInstances = &DrawInstances;
 		frameContext.SurfaceTextures = &SurfaceTextures;
 		frameContext.SurfaceSlotsComplete = SurfaceSlotsComplete;
 		frameContext.WhiteTexture = WhiteTexture;
@@ -1971,6 +1971,21 @@ namespace gargantuan {
 			return true;
 		}
 
+		int BoxAgainstPlanes(const SidePlanes &planes, glm::vec3 centre, float extent) {
+			int state = 1;
+			for (const auto &plane : planes.Planes) {
+				float distance = plane.x * centre.x + plane.y * centre.y + plane.z * centre.z + plane.w;
+				float reach = (std::abs(plane.x) + std::abs(plane.y) + std::abs(plane.z)) * extent;
+				if (distance < -reach) {
+					return -1;
+				}
+				if (distance < reach) {
+					state = 0;
+				}
+			}
+			return state;
+		}
+
 		bool CapsuleInside(const SidePlanes &planes, glm::vec3 from, glm::vec3 to, float radius) {
 			for (const auto &plane : planes.Planes) {
 				// Reject only when both capsule ends lie outside one plane.
@@ -2051,6 +2066,16 @@ namespace gargantuan {
 		}
 	} // namespace
 
+	namespace {
+		uint32_t GridCellOf(const RenderProvider::PartGrid &grid, glm::vec3 point) {
+			glm::vec3 local = (point - grid.Origin) / grid.CellSize;
+			int32_t x = std::clamp((int32_t)local.x, 0, grid.Counts[0] - 1);
+			int32_t y = std::clamp((int32_t)local.y, 0, grid.Counts[1] - 1);
+			int32_t z = std::clamp((int32_t)local.z, 0, grid.Counts[2] - 1);
+			return (uint32_t)((z * grid.Counts[1] + y) * grid.Counts[0] + x);
+		}
+	} // namespace
+
 	void RenderProvider::SyncPartRows(const std::shared_ptr<WorldRoot> &world) const {
 		const size_t count = world ? world->RawParts.size() : 0;
 		const size_t previous = PartRows.size();
@@ -2061,6 +2086,7 @@ namespace gargantuan {
 			PartRows.resize(count);
 			PartInstances.resize(count);
 			SurfaceRowsStale = true;
+			GridStale = true;
 		}
 		if (!world) {
 			return;
@@ -2088,8 +2114,18 @@ namespace gargantuan {
 
 			// Half-diagonal bounds every box rotation conservatively.
 			const glm::vec3 &size = part->Size;
-			row.Centre = part->CFrame.Position;
-			row.Radius = std::sqrt(size.x * size.x + size.y * size.y + size.z * size.z) * 0.5f;
+			const glm::vec3 centre = part->CFrame.Position;
+			const float radius = std::sqrt(size.x * size.x + size.y * size.y + size.z * size.z) * 0.5f;
+
+			if (!GridStale && index < RowCells.size()) {
+				if (radius > row.Radius || (part->CastShadow && !row.CastShadow) ||
+					GridCellOf(Grid, centre) != RowCells[index]) {
+					GridStale = true;
+				}
+			}
+
+			row.Centre = centre;
+			row.Radius = radius;
 			row.CastShadow = part->CastShadow;
 
 			Camera *camera = part->SurfaceCamera.get();
@@ -2110,9 +2146,136 @@ namespace gargantuan {
 			row.StaticMix = mix;
 
 			BuildInstance(part, instances[index]);
+			if (!GridStale) {
+				DrawInstances[RowPositions[index]] = instances[index];
+			}
 		}
 
 		dirty.clear();
+	}
+
+	void RenderProvider::RebuildGrid(const std::shared_ptr<WorldRoot> &world) const {
+		G_PROFILE("Grid Rebuild");
+		GridStale = false;
+
+		const size_t count = PartRows.size();
+		Grid.Rows.clear();
+		Grid.Starts.clear();
+		Grid.Centres.clear();
+		Grid.Extents.clear();
+		Grid.Casts.clear();
+		Grid.Largest = 0;
+		RowCells.assign(count, 0);
+		if (count == 0) {
+			Grid.Counts[0] = Grid.Counts[1] = Grid.Counts[2] = 1;
+			return;
+		}
+
+		const PartRow *rows = PartRows.data();
+
+		glm::vec3 low = rows[0].Centre;
+		glm::vec3 high = rows[0].Centre;
+		for (size_t index = 1; index < count; index++) {
+			const glm::vec3 &centre = rows[index].Centre;
+			low.x = std::min(low.x, centre.x);
+			low.y = std::min(low.y, centre.y);
+			low.z = std::min(low.z, centre.z);
+			high.x = std::max(high.x, centre.x);
+			high.y = std::max(high.y, centre.y);
+			high.z = std::max(high.z, centre.z);
+		}
+
+		constexpr float TARGET_PER_CELL = 96.0f;
+		constexpr int64_t MAXIMUM_CELLS = 1 << 18;
+
+		glm::vec3 span = glm::max(high - low, glm::vec3(1.0f));
+		float wanted = std::max(1.0f, (float)count / TARGET_PER_CELL);
+		float cellSize = std::cbrt(span.x * span.y * span.z / wanted);
+
+		int64_t total = 0;
+		for (int attempt = 0; attempt < 8; attempt++) {
+			cellSize = std::max(cellSize, 0.001f);
+			total = 1;
+			for (int axis = 0; axis < 3; axis++) {
+				int32_t sides = (int32_t)(span[axis] / cellSize) + 1;
+				Grid.Counts[axis] = std::clamp(sides, 1, 1024);
+				total *= Grid.Counts[axis];
+			}
+			if (total <= MAXIMUM_CELLS) {
+				break;
+			}
+			cellSize *= std::cbrt((float)total / (float)MAXIMUM_CELLS) * 1.05f;
+		}
+
+		Grid.Origin = low;
+		Grid.CellSize = cellSize;
+
+		std::vector<uint32_t> cursors((size_t)total + 1, 0);
+		for (size_t index = 0; index < count; index++) {
+			uint32_t cell = GridCellOf(Grid, rows[index].Centre);
+			RowCells[index] = cell;
+			cursors[cell + 1]++;
+		}
+
+		size_t used = 0;
+		for (size_t cell = 0; cell < (size_t)total; cell++) {
+			if (cursors[cell + 1] != 0) {
+				used++;
+			}
+			cursors[cell + 1] += cursors[cell];
+		}
+
+		Grid.Rows.resize(count);
+		{
+			std::vector<uint32_t> place(cursors.begin(), cursors.end() - 1);
+			for (size_t index = 0; index < count; index++) {
+				Grid.Rows[place[RowCells[index]]++] = (uint32_t)index;
+			}
+		}
+
+		RowPositions.resize(count);
+		DrawInstances.resize(count);
+		DrawParts.resize(count);
+		BasePart *const *sorted = world ? world->RawParts.data() : nullptr;
+		for (size_t at = 0; at < count; at++) {
+			uint32_t index = Grid.Rows[at];
+			RowPositions[index] = (uint32_t)at;
+			DrawInstances[at] = PartInstances[index];
+			DrawParts[at] = sorted ? sorted[index] : nullptr;
+		}
+
+		Grid.Starts.reserve(used + 1);
+		Grid.Centres.reserve(used);
+		Grid.Extents.reserve(used);
+		Grid.Casts.reserve(used);
+
+		const float half = cellSize * 0.5f;
+		for (size_t cell = 0; cell < (size_t)total; cell++) {
+			uint32_t start = cursors[cell];
+			uint32_t stop = cursors[cell + 1];
+			if (start == stop) {
+				continue;
+			}
+
+			float reach = 0.0f;
+			uint8_t casts = 0;
+			for (uint32_t at = start; at < stop; at++) {
+				const PartRow &row = rows[Grid.Rows[at]];
+				reach = std::max(reach, row.Radius);
+				casts |= row.CastShadow ? 1 : 0;
+			}
+
+			int32_t x = (int32_t)(cell % (size_t)Grid.Counts[0]);
+			int32_t y = (int32_t)((cell / (size_t)Grid.Counts[0]) % (size_t)Grid.Counts[1]);
+			int32_t z = (int32_t)(cell / ((size_t)Grid.Counts[0] * (size_t)Grid.Counts[1]));
+
+			Grid.Starts.push_back(start);
+			Grid.Centres.push_back(low + glm::vec3((float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f) * cellSize);
+			Grid.Extents.push_back(half + reach);
+			Grid.Casts.push_back(casts);
+			Grid.Largest = std::max(Grid.Largest, (size_t)(stop - start));
+		}
+		Grid.Starts.push_back((uint32_t)count);
 	}
 
 	void RenderProvider::RebuildSurfaceRows() const {
@@ -2250,21 +2413,19 @@ namespace gargantuan {
 
 		uint64_t visible = 0;
 
-		// Chunking keeps probes cheaper than work and improves field locality.
-		constexpr size_t CHUNK = 256;
 		Profiler *profiler = Profiler::GetCurrent();
 		const bool measuring = profiler && profiler->IsEnabled();
 		uint64_t cullNanoseconds = 0;
 		uint64_t gatherNanoseconds = 0;
 		uint64_t signatureNanoseconds = 0;
 
-		// Reused across chunks and frames.
-		CullScratch.resize(CHUNK);
-
 		const size_t total = world->RawParts.size();
 		// A world mutated since the signature pass, or one drawn without one.
 		if (PartRows.size() != total || !world->DirtyParts.empty()) {
 			SyncPartRows(world);
+		}
+		if (GridStale) {
+			RebuildGrid(world);
 		}
 
 		BasePart *const *rawParts = world->RawParts.data();
@@ -2275,52 +2436,82 @@ namespace gargantuan {
 		size_t inViewCount = 0;
 		size_t shadowCount = 0;
 
-		for (size_t start = 0; start < total; start += CHUNK) {
-			const size_t stop = std::min(start + CHUNK, total);
+		CullScratch.resize(std::max<size_t>(Grid.Largest, 1));
+
+		const size_t cellCount = Grid.Centres.size();
+		const uint32_t *gridRows = Grid.Rows.data();
+		BasePart *const *drawParts = DrawParts.data();
+
+		for (size_t cell = 0; cell < cellCount; cell++) {
+			const uint32_t cellStart = Grid.Starts[cell];
+			const uint32_t *members = gridRows + cellStart;
+			BasePart *const *cellParts = drawParts + cellStart;
+			const size_t memberCount = Grid.Starts[cell + 1] - cellStart;
+			const bool cellCasts = Grid.Casts[cell] != 0;
 
 			uint64_t cullStart = measuring ? SDL_GetTicksNS() : 0;
-			for (size_t index = start; index < stop; index++) {
-				const PartRow &bound = bounds[index];
-				CullResult &result = CullScratch[index - start];
+			int side = BoxAgainstPlanes(planes, Grid.Centres[cell], Grid.Extents[cell]);
 
-				const glm::vec3 &centre = bound.Centre;
-				const float radius = bound.Radius;
+			const bool decided = !cellCasts && side != 0 && !needSignature;
+			if (decided && side < 0) {
+				if (measuring) {
+					cullNanoseconds += SDL_GetTicksNS() - cullStart;
+				}
+				continue;
+			}
 
-				result.InView = SphereInside(planes, centre, radius);
+			if (!decided) {
+				const bool allInside = side > 0;
+				const bool allOutside = side < 0;
+				for (size_t at = 0; at < memberCount; at++) {
+					const PartRow &bound = bounds[members[at]];
+					CullResult &result = CullScratch[at];
 
-				// A caster outside the shadow map's own box cannot appear in
-				// it however far its shadow reaches, and the box is small next
-				// to a large world. Cheap sphere test, deliberately loose.
-				float reach = SHADOW_VOLUME_RADIUS + radius;
-				bool inShadowVolume = bound.CastShadow &&
-					centre.x * centre.x + centre.y * centre.y + centre.z * centre.z <= reach * reach;
+					const glm::vec3 &centre = bound.Centre;
+					const float radius = bound.Radius;
 
-				// Sweep only offscreen casters along their shadow reach.
-				result.ShadowReaches = !result.InView && inShadowVolume &&
-					CapsuleInside(planes, centre, centre + shadowStep, radius);
-				result.CastsShadow = inShadowVolume && (result.InView || result.ShadowReaches);
+					result.InView = allInside || (!allOutside && SphereInside(planes, centre, radius));
+
+					float reach = SHADOW_VOLUME_RADIUS + radius;
+					bool inShadowVolume = bound.CastShadow &&
+						centre.x * centre.x + centre.y * centre.y + centre.z * centre.z <= reach * reach;
+
+					result.ShadowReaches = !result.InView && inShadowVolume &&
+						CapsuleInside(planes, centre, centre + shadowStep, radius);
+					result.CastsShadow = inShadowVolume && (result.InView || result.ShadowReaches);
+				}
 			}
 			if (measuring) {
 				cullNanoseconds += SDL_GetTicksNS() - cullStart;
 			}
 
 			uint64_t gatherStart = measuring ? SDL_GetTicksNS() : 0;
-			for (size_t index = start; index < stop; index++) {
-				BasePart *part = rawParts[index];
-				const CullResult &result = CullScratch[index - start];
-				if (result.InView) {
+			if (decided) {
+				for (size_t at = 0; at < memberCount; at++) {
+					BasePart *part = cellParts[at];
 					if (needSets) {
 						out.InView.insert(part);
 					}
-					inViewIndexOut[inViewCount] = (uint32_t)index;
+					inViewIndexOut[inViewCount] = (uint32_t)(cellStart + at);
 					inViewOut[inViewCount++] = part;
 				}
-				// ShadowList is a superset of visible shadow casters.
-				if (result.CastsShadow) {
-					if (needSets) {
-						out.ShadowsIntoView.insert(part);
+			} else {
+				for (size_t at = 0; at < memberCount; at++) {
+					BasePart *part = cellParts[at];
+					const CullResult &result = CullScratch[at];
+					if (result.InView) {
+						if (needSets) {
+							out.InView.insert(part);
+						}
+						inViewIndexOut[inViewCount] = (uint32_t)(cellStart + at);
+						inViewOut[inViewCount++] = part;
 					}
-					shadowOut[shadowCount++] = part;
+					if (result.CastsShadow) {
+						if (needSets) {
+							out.ShadowsIntoView.insert(part);
+						}
+						shadowOut[shadowCount++] = part;
+					}
 				}
 			}
 			if (measuring) {
@@ -2332,9 +2523,9 @@ namespace gargantuan {
 			}
 
 			uint64_t signatureStart = measuring ? SDL_GetTicksNS() : 0;
-			for (size_t index = start; index < stop; index++) {
-				BasePart *part = rawParts[index];
-				const CullResult &result = CullScratch[index - start];
+			for (size_t at = 0; at < memberCount; at++) {
+				BasePart *part = cellParts[at];
+				const CullResult &result = CullScratch[at];
 				// Hash visible parts and offscreen casters affecting view.
 				if (!result.InView && !result.ShadowReaches) {
 					continue;
@@ -2853,7 +3044,7 @@ namespace gargantuan {
 		EnsureWhiteTexture();
 		ResolvePartTextures(drawContext.WorldRoot);
 		frameContext.PartTextures = &PartTextures;
-		frameContext.PartInstances = &PartInstances;
+		frameContext.PartInstances = &DrawInstances;
 		frameContext.SurfaceTextures = &SurfaceTextures;
 		frameContext.SurfaceSlotsComplete = SurfaceSlotsComplete;
 		frameContext.WhiteTexture = WhiteTexture;
