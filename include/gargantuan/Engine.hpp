@@ -46,8 +46,16 @@ namespace gargantuan {
 		// DistributedGameTime advanced in 1 ms jumps, which rounded every
 		// camera interval up to the next millisecond -- asking for 240 fps got
 		// 200, because 4.17 ms became 5.
+		// A frame that spanned a stall is not a frame anybody rendered. Left
+		// unclamped, coming back from a minimised or unfocused window hands the
+		// whole gap to the simulation at once and everything teleports; the
+		// tenth of a second here is far longer than a real frame and far
+		// shorter than the pause it is guarding against.
+		static constexpr float MAXIMUM_DELTA_SECONDS = 0.1f;
+
 		float GetDeltaTime() {
-			return (float)((double)(CurrentTick - LastTick) / 1000000000.0);
+			float delta = (float)((double)(CurrentTick - LastTick) / 1000000000.0);
+			return delta > MAXIMUM_DELTA_SECONDS ? MAXIMUM_DELTA_SECONDS : delta;
 		};
 		void ProcessEvent(SDL_Event event);
 		void Step();
@@ -83,6 +91,18 @@ namespace gargantuan {
 		static constexpr float STATISTICS_MARGIN = 8.0f;
 
 		void UpdateStatistics(double now, float deltaTime);
+
+		// Real time until which frames are not counted, set when the window
+		// comes back from a focus change or an unminimise.
+		//
+		// Not one frame but a short settle. The compositor stops presenting
+		// while the window is away and then lets a burst through at once, so
+		// what arrives is one frame spanning the whole gap followed by several
+		// of almost no length at all. One reads as a minimum of about five
+		// frames a second and the others as a maximum of over a thousand, and
+		// both then sit in the counter for its whole twenty second window.
+		static constexpr double SETTLE_AFTER_RESUME = 0.3;
+		double SettleUntil = 0.0;
 
 		// F6 shows the flame chart. Kept apart from the F3 counter because they
 		// answer different questions and cost different amounts: the counter is

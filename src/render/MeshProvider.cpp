@@ -5,6 +5,7 @@
 #include <memory>
 
 namespace gargantuan::MeshProvider {
+	uint64_t Generation = 1;
 	namespace {
 		std::unordered_map<std::string, Mesh> UnloadedMeshes = {
 			{"gargantuan://meshes/Ball", PrimitiveMeshes::Sphere()},
@@ -15,6 +16,7 @@ namespace gargantuan::MeshProvider {
 		};
 
 		std::unordered_map<std::string, std::unique_ptr<GpuMesh>> GpuMeshes;
+
 	} // namespace
 
 	// By reference: taken by value, every caller paid for a copy of the key on
@@ -23,11 +25,19 @@ namespace gargantuan::MeshProvider {
 		return GpuMeshes[id];
 	}
 
+	std::unique_ptr<GpuMesh> *GetGpuMeshSlot(const std::string &id) {
+		return &GpuMeshes[id];
+	}
+
+
+
 	void Destroy(SDL_GPUDevice *gpu) {
 		for (auto &[meshId, gpuMesh] : GpuMeshes) {
 			gpuMesh->Destroy(gpu);
 		}
 		GpuMeshes.clear();
+		// Every slot handed out is now dangling; saying so is what stops it
+		Generation++;
 	}
 
 	void UploadToGpu(SDL_GPUDevice *gpu) {

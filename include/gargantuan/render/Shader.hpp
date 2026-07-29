@@ -26,6 +26,9 @@ namespace gargantuan {
 		std::filesystem::path VertexFilepath;
 		Uint32 VertexUniformBufferCount = 1;
 		Uint32 VertexSamplerCount = 0;
+		// A vertex stage reading per-instance data out of a buffer rather than
+		// being told about one object at a time
+		Uint32 VertexStorageBufferCount = 0;
 
 		std::filesystem::path FragmentFilepath;
 		Uint32 FragmentUniformBufferCount = 0;

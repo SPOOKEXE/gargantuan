@@ -63,6 +63,10 @@ eyes. What is missing is the runtime that drives them.
       match what opaque.vert emits
 - [ ] Add mesh edge and mesh face inputs as well
 
+## Profiling and Tracing
+
+- [ ] https://github.com/wolfpld/tracy
+
 ## Render
 
 - [ ] Offscreen and un-used cameras still render (at their high frame rate), fix. (i.e. offscreen, not used onscreen, etc). Could render at a slower rate instead (1-5fps for example). Could also add a slightly wider FOV check than what the cameras see to scan for ones we need to render faster.
@@ -86,6 +90,7 @@ eyes. What is missing is the runtime that drives them.
       a decision about how many one draw can carry
 - [ ] PBR
 - [ ] Ensure batched, parallel, vectorised and SIMD compute across the board (use stress test to find bottlenecks).
+- [ ] For shapes that are "flat" on axis, add per-cardinal 3d direction (up/down/left/right/forward/backward) face grouping so we can skip rendering faces that are pointing away from camera and are out of view. Refer to video https://www.youtube.com/watch?v=40JzyaOYJeY
 
 ## Scripting
 

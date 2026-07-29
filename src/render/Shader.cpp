@@ -77,7 +77,7 @@ namespace gargantuan {
 					.stage = SDL_GPU_SHADERSTAGE_VERTEX,
 					.num_samplers = VertexSamplerCount,
 					.num_storage_textures = 0,
-					.num_storage_buffers = 0,
+					.num_storage_buffers = VertexStorageBufferCount,
 					.num_uniform_buffers = VertexUniformBufferCount,
 				}
 			);

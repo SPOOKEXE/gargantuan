@@ -1,5 +1,7 @@
 // #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
+#include <algorithm>
+#include <cmath>
 #include "gargantuan/Profiler.hpp"
 #include "gargantuan/render/RenderProvider.hpp"
 #include "gargantuan/classes/BasePart.hpp"
@@ -904,7 +906,10 @@ namespace gargantuan {
 	void RenderProvider::ResolvePartTextures(const std::shared_ptr<WorldRoot> &worldRoot) {
 		G_PROFILE("Part Textures");
 		PartTextures.clear();
-		if (!worldRoot) {
+		// Nothing in the world is showing anything, so there is nothing to walk
+		// the world for. The flag came off the scene signature, which read the
+		// same two fields a moment ago.
+		if (!worldRoot || !WorldHasSurfaces) {
 			return;
 		}
 
@@ -2043,13 +2048,31 @@ namespace gargantuan {
 		// anywhere on the inside. A capsule rather than a sphere because a
 		// part throws its shadow along a line, and that line has to be tested
 		// too; passing the same point twice makes it a plain sphere test.
+		// The capsule test with both ends at the same point, written out so it
+		// does half the dot products. Every part in the world goes through this
+		// one, and only the casters go through the swept version below.
+		bool SphereInside(const SidePlanes &planes, glm::vec3 centre, float radius) {
+			// Written out in plain floats. glm::dot and the vec3 built from the
+			// plane are function calls until something inlines them, and this
+			// runs four times for every part in the world every frame -- which
+			// made it the single largest row on the profile.
+			for (const auto &plane : planes.Planes) {
+				float distance = plane.x * centre.x + plane.y * centre.y + plane.z * centre.z + plane.w;
+				if (distance < -radius) {
+					return false;
+				}
+			}
+			return true;
+		}
+
 		bool CapsuleInside(const SidePlanes &planes, glm::vec3 from, glm::vec3 to, float radius) {
 			for (const auto &plane : planes.Planes) {
-				glm::vec3 normal(plane);
 				// Out only when both ends are out, or a capsule lying across
 				// the frustum would be thrown away by the plane each end
 				// happens to be behind
-				if (glm::dot(normal, from) + plane.w < -radius && glm::dot(normal, to) + plane.w < -radius) {
+				float near = plane.x * from.x + plane.y * from.y + plane.z * from.z + plane.w;
+				float far = plane.x * to.x + plane.y * to.y + plane.z * to.z + plane.w;
+				if (near < -radius && far < -radius) {
 					return false;
 				}
 			}
@@ -2081,6 +2104,20 @@ namespace gargantuan {
 		// in the same frame would otherwise leave the rest hashing identically
 		MixBits(hash, world->Parts.size());
 
+		// What the last walk found. Reading the four surface fields for every
+		// part is most of what this loop does, and in a world with none of them
+		// every one of those reads says nothing.
+		//
+		// Safe to trust last frame's answer: a part is given a surface through
+		// the property path, which bumps its QuickHash, and that is mixed
+		// unconditionally. A surface appearing changes the signature by that
+		// route whether or not this branch looked at it.
+		const bool hadSurfaces = WorldHasSurfaces;
+
+		// Answered here because this walk already reads the fields they depend on
+		WorldHasSurfaceCameras = false;
+		WorldHasSurfaces = false;
+
 		for (const auto &part : world->Parts) {
 			if (!part) {
 				MixBits(hash, 0);
@@ -2101,10 +2138,22 @@ namespace gargantuan {
 			// says which one is being shown, and a screen showing the same
 			// camera it showed last frame is the ordinary case, not the still
 			// one.
-			MixPointer(hash, part->SurfaceCamera.get());
-			MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
-			MixPointer(hash, part->SurfaceImage.get());
-			MixBits(hash, part->SurfaceImage ? part->SurfaceImage->GetRevision() : 0);
+			if (hadSurfaces) {
+				MixPointer(hash, part->SurfaceCamera.get());
+				MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
+				MixPointer(hash, part->SurfaceImage.get());
+				MixBits(hash, part->SurfaceImage ? part->SurfaceImage->GetRevision() : 0);
+			}
+
+			// Noticed here, where the fields are already being read, so the
+			// per-camera walk and the texture resolve can skip them entirely in
+			// a world that has neither
+			if (part->SurfaceCamera) {
+				WorldHasSurfaceCameras = true;
+				WorldHasSurfaces = true;
+			} else if (part->SurfaceImage) {
+				WorldHasSurfaces = true;
+			}
 		}
 
 		return hash;
@@ -2134,6 +2183,19 @@ namespace gargantuan {
 		out.InViewList.clear();
 		out.ShadowList.clear();
 
+		// Only the redraw check ever asks the sets a question, and only about a
+		// part showing a camera. With none of those in the world they are a
+		// hash insert per part for nothing.
+		const bool needSets = WorldHasSurfaceCameras;
+		const bool worldHasSurfaces = WorldHasSurfaces;
+
+		if (world) {
+			// One allocation each rather than a dozen reallocations and copies
+			// on the way up to a hundred thousand
+			out.InViewList.reserve(world->Parts.size());
+			out.ShadowList.reserve(world->Parts.size());
+		}
+
 		uint64_t hash = 0xCBF29CE484222325ull;
 		MixVec3(hash, lightDirection);
 
@@ -2148,56 +2210,128 @@ namespace gargantuan {
 		glm::vec3 shadowStep = -glm::normalize(lightDirection) * SHADOW_CAST_REACH;
 
 		uint64_t visible = 0;
-		for (const auto &part : world->Parts) {
-			if (!part) {
-				continue;
+
+		// Walked in chunks so the phases can be timed at all. Opening a zone
+		// per part would cost far more than the part costs; timing a block of
+		// them amortises the two clock reads over the whole block, and the
+		// answer is the same because every part in a chunk does the same work.
+		//
+		// The chunking is also kinder to the cache: the cull pass touches only
+		// Size and Position, and it touches them for all of a chunk before
+		// anything else goes looking at the same parts again.
+		constexpr size_t CHUNK = 256;
+		Profiler *profiler = Profiler::GetCurrent();
+		const bool measuring = profiler && profiler->IsEnabled();
+		uint64_t cullNanoseconds = 0;
+		uint64_t gatherNanoseconds = 0;
+		uint64_t signatureNanoseconds = 0;
+
+		// Reused between chunks and between frames
+		CullScratch.resize(CHUNK);
+
+		const size_t total = world->Parts.size();
+		for (size_t start = 0; start < total; start += CHUNK) {
+			const size_t stop = std::min(start + CHUNK, total);
+
+			uint64_t cullStart = measuring ? SDL_GetTicksNS() : 0;
+			for (size_t index = start; index < stop; index++) {
+				const auto &part = world->Parts[index];
+				CullResult &result = CullScratch[index - start];
+				if (!part) {
+					result.InView = false;
+					result.ShadowReaches = false;
+					continue;
+				}
+
+				// Half the box diagonal, so the sphere holds the part whichever
+				// way it is turned. Loose, which is the safe way round: too big
+				// only costs a redraw, too small drops something on screen.
+				// Not glm::length, which is a call to a call at this
+				// optimisation level, for a square root this already needs
+				const glm::vec3 &size = part->Size;
+				float radius = std::sqrt(size.x * size.x + size.y * size.y + size.z * size.z) * 0.5f;
+				const glm::vec3 &centre = part->CFrame.Position;
+
+				// The sphere on its own, which is the capsule test with no
+				// sweep: what the opaque pass would actually put on screen
+				result.InView = SphereInside(planes, centre, radius);
+				// The same sphere swept along the shadow, so a caster off the
+				// side of the screen still counts. Only worth asking of a part
+				// that casts at all, and not at all of one already on screen --
+				// the sweep starts at the part, so a sphere that passed cannot
+				// fail a test that contains it.
+				result.ShadowReaches = !result.InView && part->CastShadow &&
+					CapsuleInside(planes, centre, centre + shadowStep, radius);
+			}
+			if (measuring) {
+				cullNanoseconds += SDL_GetTicksNS() - cullStart;
 			}
 
-			// Half the box diagonal, so the sphere holds the part whichever way
-			// it is turned. Loose, which is the safe way round: too big only
-			// costs a redraw, too small drops something that was on screen.
-			float radius = glm::length(part->Size) * 0.5f;
-			glm::vec3 centre = part->CFrame.Position;
+			uint64_t gatherStart = measuring ? SDL_GetTicksNS() : 0;
+			for (size_t index = start; index < stop; index++) {
+				const auto &part = world->Parts[index];
+				if (!part) {
+					continue;
+				}
 
-			// The sphere on its own, which is the capsule test with no sweep:
-			// what the opaque pass would actually put on screen
-			bool inView = CapsuleInside(planes, centre, centre, radius);
-			// The same sphere swept along the shadow, so a caster off the side
-			// of the screen still counts. Only worth asking of a part that
-			// casts at all.
-			bool shadowReaches =
-				part->CastShadow && CapsuleInside(planes, centre, centre + shadowStep, radius);
-
-			if (inView) {
-				out.InView.insert(part.get());
-				out.InViewList.push_back(part.get());
+				const CullResult &result = CullScratch[index - start];
+				if (result.InView) {
+					if (needSets) {
+						out.InView.insert(part.get());
+					}
+					out.InViewList.push_back(part.get());
+				}
+				// A caster already on screen throws its shadow onto the screen
+				// too, so this list is the wider of the two and never drops one
+				// InViewList holds.
+				if (part->CastShadow && (result.InView || result.ShadowReaches)) {
+					if (needSets) {
+						out.ShadowsIntoView.insert(part.get());
+					}
+					out.ShadowList.push_back(part.get());
+				}
 			}
-			// A caster already on screen throws its shadow onto the screen too,
-			// so this set is the wider of the two and never drops one InView
-			// holds. The sweep starts at the part, so inView implies it, but
-			// saying so costs nothing and does not rely on noticing that.
-			if (part->CastShadow && (inView || shadowReaches)) {
-				out.ShadowsIntoView.insert(part.get());
-				out.ShadowList.push_back(part.get());
-			}
-
-			// Anything that can change the picture: by being in it, or by
-			// darkening something that is
-			if (!inView && !shadowReaches) {
-				continue;
+			if (measuring) {
+				gatherNanoseconds += SDL_GetTicksNS() - gatherStart;
 			}
 
-			visible++;
-			MixPointer(hash, part.get());
-			MixBits(hash, part->QuickHash);
-			// A screen in view is a reason to redraw whenever the camera on it
-			// has drawn again, however still the screen itself has been. This
-			// is the narrow check, so it asks only about the ones this camera
-			// can actually see: a monitor behind it costs it nothing.
-			MixPointer(hash, part->SurfaceCamera.get());
-			MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
-			MixPointer(hash, part->SurfaceImage.get());
-			MixBits(hash, part->SurfaceImage ? part->SurfaceImage->GetRevision() : 0);
+			uint64_t signatureStart = measuring ? SDL_GetTicksNS() : 0;
+			for (size_t index = start; index < stop; index++) {
+				const auto &part = world->Parts[index];
+				if (!part) {
+					continue;
+				}
+
+				const CullResult &result = CullScratch[index - start];
+				// Anything that can change the picture: by being in it, or by
+				// darkening something that is
+				if (!result.InView && !result.ShadowReaches) {
+					continue;
+				}
+
+				visible++;
+				MixPointer(hash, part.get());
+				MixBits(hash, part->QuickHash);
+				// Four mixes that only ever say "still nothing" in a world with
+				// no screens and no drawn-on parts, which is most of them. The
+				// flag flipping is itself a change of signature, so a surface
+				// appearing still forces the redraw it should.
+				if (worldHasSurfaces) {
+					MixPointer(hash, part->SurfaceCamera.get());
+					MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
+					MixPointer(hash, part->SurfaceImage.get());
+					MixBits(hash, part->SurfaceImage ? part->SurfaceImage->GetRevision() : 0);
+				}
+			}
+			if (measuring) {
+				signatureNanoseconds += SDL_GetTicksNS() - signatureStart;
+			}
+		}
+
+		if (measuring) {
+			profiler->AddZoneTime("Cull", cullNanoseconds, total);
+			profiler->AddZoneTime("Gather", gatherNanoseconds, total);
+			profiler->AddZoneTime("Signature", signatureNanoseconds, total);
 		}
 
 		// Cheap insurance on how many were in view, since the loop above

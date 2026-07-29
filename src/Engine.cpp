@@ -207,7 +207,15 @@ namespace gargantuan {
 		// Recorded even while hidden. The counter is turned on because
 		// something went wrong a moment ago, and a window that only starts
 		// filling at that point has nothing to say about it for twenty seconds.
-		Statistics.Record(now, deltaTime);
+		//
+		// Except across a resume, where the frame is an artefact of the window
+		// having been away rather than anything the engine did. Letting it in
+		// pins the maximum at whatever the catch-up burst managed and the
+		// minimum at the length of the pause, and both stay there for the whole
+		// twenty second window.
+		if (now >= SettleUntil) {
+			Statistics.Record(now, deltaTime);
+		}
 
 		if (!ShowStatistics) {
 			// Handing over nothing is what takes it off the window; the panel
@@ -264,6 +272,14 @@ namespace gargantuan {
 			if (event.type == SDL_EVENT_QUIT) {
 				IsRunning = false;
 				return;
+			}
+
+			// The window coming back is not a frame anyone saw. Whatever the
+			// compositor did while it was away, the timings across the gap
+			// belong to the gap and not to the engine.
+			if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED || event.type == SDL_EVENT_WINDOW_RESTORED ||
+				event.type == SDL_EVENT_WINDOW_SHOWN || event.type == SDL_EVENT_WINDOW_EXPOSED) {
+				SettleUntil = seconds + SETTLE_AFTER_RESUME;
 			}
 
 			// Held down, these would repeat and flicker the panels on and off

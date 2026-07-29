@@ -39,8 +39,8 @@ local LAYERS_BELOW = 4
 
 -- A block and the gap beside it are the same size, which is the whole idea of
 -- a skygrid: you can see and fall through every space between them
-local BLOCK = 4
-local SPACING = BLOCK * 2
+local CUBE = 4
+local SPACING = CUBE * 2
 local LAYER_HEIGHT = SPACING * 2
 
 -- Shapes in the mix, so the profiler's per-class counters have more than one
@@ -65,6 +65,56 @@ local PALETTE = {
 	Color3.fromRGB(70, 96, 74),
 }
 
+-- A few small pictures shared between every part that shows one. Sharing
+-- matters: an EditableImage is uploaded to the GPU once and kept until it
+-- changes, so four of them is four uploads however many parts point at them.
+-- There are no texture assets yet, so these are drawn here.
+local function makeTexture(base, accent, kind)
+	local image = Instance.new("EditableImage")
+	image:Resize(Vector2.new(32, 32))
+	image:DrawRectangle(Vector2.zero, Vector2.new(32, 32), base, 0, Enum.ImageCombineType.Overwrite)
+
+	if kind == "checker" then
+		for y = 0, 3 do
+			for x = 0, 3 do
+				if (x + y) % 2 == 0 then
+					image:DrawRectangle(
+						Vector2.new(x * 8, y * 8),
+						Vector2.new(8, 8),
+						accent,
+						0,
+						Enum.ImageCombineType.Overwrite
+					)
+				end
+			end
+		end
+	elseif kind == "stripes" then
+		for y = 0, 7 do
+			image:DrawRectangle(Vector2.new(0, y * 4), Vector2.new(32, 2), accent, 0, Enum.ImageCombineType.Overwrite)
+		end
+	elseif kind == "spot" then
+		image:DrawCircle(Vector2.new(16, 16), 10, accent, 0, Enum.ImageCombineType.BlendSourceOver)
+	else
+		image:DrawRectangle(Vector2.new(2, 2), Vector2.new(28, 28), accent, 0, Enum.ImageCombineType.Overwrite)
+		image:DrawRectangle(Vector2.new(8, 8), Vector2.new(16, 16), base, 0, Enum.ImageCombineType.Overwrite)
+	end
+
+	return image
+end
+
+local TEXTURES = {
+	makeTexture(Color3.fromRGB(200, 190, 170), Color3.fromRGB(120, 100, 80), "checker"),
+	makeTexture(Color3.fromRGB(90, 130, 180), Color3.fromRGB(210, 220, 235), "stripes"),
+	makeTexture(Color3.fromRGB(150, 90, 90), Color3.fromRGB(240, 200, 120), "spot"),
+	makeTexture(Color3.fromRGB(110, 150, 110), Color3.fromRGB(60, 80, 60), "frame"),
+}
+
+-- How many of the grid carry one. A part showing a picture needs its own
+-- fragment uniforms and its own texture bound, so it cannot go in a batch --
+-- which makes this the knob that decides how much of the grid takes the
+-- batched path and how much takes the one-at-a-time path.
+local TEXTURED_SHARE = 0.20
+
 local started = os.clock()
 local random = Random.new(4242)
 local half = (EXTENT - 1) * SPACING / 2
@@ -74,7 +124,7 @@ for layer = -LAYERS_BELOW, LAYERS_ABOVE - 1 do
 		for row = 0, EXTENT - 1 do
 			local block = Instance.new("Part")
 			block.Anchored = true
-			block.Size = Vector3.new(BLOCK, BLOCK, BLOCK)
+			block.Size = Vector3.new(CUBE, CUBE, CUBE)
 			block.Position = Vector3.new(
 				column * SPACING - half,
 				layer * LAYER_HEIGHT,
@@ -86,6 +136,12 @@ for layer = -LAYERS_BELOW, LAYERS_ABOVE - 1 do
 			-- middle of the grid falls outside it anyway. Leaving it on would
 			-- put every one of these through the shadow pass to no effect.
 			block.CastShadow = false
+
+			if random:NextNumber() < TEXTURED_SHARE then
+				block.SurfaceImage = TEXTURES[random:NextInteger(1, #TEXTURES)]
+				block.SurfaceFace = Enum.NormalId.Front
+			end
+
 			block.Parent = Workspace
 		end
 	end
@@ -94,7 +150,40 @@ end
 local layers = LAYERS_ABOVE + LAYERS_BELOW
 local parts = EXTENT * EXTENT * layers
 local built = os.clock() - started
-print(`skygrid: {parts} parts in a {EXTENT}x{EXTENT} grid, {layers} layers, built in {string.format("%.2f", built)}s`)
+print(
+	`skygrid: {parts} parts in a {EXTENT}x{EXTENT} grid, {layers} layers, `
+		.. `{math.floor(TEXTURED_SHARE * 100)}% textured, built in {string.format("%.2f", built)}s`
+)
+
+-- One camera per side, drawn across the top of the window as a strip. Each is
+-- a real camera rendering the same world from its own corner, so the strip is
+-- four more full passes over the scene: the point is to see what that costs on
+-- the chart, not only to look at it.
+local SIDES = {
+	{ Name = "North", Offset = Vector3.new(0, 0, -1) },
+	{ Name = "East", Offset = Vector3.new(1, 0, 0) },
+	{ Name = "South", Offset = Vector3.new(0, 0, 1) },
+	{ Name = "West", Offset = Vector3.new(-1, 0, 0) },
+}
+
+local watchCentre = Vector3.new(0, (LAYERS_ABOVE - LAYERS_BELOW - 1) * LAYER_HEIGHT / 2, 0)
+for index, side in SIDES do
+	local watcher = Instance.new("Camera")
+	watcher.Name = side.Name
+	watcher.CameraType = Enum.CameraType.Scriptable
+	watcher.FieldOfView = 70
+	-- Drawn into the window alongside the main view rather than into a target
+	-- of its own, each in its own quarter of a strip along the top
+	watcher.DrawToWindow = true
+	watcher.WindowPosition = UDim2.new((index - 1) * 0.25, 0, 0, 0)
+	watcher.WindowSize = UDim2.new(0.25, 0, 0.24, 0)
+	watcher.CFrame = CFrame.lookAt(
+		watchCentre + side.Offset * (half * 1.25) + Vector3.new(0, layers * LAYER_HEIGHT * 0.3, 0),
+		watchCentre
+	)
+	watcher.Parent = Workspace
+end
+print(`skygrid: {#SIDES} side cameras across the top of the window`)
 
 -- Flown round the grid on its own, which is a measurement decision as much as a
 -- presentation one: a camera that never moves lets the engine notice nothing

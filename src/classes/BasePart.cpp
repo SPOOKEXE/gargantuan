@@ -221,9 +221,23 @@ namespace gargantuan {
 	}
 
 	glm::mat4 BasePart::GetModelMatrix() {
-		glm::mat4 translation = glm::translate(glm::mat4(1.0f), CFrame.Position);
-		glm::mat4 rotation = CFrame.Rotation;
-		glm::mat4 scale = glm::scale(glm::mat4(1.0f), Size);
-		return translation * rotation * scale;
+		// Written out rather than composed from three matrices and two full
+		// multiplies. Translate times rotate times scale has a closed form: the
+		// scale only ever multiplies its own column, and the translation only
+		// ever lands in the last one, so of the hundred and twenty eight
+		// multiply-adds a pair of 4x4 products costs, nine do the work and the
+		// rest are against the zeroes and ones of two nearly empty matrices.
+		//
+		//   T * R * S  =  [ r0*sx  r1*sy  r2*sz  position ]
+		//
+		// This is the hottest arithmetic in the engine -- every pass asks every
+		// part for it, every frame -- so it is worth writing once and reading
+		// twice.
+		glm::mat4 model;
+		model[0] = glm::vec4(CFrame.Rotation[0] * Size.x, 0.0f);
+		model[1] = glm::vec4(CFrame.Rotation[1] * Size.y, 0.0f);
+		model[2] = glm::vec4(CFrame.Rotation[2] * Size.z, 0.0f);
+		model[3] = glm::vec4(CFrame.Position, 1.0f);
+		return model;
 	}
 } // namespace gargantuan

@@ -234,6 +234,29 @@ namespace gargantuan {
 		// the engine once a frame and compared per camera
 		uint64_t SceneSignature = 0;
 
+		// Whether anything in the world is showing a camera on its surface,
+		// noticed while the scene signature is being taken because that walk is
+		// already reading the field.
+		//
+		// It decides whether the frustum walk builds its lookup sets at all.
+		// Those sets exist for one caller -- the redraw check asking whether a
+		// particular screen is on screen -- and in a place with no screens they
+		// are a hash insert per visible part per camera per frame for a
+		// question nobody asks.
+		mutable bool WorldHasSurfaceCameras = false;
+		// The same for a picture of any kind, camera or drawn image, which is
+		// what the frustum walk needs to know before it bothers hashing any of
+		// it per part
+		mutable bool WorldHasSurfaces = false;
+
+		// One chunk's worth of cull answers, kept between frames so the walk
+		// allocates nothing
+		struct CullResult {
+			bool InView = false;
+			bool ShadowReaches = false;
+		};
+		std::vector<CullResult> CullScratch;
+
 		SDL_Window *Window = nullptr;
 		SDL_GPUDevice *Gpu = nullptr;
 		SDL_GPUGraphicsPipeline *Pipeline = nullptr;
