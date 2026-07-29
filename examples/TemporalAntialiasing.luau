@@ -12,12 +12,9 @@
 --   builtin.Jitter                   read by the shader, which puts the
 --                                    camera's projection on a sub-pixel wander
 --
--- Without velocity a pass can only decide whether to trust its history by
--- comparing colours, which drags a smear behind anything that moves. Without
--- the depths it is still blind to one case colour cannot reach: a surface
--- coming out from behind another of much the same shade, where the motion is
--- honest and the history belongs to whatever was covering it. And without the
--- jitter there is nothing new to average and the whole thing is merely a blur.
+-- Without velocity it can only judge history by colour, which smears behind
+-- anything moving. Without the depths it is blind to a surface emerging from
+-- behind another of the same shade. Without the jitter it is merely a blur.
 
 local RenderSettings = game:GetService("RenderSettings")
 local RunService = game:GetService("RunService")
@@ -64,17 +61,11 @@ mover.Parent = Workspace
 -- away from anything set here as a CFrame alone.
 Workspace.CurrentCamera.CFrame = CFrame.new(Vector3.new(0, 12, 46))
 
--- What the picture would look like if every pixel really had been sampled all
--- over rather than once: rendered at four times the width and height with no
--- antialiasing at all, then averaged sixteen-to-one back down.
+-- Rendered at four times the size with no antialiasing, averaged back down.
 --
--- This is the thing to measure against. Counting how many pixels came out
--- part-way between their neighbours sounds like it measures antialiasing and
--- does not -- a half-resolved edge scores higher than a correctly resolved one,
--- because the correct one is a smooth ramp and its neighbours are close
--- together. Distance from the truth has no such blind spot: there is one right
--- answer per pixel and every kind of wrongness, aliased or blurred or ghosted,
--- shows up as distance from it.
+-- Counting part-way pixels sounds like it measures antialiasing and does not: a
+-- half-resolved edge scores higher than a correct one, whose neighbours are
+-- close together. Distance from the truth has no such blind spot.
 local SUPERSAMPLE = 4
 
 local function groundTruth()
@@ -126,14 +117,9 @@ local function errorAgainst(image, truth)
 	return total / (width * height)
 end
 
--- A camera of its own for every measurement, because the accumulation lives on
--- the camera's target: asking what one frame of this looks like has to start
--- from no frames at all, and a camera that has been running has a history.
---
--- FPS is set to on demand so that nothing but the Render() calls below draws
--- it. Left at the default the engine would also be drawing it in between, and
--- the answer to "how good is this after eight frames" would depend on how many
--- frames the engine happened to slip in.
+-- A camera each, because the accumulation lives on the target and "one frame"
+-- has to start from none. On demand so nothing but the Render() calls below
+-- draws it, or the answer would depend on how many frames the engine slipped in.
 local function resolve(frames)
 	local probe = Instance.new("Camera")
 	probe.Name = "Probe"
@@ -181,21 +167,12 @@ taa:SetNumber(Enum.ShaderProperty.Disocclusion, 0.02)
 RenderSettings.AntialiasShader = taa
 print(`swapped in {taa.Name}, which reads {#taa:ListImages()} engine textures`)
 
--- One frame, a few, and a lot.
+-- The curve is not a straight climb. Frame one has no history and ties the
+-- built-in; frame two is the worst of all, being a sub-pixel-shifted copy of
+-- something that was not antialiased either. It takes several passes through
+-- the eight jitter positions for those offsets to average out.
 --
--- The curve is not a straight climb and should not be expected to be. On the
--- first frame there is no history, so it scores exactly what the built-in does.
--- On the second it scores its worst of all: the picture is almost entirely the
--- first frame, which was rendered through a projection nudged off-centre, so it
--- is a sub-pixel-shifted copy of something that was not antialiased either. It
--- takes several passes through the eight jitter positions for those offsets to
--- average out, and only then does having sampled the pixel in eight places
--- start being worth more than the shifting cost. From there it keeps improving
--- until the history has turned over entirely.
---
--- That is the bargain a temporal pass makes, and it is worth knowing before
--- reaching for one: it is behind for the first fraction of a second and ahead
--- for as long as the camera keeps running.
+-- That is the bargain: behind for a fraction of a second, ahead after.
 for _, frames in { 1, 2, 8, 32, 128 } do
 	local capture = resolve(frames)
 	local error = errorAgainst(capture, truth)

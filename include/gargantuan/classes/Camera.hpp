@@ -62,10 +62,8 @@ namespace gargantuan {
 		// Vertical field of view in degrees.
 		float FieldOfView = 70.0f;
 
-		// How near and how far a camera can see, in studs. Named rather than
-		// written into the projection, because the depth a camera hands to a
-		// shader is measured in the same units and the two agreeing is the
-		// whole point of handing it over.
+		// Named rather than written into the projection, because the depth a
+		// camera hands to a shader is in the same units
 		static constexpr float NEAR_PLANE = 0.1f;
 		static constexpr float FAR_PLANE = 100000.0f;
 		Vector2 ViewportSize = gargantuan::Vector2(0.0f, 0.0f);
@@ -82,35 +80,24 @@ namespace gargantuan {
 		void SetDiagonalFieldOfView(float fovy);
 		glm::mat4 GetProjectionMatrix();
 		glm::mat4 GetViewMatrix();
-		// The projection with this frame's sub-pixel offset folded in, which is
-		// what the world is actually drawn through. Identical to
-		// GetProjectionMatrix on a camera that is not jittering, and that one
-		// stays the truthful description of the frustum: culling, motion
-		// vectors and anything else comparing one frame against another want
-		// the camera's real shape, not the wobble laid over it.
+		// What the world is actually drawn through. GetProjectionMatrix stays
+		// the truthful description of the frustum, which culling and motion
+		// vectors want -- not the wobble laid over it.
 		glm::mat4 GetJitteredProjectionMatrix();
 
-		// How many sub-pixel offsets the camera cycles through before repeating.
-		// Eight is the usual choice: enough positions to cover the pixel
-		// convincingly, few enough that a pass blending frames together has seen
-		// all of them again before its history has decayed away.
+		// Enough positions to cover the pixel, few enough that a blending pass
+		// sees them all again before its history decays
 		static constexpr uint32_t JITTER_SEQUENCE_LENGTH = 8;
 
-		// Where inside the pixel this frame was sampled, and where the frame
-		// before it was, both in pixels and both zero on a camera with no pass
-		// asking for the offset. Bookkeeping, not properties: the renderer moves
-		// them on exactly when it redraws the world.
+		// Zero on a camera with no pass asking. Bookkeeping, not properties.
 		glm::vec2 Jitter = glm::vec2(0.0f);
 		glm::vec2 PreviousJitter = glm::vec2(0.0f);
 		uint32_t JitterIndex = 0;
-		// Steps to the next offset in the sequence, or clears it back to none.
-		// Only ever called from the point the scene is about to be redrawn, so a
-		// camera the engine skipped keeps the offset its picture was drawn with.
+		// Only called where the scene is about to be redrawn, so a skipped
+		// camera keeps the offset its picture was drawn with
 		void AdvanceJitter(bool jittering);
 
-		// The unjittered view-projection this camera drew with last time, so a
-		// motion vector can say where a point on screen was then. Meaningless
-		// until the camera has drawn once, which is what the flag is for.
+		// Unjittered, for motion vectors. Meaningless until it has drawn once.
 		glm::mat4 PreviousViewProjection = glm::mat4(1.0f);
 		bool HasPreviousViewProjection = false;
 

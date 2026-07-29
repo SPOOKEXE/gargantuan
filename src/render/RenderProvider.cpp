@@ -374,9 +374,8 @@ namespace gargantuan {
 			return it->second.ColorTexture;
 		}
 
-		// One of the reader's own buffers. No camera is named because none can
-		// be: the antialias pass is a single script shared by every camera, so
-		// the only camera it can mean is whichever one it is running on.
+		// No camera is named because none can be: the antialias pass is one
+		// script shared by every camera.
 		if (source.Render != Enums::RenderTexture::None) {
 			auto it = CameraTargets.find(reader);
 			if (it == CameraTargets.end()) {
@@ -423,8 +422,7 @@ namespace gargantuan {
 		}
 
 		if (!WindowOverlayPipeline) {
-			// Complained about once rather than every frame, which is what the
-			// flag is for
+			// Complained about once rather than every frame
 			WindowOverlayFailed = true;
 
 			SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
@@ -526,9 +524,7 @@ namespace gargantuan {
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(commands, &colorTarget, 1, nullptr);
 		SDL_BindGPUGraphicsPipeline(pass, WindowOverlayPipeline);
 
-		// One draw per panel. They rarely overlap and there are only ever a
-		// couple, so a pass each would cost more in beginning and ending than
-		// the triangles ever could.
+		// One draw per panel; a pass each would cost more than the triangles
 		for (const auto &entry : WindowOverlays) {
 			if (!entry.Image) {
 				continue;
@@ -575,10 +571,7 @@ namespace gargantuan {
 	}
 
 	SDL_GPUSampler *RenderProvider::GetSourceSampler(const ShaderScript::TextureSource &source) {
-		// Averaging two neighbouring measurements invents a third that neither
-		// surface reported: half a step neither took, or a distance at which
-		// nothing stands. A pass reprojecting by the one or comparing against
-		// the other is then reasoning about something that was never there.
+		// Averaging two measurements invents a third neither surface reported.
 		// Only the pictures are smoothed.
 		switch (source.Render) {
 		case Enums::RenderTexture::Velocity:
@@ -637,9 +630,8 @@ namespace gargantuan {
 		for (const auto &shader : BuildShaderChain(camera)) {
 			consider(shader);
 		}
-		// A surface shader can ask too. It shades during the opaque pass, which
-		// is why the velocity pass is recorded ahead of that one rather than
-		// after it -- otherwise the vectors it read would be a frame old.
+		// A surface shader can ask too, which is why the velocity pass is
+		// recorded ahead of the opaque one
 		consider(camera->SurfaceShader);
 
 		return needs;
@@ -667,13 +659,8 @@ namespace gargantuan {
 				};
 				target.HistoryTexture = SDL_CreateGPUTexture(Gpu, &info);
 
-				// Cleared, because a pass is about to read it a moment before
-				// the frame that fills it. Whatever the driver handed back is
-				// not a picture and blending against it shows; black is at
-				// least defined, and a pass rejecting history on how far it
-				// sits from its surroundings throws it out on the first frame
-				// anyway, which is exactly what should happen to a history that
-				// does not exist yet.
+				// A pass reads it a moment before the frame that fills it.
+				// Black is at least defined, and gets rejected anyway.
 				if (target.HistoryTexture && commands) {
 					SDL_GPUColorTargetInfo clear{
 						.texture = target.HistoryTexture,
@@ -718,10 +705,8 @@ namespace gargantuan {
 		if (needs.DepthHistory && !target.ViewDepthHistoryTexture) {
 			measurement(target.ViewDepthHistoryTexture, VIEW_DEPTH_FORMAT, "previous view depth");
 
-			// Cleared to the far plane, like the buffer it is a copy of, for
-			// the one frame it is read before it has ever been written. A pass
-			// comparing against it then sees empty space everywhere rather than
-			// a wall of geometry pressed against the lens.
+			// Far plane, like the buffer it copies, for the one frame it is
+			// read before it is ever written
 			if (target.ViewDepthHistoryTexture && commands) {
 				SDL_GPUColorTargetInfo clear{
 					.texture = target.ViewDepthHistoryTexture,
@@ -784,9 +769,7 @@ namespace gargantuan {
 
 		TemporalNeeds needs = GetTemporalNeeds(camera);
 
-		// This frame's distances become last frame's, taken here so that the
-		// chain that just ran read the copy from before it. Ahead of the colour
-		// copy for no reason but that the two are independent.
+		// Taken after the chain, so what just ran read the previous copy
 		if (needs.DepthHistory && target.ViewDepthTexture && target.ViewDepthHistoryTexture) {
 			SDL_GPUBlitInfo blit{
 				.source = {.texture = target.ViewDepthTexture, .w = target.Width, .h = target.Height},
@@ -797,12 +780,8 @@ namespace gargantuan {
 			SDL_BlitGPUTexture(commands, &blit);
 		}
 
-		// Two reasons to keep a picture, and they expire differently. Being part
-		// of a camera loop is remembered in NeedsHistory, which is only cleared
-		// when the camera goes away. A pass asking for
-		// Enum.RenderTexture.History is asked about again every frame, so
-		// putting the engine's own antialias pass back stops the copy the same
-		// frame rather than leaving the camera paying for one nothing reads.
+		// Two reasons, expiring differently: a camera loop is remembered until
+		// the camera goes away, a binding is re-asked every frame
 		if (!NeedsHistory.count(camera) && !needs.History) {
 			return;
 		}
@@ -906,9 +885,7 @@ namespace gargantuan {
 	void RenderProvider::ResolvePartTextures(const std::shared_ptr<WorldRoot> &worldRoot) {
 		G_PROFILE("Part Textures");
 		PartTextures.clear();
-		// Nothing in the world is showing anything, so there is nothing to walk
-		// the world for. The flag came off the scene signature, which read the
-		// same two fields a moment ago.
+		// Nothing is showing anything, so nothing to walk for
 		if (!worldRoot || !WorldHasSurfaces) {
 			return;
 		}
@@ -1634,9 +1611,8 @@ namespace gargantuan {
 			parameterStorage.resize(sizeof(glm::vec4), 0);
 		}
 
-		// Before the bindings are built rather than after: they are what needs
-		// it, and creating it below meant the first surface shader to bind an
-		// image bound it with no sampler at all
+		// Before the bindings, not after: the first surface shader to bind an
+		// image was binding it with no sampler at all
 		if (!ShaderSampler) {
 			SDL_GPUSamplerCreateInfo samplerInfo{
 				.min_filter = SDL_GPU_FILTER_LINEAR,
@@ -1692,9 +1668,8 @@ namespace gargantuan {
 		TemporalNeeds needs = GetTemporalNeeds(camera);
 		if (camera) {
 			EnsureTemporalTargets(commands, camera, CameraTargets[camera], needs);
-			// Only here, where the world is about to be drawn again. A camera
-			// the engine skipped keeps the offset its picture was drawn with,
-			// so the offset and the pixels always describe each other.
+			// Only where the world is about to be redrawn, so the offset and
+			// the pixels always describe each other
 			camera->AdvanceJitter(needs.Jitter);
 		}
 
@@ -1743,10 +1718,9 @@ namespace gargantuan {
 			SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
 		}
 
-		// Ahead of the opaque pass, so a SurfaceShader that binds the motion
-		// vectors reads this frame's rather than the last one's. It clears the
-		// depth buffer and throws it away again, which costs nothing the opaque
-		// pass was going to keep -- that one clears depth for itself.
+		// Ahead of the opaque pass, so a SurfaceShader binding the motion
+		// vectors reads this frame's. It clears depth and discards it, which
+		// costs nothing: the opaque pass clears for itself.
 		if (frameContext.VelocityTarget) {
 			if (RenderPass *velocity = GetVelocityPass()) {
 				G_PROFILE("Motion");
@@ -1760,9 +1734,7 @@ namespace gargantuan {
 			SDL_EndGPURenderPass(OffscreenOpaquePass->Draw(Gpu, frameContext));
 		}
 
-		// What this camera drew through, for the next frame's motion vectors to
-		// measure against. Unjittered: the offset describes the sampling, not
-		// where the camera is.
+		// Unjittered: the offset describes the sampling, not where it is
 		if (camera && needs.Motion) {
 			camera->PreviousViewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
 			camera->HasPreviousViewProjection = true;
@@ -2052,10 +2024,8 @@ namespace gargantuan {
 		// does half the dot products. Every part in the world goes through this
 		// one, and only the casters go through the swept version below.
 		bool SphereInside(const SidePlanes &planes, glm::vec3 centre, float radius) {
-			// Written out in plain floats. glm::dot and the vec3 built from the
-			// plane are function calls until something inlines them, and this
-			// runs four times for every part in the world every frame -- which
-			// made it the single largest row on the profile.
+			// Plain floats: glm::dot and the vec3 built from the plane are
+			// calls until something inlines them, four times per part
 			for (const auto &plane : planes.Planes) {
 				float distance = plane.x * centre.x + plane.y * centre.y + plane.z * centre.z + plane.w;
 				if (distance < -radius) {
@@ -2104,14 +2074,9 @@ namespace gargantuan {
 		// in the same frame would otherwise leave the rest hashing identically
 		MixBits(hash, world->Parts.size());
 
-		// What the last walk found. Reading the four surface fields for every
-		// part is most of what this loop does, and in a world with none of them
-		// every one of those reads says nothing.
-		//
-		// Safe to trust last frame's answer: a part is given a surface through
-		// the property path, which bumps its QuickHash, and that is mixed
-		// unconditionally. A surface appearing changes the signature by that
-		// route whether or not this branch looked at it.
+		// Last frame's answer is safe to trust: a part is given a surface
+		// through the property path, which bumps QuickHash, which is always
+		// mixed. An appearing surface changes the signature by that route.
 		const bool hadSurfaces = WorldHasSurfaces;
 
 		// Answered here because this walk already reads the fields they depend on
@@ -2132,12 +2097,8 @@ namespace gargantuan {
 			// many there are.
 			MixPointer(hash, part.get());
 			MixBits(hash, part->QuickHash);
-			// A part showing a camera changes when that camera does, and one
-			// showing an image when the image is drawn into. Both need the
-			// count or the revision as well as the pointer: the pointer only
-			// says which one is being shown, and a screen showing the same
-			// camera it showed last frame is the ordinary case, not the still
-			// one.
+			// Both need the count or the revision as well as the pointer: the
+			// pointer only says which one is being shown
 			if (hadSurfaces) {
 				MixPointer(hash, part->SurfaceCamera.get());
 				MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
@@ -2183,15 +2144,13 @@ namespace gargantuan {
 		out.InViewList.clear();
 		out.ShadowList.clear();
 
-		// Only the redraw check ever asks the sets a question, and only about a
-		// part showing a camera. With none of those in the world they are a
-		// hash insert per part for nothing.
+		// Only the redraw check asks the sets anything, and only about a part
+		// showing a camera
 		const bool needSets = WorldHasSurfaceCameras;
 		const bool worldHasSurfaces = WorldHasSurfaces;
 
 		if (world) {
-			// One allocation each rather than a dozen reallocations and copies
-			// on the way up to a hundred thousand
+			// One allocation each rather than a dozen on the way to 100k
 			out.InViewList.reserve(world->Parts.size());
 			out.ShadowList.reserve(world->Parts.size());
 		}
@@ -2211,14 +2170,9 @@ namespace gargantuan {
 
 		uint64_t visible = 0;
 
-		// Walked in chunks so the phases can be timed at all. Opening a zone
-		// per part would cost far more than the part costs; timing a block of
-		// them amortises the two clock reads over the whole block, and the
-		// answer is the same because every part in a chunk does the same work.
-		//
-		// The chunking is also kinder to the cache: the cull pass touches only
-		// Size and Position, and it touches them for all of a chunk before
-		// anything else goes looking at the same parts again.
+		// Chunked so the phases can be timed at all: a zone per part would
+		// cost more than the part. Also kinder to the cache -- each phase
+		// touches one set of fields across a whole chunk.
 		constexpr size_t CHUNK = 256;
 		Profiler *profiler = Profiler::GetCurrent();
 		const bool measuring = profiler && profiler->IsEnabled();
@@ -2243,23 +2197,16 @@ namespace gargantuan {
 					continue;
 				}
 
-				// Half the box diagonal, so the sphere holds the part whichever
-				// way it is turned. Loose, which is the safe way round: too big
-				// only costs a redraw, too small drops something on screen.
-				// Not glm::length, which is a call to a call at this
-				// optimisation level, for a square root this already needs
+				// Half the box diagonal, so the sphere holds the part however
+				// it is turned. Loose is the safe way round.
 				const glm::vec3 &size = part->Size;
 				float radius = std::sqrt(size.x * size.x + size.y * size.y + size.z * size.z) * 0.5f;
 				const glm::vec3 &centre = part->CFrame.Position;
 
-				// The sphere on its own, which is the capsule test with no
-				// sweep: what the opaque pass would actually put on screen
 				result.InView = SphereInside(planes, centre, radius);
-				// The same sphere swept along the shadow, so a caster off the
-				// side of the screen still counts. Only worth asking of a part
-				// that casts at all, and not at all of one already on screen --
-				// the sweep starts at the part, so a sphere that passed cannot
-				// fail a test that contains it.
+				// Swept along the shadow, so a caster off screen still counts.
+				// Not asked of one already on screen: the sweep starts at the
+				// part, so a sphere that passed cannot fail a test containing it.
 				result.ShadowReaches = !result.InView && part->CastShadow &&
 					CapsuleInside(planes, centre, centre + shadowStep, radius);
 			}
@@ -2281,9 +2228,7 @@ namespace gargantuan {
 					}
 					out.InViewList.push_back(part.get());
 				}
-				// A caster already on screen throws its shadow onto the screen
-				// too, so this list is the wider of the two and never drops one
-				// InViewList holds.
+				// The wider of the two: it never drops one InViewList holds
 				if (part->CastShadow && (result.InView || result.ShadowReaches)) {
 					if (needSets) {
 						out.ShadowsIntoView.insert(part.get());
@@ -2312,10 +2257,8 @@ namespace gargantuan {
 				visible++;
 				MixPointer(hash, part.get());
 				MixBits(hash, part->QuickHash);
-				// Four mixes that only ever say "still nothing" in a world with
-				// no screens and no drawn-on parts, which is most of them. The
-				// flag flipping is itself a change of signature, so a surface
-				// appearing still forces the redraw it should.
+				// Four mixes that say "still nothing" in a world with no
+				// screens. The flag flipping is itself a change of signature.
 				if (worldHasSurfaces) {
 					MixPointer(hash, part->SurfaceCamera.get());
 					MixBits(hash, GetCameraDrawCount(part->SurfaceCamera.get()));
@@ -2453,11 +2396,9 @@ namespace gargantuan {
 			sceneMatches = false;
 		}
 
-		// So is one whose projection moves inside the pixel every frame, or
-		// whose passes read a picture of last frame: both paint something
-		// different from a scene that has not moved, which is exactly the case
-		// the cache would otherwise answer out of what it kept. A temporal pass
-		// converges by being run, so freezing it would freeze it half-resolved.
+		// So is one that jitters or reads its own last frame: both paint
+		// something different from a scene that has not moved, and a temporal
+		// pass converges by being run
 		if (GetTemporalNeeds(camera).Any()) {
 			sceneMatches = false;
 		}
@@ -2523,11 +2464,8 @@ namespace gargantuan {
 			return nullptr;
 		}
 
-		// Its own frame rate says it is not due. Nothing is recorded and the
-		// target it drew last time is handed back, which is exactly what the
-		// cache path below does when the world has not moved -- the difference
-		// is only that this one is a decision about time rather than about
-		// whether anything changed.
+		// Not due yet: hand back what it drew last time, as the cache path
+		// below does when nothing moved
 		if (drawContext.NotDueYet && camera->HasDrawn) {
 			return target;
 		}
@@ -2570,10 +2508,8 @@ namespace gargantuan {
 
 		RecordShaderChain(commands, camera, *target, plan.FirstShader, plan.WriteCache);
 		RecordHistoryCopy(commands, camera, *target);
-		// Its target now holds a different picture, which is what a part showing
-		// this camera needs to know. The plan.Skip path above returns before
-		// here on purpose: nothing was rewritten, so nothing looking at it has
-		// been given a reason to redraw.
+		// The plan.Skip path returns before here on purpose: nothing was
+		// rewritten, so nothing looking at it needs to redraw
 		CountCameraDraw(camera);
 		outRecorded = true;
 		return target;

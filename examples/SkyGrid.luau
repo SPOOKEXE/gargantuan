@@ -5,24 +5,12 @@
 -- EXTENT squared times the layers, so widening the grid costs four times what
 -- it looks like it should.
 --
--- It is here to find where the engine stops coping, so it says so out loud:
--- after a few seconds it prints the part count, the build time and the frame
--- rate it settled at. Press F6 for the flame chart while it runs, or start with
--- --profile to have it write the report and quit, and the answer to "what does
--- a hundred thousand parts cost" is a row on the chart rather than a guess.
+-- It prints the part count, build time and frame rate it settled at. Press F6
+-- for the flame chart, or start with --profile to write the report and quit.
 --
--- Measured at 131072 parts on an unoptimised build: 3.4 fps, of which the
--- opaque pass is 220 ms and the frustum walk 54 ms, and the GPU is idle the
--- whole time. Every part costs a matrix, two uniform pushes and a draw call,
--- and nothing about that is batched yet.
---
--- On the scale of the request: a 10000x10000 stud field at this spacing is
--- 5000 x 5000 = twenty five million blocks in ONE layer. Each part carries a
--- CFrame, a size, a colour and its physical properties, so that alone is
--- several gigabytes before a single triangle is drawn -- and three separate
--- per-frame walks visit every part in the world (the scene signature, each
--- camera's frustum test, and the opaque pass). The numbers below are what this
--- engine can actually stand up; raise EXTENT until the report says otherwise.
+-- On scale: a 10000x10000 stud field at this spacing is 5000 x 5000 = twenty
+-- five million parts in ONE layer, which is gigabytes before a triangle is
+-- drawn. Raise EXTENT until the report says otherwise.
 
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -65,10 +53,8 @@ local PALETTE = {
 	Color3.fromRGB(70, 96, 74),
 }
 
--- A few small pictures shared between every part that shows one. Sharing
--- matters: an EditableImage is uploaded to the GPU once and kept until it
--- changes, so four of them is four uploads however many parts point at them.
--- There are no texture assets yet, so these are drawn here.
+-- Shared: an EditableImage is uploaded once and kept until it changes, so four
+-- of them is four uploads however many parts point at them
 local function makeTexture(base, accent, kind)
 	local image = Instance.new("EditableImage")
 	image:Resize(Vector2.new(32, 32))
@@ -109,10 +95,8 @@ local TEXTURES = {
 	makeTexture(Color3.fromRGB(110, 150, 110), Color3.fromRGB(60, 80, 60), "frame"),
 }
 
--- How many of the grid carry one. A part showing a picture needs its own
--- fragment uniforms and its own texture bound, so it cannot go in a batch --
--- which makes this the knob that decides how much of the grid takes the
--- batched path and how much takes the one-at-a-time path.
+-- Parts sharing a mesh and a texture batch together, so this decides how many
+-- batches the grid ends up in
 local TEXTURED_SHARE = 0.20
 
 local started = os.clock()
@@ -155,10 +139,8 @@ print(
 		.. `{math.floor(TEXTURED_SHARE * 100)}% textured, built in {string.format("%.2f", built)}s`
 )
 
--- One camera per side, drawn across the top of the window as a strip. Each is
--- a real camera rendering the same world from its own corner, so the strip is
--- four more full passes over the scene: the point is to see what that costs on
--- the chart, not only to look at it.
+-- Each is a real camera rendering the same world, so the strip is more full
+-- passes over the scene -- the point is to see what that costs
 -- Opposite corners, so the two panes are looking at the grid down the same
 -- diagonal from either end and never see the same thing
 local SIDES = {
@@ -184,9 +166,8 @@ for index, side in SIDES do
 	watcher.DrawToWindow = true
 	watcher.WindowPosition = UDim2.new((index - 1) * 0.5, 0, 0, 0)
 	watcher.WindowSize = UDim2.new(0.5, 0, 0.28, 0)
-	-- Its own rate. A pane is redrawn this often and blitted onto the window
-	-- every frame regardless, so between redraws it costs a copy rather than a
-	-- pass over the world.
+	-- Redrawn this often, blitted every frame regardless, so between redraws
+	-- it costs a copy rather than a pass over the world
 	watcher.FPS = 30
 	watcher.Parent = Workspace
 
@@ -199,14 +180,9 @@ for index, side in SIDES do
 end
 print(`skygrid: {#SIDES} diagonal cameras across the top, {watchers[1].Camera.FPS} fps each`)
 
--- Flown round the grid on its own, which is a measurement decision as much as a
--- presentation one: a camera that never moves lets the engine notice nothing
--- has changed and reuse the picture it already had, and a stress test that
--- stops drawing is not testing anything. Turning slowly means every frame walks
--- the frustum and draws for real.
---
--- Scriptable rather than Freecam, so Camera:Step leaves the CFrame set here
--- alone instead of rebuilding it from its own pitch and yaw.
+-- Moving on its own is a measurement decision: a still camera lets the engine
+-- reuse the picture it already had, and a stress test that stops drawing is not
+-- testing anything. Scriptable so Camera:Step leaves this CFrame alone.
 local camera = Workspace.CurrentCamera
 camera.CameraType = Enum.CameraType.Scriptable
 
@@ -233,9 +209,8 @@ local reported = false
 RunService.PreRender:Connect(function(deltaTime)
 	local now = Workspace.DistributedGameTime
 
-	-- The panes sweep a small cone by moving what they look at rather than
-	-- where they are. Aiming a fixed camera somewhere slightly different is a
-	-- rotation; moving the camera would be an orbit and would leave the grid.
+	-- A cone by moving what they look at, not where they are: moving them
+	-- would be an orbit and would leave the grid
 	for _, watcher in watchers do
 		local wobble = Vector3.new(
 			math.cos(now * 0.6 + watcher.Phase) * CONE,

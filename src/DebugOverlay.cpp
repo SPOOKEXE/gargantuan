@@ -41,8 +41,7 @@ namespace gargantuan {
 			return 0.0f;
 		}
 
-		// The longest frame is the lowest rate, so this is a maximum over the
-		// deltas and a minimum only once it is turned back into a rate
+		// Longest frame, lowest rate: a maximum until it becomes a rate
 		float longest = Samples.front().Delta;
 		for (const auto &sample : Samples) {
 			longest = std::max(longest, sample.Delta);
@@ -75,9 +74,7 @@ namespace gargantuan {
 			return 0.0f;
 		}
 
-		// Frames over the time they took. The mean of the individual rates
-		// would count a frame that took a moment the same as one that took a
-		// tenth of a second, and report a smoothness the run did not have.
+		// Frames over the time they took, not the mean of the rates
 		return (float)((double)Samples.size() / total);
 	}
 
@@ -90,9 +87,8 @@ namespace gargantuan {
 
 	namespace DebugText {
 		namespace {
-			// Five rows of three bits, most significant bit leftmost. Written
-			// out rather than generated because at this size every glyph is a
-			// judgement call about which three pixels read as the letter.
+			// Five rows of three bits, most significant leftmost. Written out
+			// because at this size every glyph is a judgement call.
 			struct Glyph {
 				char Character;
 				std::array<uint8_t, GLYPH_HEIGHT> Rows;
@@ -139,8 +135,7 @@ namespace gargantuan {
 			}};
 
 			const Glyph *Find(char character) {
-				// Lowercase reads as its capital rather than as nothing, since
-				// the font has one case and a missing glyph is a hole
+				// The font has one case, and a missing glyph is a hole
 				if (character >= 'a' && character <= 'z') {
 					character = (char)(character - 'a' + 'A');
 				}
@@ -158,7 +153,6 @@ namespace gargantuan {
 			if (text.empty()) {
 				return 0;
 			}
-			// Every character but the last carries its trailing gap
 			return (int)((text.size() * ADVANCE - 1) * (size_t)std::max(scale, 1));
 		}
 
@@ -170,8 +164,7 @@ namespace gargantuan {
 
 			for (char character : text) {
 				const Glyph *glyph = Find(character);
-				// A space, or anything the font has no answer for, advances
-				// without drawing
+				// A space, or an unknown, advances without drawing
 				if (glyph) {
 					for (int row = 0; row < GLYPH_HEIGHT; row++) {
 						uint8_t bits = glyph->Rows[(size_t)row];
@@ -197,9 +190,7 @@ namespace gargantuan {
 	} // namespace DebugText
 
 	namespace {
-		// Whole frames a second, capped at four digits. Past that the number is
-		// wider than the panel and the difference between 9999 and 20000 is not
-		// what anyone is reading the counter for.
+		// Capped at four digits: past that it is wider than the panel
 		std::string Rate(float framesPerSecond) {
 			int rounded = (int)(framesPerSecond + 0.5f);
 			rounded = std::clamp(rounded, 0, 9999);
@@ -209,10 +200,8 @@ namespace gargantuan {
 			return buffer;
 		}
 
-		// Right-aligned into a fixed width, so the columns do not shuffle
-		// sideways every time a number gains or loses a digit. The field is one
-		// wider than the longest number it can hold, or a four digit rate would
-		// run straight into the word in front of it.
+		// Right-aligned so columns do not shuffle, and one wider than the
+		// longest number or a four digit rate runs into its label
 		std::string Column(std::string_view label, float framesPerSecond) {
 			constexpr size_t FIELD = 5;
 
@@ -239,8 +228,7 @@ namespace gargantuan {
 			image.Resize(size);
 		}
 
-		// Dark and mostly opaque, so the numbers stay readable over a bright
-		// scene without hiding it
+		// Readable over a bright scene without hiding it
 		image.DrawRectangle(
 			Vector2(0, 0), size, Color3::fromRGB(8, 8, 12), 0.25f, Enums::ImageCombineType::Overwrite
 		);
@@ -253,8 +241,7 @@ namespace gargantuan {
 			0.0f,
 			SCALE
 		);
-		// The window's numbers in a dimmer colour than the live one, because
-		// the live one is what the eye should land on first
+		// Dimmer than the live number, which the eye should land on first
 		DebugText::Draw(
 			image,
 			Vector2((float)PADDING, (float)(PADDING + LINE_HEIGHT)),

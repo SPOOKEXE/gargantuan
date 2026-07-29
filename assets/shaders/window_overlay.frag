@@ -1,16 +1,11 @@
 #version 450
 
-// Lays a small picture over the finished window in pixel coordinates, for the
-// engine's own debug readouts. Not a post-process pass: it runs after the
-// camera's picture has been put on the swapchain, so what it draws is not in
-// any camera's target, not in what Camera:Render() hands back, and not part of
-// anything the redraw cache reasons about.
+// A small picture over the finished window, for the engine's debug readouts.
+// Runs after the camera's picture is on the swapchain, so it is in no camera's
+// target, not in what Camera:Render() returns, and invisible to the cache.
 //
-// The fullscreen triangle covers the whole target and everything outside the
-// rectangle is discarded, rather than drawing a quad sized to the rectangle.
-// The vertex stage is shared with every other pass and takes no vertex buffer,
-// so there is nothing to size; a discard on the way out is cheaper than a
-// pipeline that needs geometry of its own.
+// A fullscreen triangle with everything outside the rectangle discarded: the
+// shared vertex stage takes no vertex buffer, so there is nothing to size.
 
 layout(location = 0) in vec2 FragmentUV;
 layout(location = 0) out vec4 OutputColor;

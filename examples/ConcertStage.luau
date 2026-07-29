@@ -5,17 +5,11 @@
 -- shadowed and reflected in the world like any other part, and they happen to
 -- be showing a camera.
 --
--- Two cameras and two screens rather than one of each because the interesting
--- part is that they disagree. Stage left and stage right see the same crowd
--- from opposite wings, so a block near one camera fills its screen and is a
--- speck on the other, and the wave crossing the crowd runs left to right on one
--- and right to left on the other.
+-- Two of each because the interesting part is that they disagree: a block near
+-- one camera is a speck on the other, and the wave runs the opposite way.
 --
--- The crowd is a grid, which is what makes it a crowd rather than a heap: every
--- block is placed from its row and column, and everything that varies -- height,
--- colour, when it jumps -- is worked out from those two numbers. Nothing is
--- placed by hand and nothing is random except through a seeded Random, so the
--- same crowd comes back every run.
+-- The crowd is a grid. Everything that varies is worked out from a row and a
+-- column, through a seeded Random, so the same crowd comes back every run.
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -34,19 +28,10 @@ local STAGE_WIDTH = 44
 local STAGE_DEPTH = 20
 local STAGE_TOP = 4
 
--- Two things about the light here, both of which the venue is built around.
---
--- The sun is only above the horizon between 6 and 18. Outside that every
--- surface falls back to the shader's flat ambient, a fifth of its colour, and
--- the whole place goes black -- which is what an evening concert would
--- otherwise be, there being no lighting service to hang a rig off yet.
---
--- The latitude is negative to swing it round behind the audience. A stage faces
--- its crowd, so every face worth seeing -- the backdrop, the speaker stacks,
--- and above all the screens -- points that way, and a sun anywhere else leaves
--- the lot of them on ambient alone. The screens especially: they are showing a
--- well-lit picture of the crowd, and it is multiplied by however much light
--- falls on the screen itself.
+-- The sun is only up between 6 and 18; outside that everything falls back to
+-- the shader's flat ambient and the venue goes black. The latitude is negative
+-- to swing it behind the audience, because a stage faces its crowd and every
+-- face worth seeing -- the screens especially -- points that way.
 Lighting.ClockTime = 14
 Lighting.GeographicLatitude = -40
 
@@ -104,11 +89,8 @@ block(
 	Color3.fromRGB(96, 94, 106)
 )
 
--- Lamps hanging off the beam. Nothing here emits light -- there is no lighting
--- service yet, so a lamp cannot throw colour onto the stage the way a real one
--- would. What it can do is be its colour or be black, and a rig that switches
--- between the two in a run along the beam reads as lamps going on and off even
--- though nothing around them changes.
+-- Nothing emits light yet, so a lamp can only be its colour or be black. A run
+-- of that along the beam reads as lamps switching on and off.
 local LAMP_COLOURS = {
 	Color3.fromRGB(255, 90, 70),
 	Color3.fromRGB(255, 190, 80),
@@ -261,9 +243,8 @@ RunService.PreRender:Connect(function()
 
 	performer.Orientation = Vector3.new(0, math.sin(now * 1.6) * 35, 0)
 
-	-- Hard on or hard off rather than faded between the two. A lamp dimming up
-	-- and down reads as a colour change on a ball; a lamp that is either its
-	-- colour or nearly black reads as a lamp being switched.
+	-- Hard on or off: dimming reads as a ball changing colour, switching
+	-- reads as a lamp
 	for _, lamp in lamps do
 		local lit = math.sin(now * 6.0 - lamp.Phase) > 0.1
 		lamp.Part.Color = lit and lamp.Lit or LAMP_OFF

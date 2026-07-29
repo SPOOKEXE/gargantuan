@@ -10,31 +10,17 @@
 //   taa:SetRenderTexture(Enum.ShaderProperty.DepthHistoryTexture, Enum.RenderTexture.DepthHistory)
 //   RenderSettings.AntialiasShader = taa
 //
-// The bindings are what make it work at all, and asking for them is what makes
-// the engine produce them: History is the camera's own finished picture from
-// last frame, Velocity is where each pixel was on that frame, and the two
-// depths are how far away things are now and were then. Reading builtin.Jitter
-// is separately what puts the camera's projection on a sub-pixel wander, so
-// each frame samples a different point inside the pixel.
+// Asking for the bindings is what makes the engine produce them. Reading
+// builtin.Jitter separately puts the camera's projection on a sub-pixel wander.
 //
-// Where FXAA guesses at an edge from one frame and blurs along it, this one
-// averages the frames themselves. Every frame samples the pixel somewhere
-// slightly different, so a handful of them together describe how much of the
-// pixel the edge actually covers -- which is what antialiasing is, rather than
-// a smear that happens to look like it.
+// Where FXAA guesses at an edge from one frame, this averages the frames
+// themselves: each samples the pixel somewhere different, so together they
+// describe how much of it the edge actually covers.
 //
-// Everything hard about this is history that should not be reused: a pixel the
-// camera swung past, a surface that moved out from behind another, a light that
-// changed. Velocity finds where a point was; two tests then decide whether what
-// was there is still worth believing.
-//
-// The colour test asks whether the old sample could plausibly belong among this
-// pixel's neighbours. It catches most things and is cheap, but it is blind in
-// exactly one case: a surface emerging from behind another of much the same
-// shade. The motion is honest, the history is wrong, and the two colours agree.
-// The depth test is what sees that -- whatever stood at that spot last frame
-// was nearer than what stands here now, and no amount of looking at colour
-// says so.
+// The hard part is history that should not be reused. The colour test asks
+// whether the old sample belongs among its neighbours, and is blind in one
+// case: a surface emerging from behind another of the same shade. The depth
+// test sees that one.
 
 layout(location = 0) in vec2 FragmentUV;
 layout(location = 0) out vec4 OutputColor;
@@ -78,10 +64,9 @@ const float DEFAULT_FEEDBACK = 0.92;
 const float DEFAULT_CLAMPING = 1.25;
 const float DEFAULT_DISOCCLUSION = 0.1;
 
-// Luma and two chroma axes, from a rotation of RGB that costs a few adds.
 // Clamping in RGB tests three channels that move together, so a colour can sit
-// inside all three ranges and still be wrong; in YCoCg brightness is one axis
-// on its own, which is the axis ghosting actually travels along.
+// inside all three ranges and still be wrong. In YCoCg brightness is its own
+// axis, which is the one ghosting travels along.
 vec3 RgbToYCoCg(vec3 colour) {
     return vec3(
         0.25 * colour.r + 0.5 * colour.g + 0.25 * colour.b,
@@ -95,9 +80,8 @@ vec3 YCoCgToRgb(vec3 colour) {
     return vec3(t + colour.y, colour.x + colour.z, t - colour.y);
 }
 
-// Bicubic rather than bilinear, because the history is resampled every single
-// frame. Bilinear loses a little every time and the loss compounds: within a
-// second of the camera drifting, a linear-sampled history is visibly soft.
+// Bicubic, because the history is resampled every frame and bilinear loses a
+// little each time. Within a second of drifting it is visibly soft.
 vec4 SampleHistory(vec2 uv) {
     vec2 resolution = builtin.Resolution.xy;
     vec2 texel = builtin.Resolution.zw;
@@ -112,8 +96,8 @@ vec4 SampleHistory(vec2 uv) {
     vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
     vec2 w3 = f * f * (-0.5 + 0.5 * f);
 
-    // The middle two taps of each axis are fetched as one bilinear sample
-    // placed between them, which is what turns sixteen reads into five
+    // The middle two taps of each axis as one bilinear sample between them,
+    // which turns sixteen reads into five
     vec2 w12 = w1 + w2;
     vec2 offset12 = w2 / max(w12, vec2(0.0001));
 
@@ -150,18 +134,13 @@ vec4 SampleHistory(vec2 uv) {
     return max(result, vec4(0.0));
 }
 
-// The nearest surface in the pixel's own neighbourhood, and how it moved.
+// The nearest surface around the pixel, and how it moved.
 //
-// Taking the centre pixel's own motion looks obviously right and is not. An
-// edge is antialiased across two pixels, so the pixel holding the near side of
-// a silhouette often sits over the background by more than half its area and
-// reports the background's motion; the near surface then reprojects to where
-// the far one was and trails behind itself. Whatever is closest is what the eye
-// reads the pixel as, so its motion is the one to follow.
+// The centre pixel's own motion looks right and is not: an edge is antialiased
+// across two pixels, so the one holding a silhouette often reports the
+// background's motion and the near surface trails behind itself.
 //
-// The distance comes back with it because the two have to agree. A test asking
-// whether the history belongs here has to be asking about the same surface the
-// reprojection went looking for.
+// The distance comes back with it because the two have to agree.
 struct Nearest {
     vec2 Velocity;
     float Depth;
@@ -185,13 +164,9 @@ Nearest FindNearest(vec2 uv, vec2 texel) {
     return Nearest(texture(VelocityTexture, closest).xy, nearest);
 }
 
-// The same question asked of last frame's distances, and it has to be asked the
-// same way. A single tap would hold the nearest thing anywhere around here
-// against whatever happened to land on one particular texel back then, and at
-// an edge those are not comparable: the camera samples a fraction of a pixel
-// further along every frame, so a texel just outside a silhouette holds the
-// surface on one frame and the emptiness behind it on the next. Every edge in
-// the picture would read as a disocclusion and throw away its own accumulation.
+// The same question of last frame, asked the same way. A single tap would hold
+// "nearest thing around here" against "whatever landed on one texel", and at an
+// edge those are not comparable -- every edge would read as a disocclusion.
 float NearestHistoryDepth(vec2 uv, vec2 texel) {
     float nearest = texture(DepthHistoryTexture, uv).r;
 
@@ -224,10 +199,8 @@ void main() {
         return;
     }
 
-    // The range of colours this pixel's own surroundings take, which is the
-    // test for whether the history still belongs here. A sample that came from
-    // a surface since covered up, or lit differently, or moved off, lands
-    // outside what any of its neighbours could be.
+    // What this pixel's surroundings take, which is the test for whether the
+    // history still belongs here
     vec3 centre = RgbToYCoCg(current.rgb);
     vec3 sum = vec3(0.0);
     vec3 sumOfSquares = vec3(0.0);
@@ -244,9 +217,8 @@ void main() {
         }
     }
 
-    // Mean and spread rather than the outright minimum and maximum. One bright
-    // pixel in the nine drags the hard range wide enough to let a stale sample
-    // through; the spread barely notices it.
+    // Mean and spread, not min and max: one bright pixel in the nine drags a
+    // hard range wide enough to let a stale sample through
     vec3 mean = sum / 9.0;
     vec3 deviation = sqrt(max(sumOfSquares / 9.0 - mean * mean, vec3(0.0)));
     vec3 minimum = max(mean - clamping * deviation, lowest);
@@ -255,10 +227,8 @@ void main() {
     vec4 historySample = SampleHistory(historyUv);
     vec3 history = RgbToYCoCg(historySample.rgb);
 
-    // Pulled back towards the middle of the range along the line it sits on,
-    // rather than squashed onto the box per channel. Clamping each axis on its
-    // own moves the colour sideways as well as in, which shows up as the wrong
-    // hue along a moving edge.
+    // Pulled towards the middle along the line it sits on. Clamping each axis
+    // on its own moves the colour sideways too, which reads as the wrong hue.
     vec3 offset = history - centre;
     vec3 extent = max(max(maximum - centre, centre - minimum), vec3(0.0001));
     vec3 units = abs(offset) / extent;
@@ -284,23 +254,18 @@ void main() {
     // frame of approach changes the distance by a fraction of a percent, and
     // an occluder giving way to what is behind it changes it by a great deal.
     //
-    // One-sided, and that is the whole of it. Only a history that was NEARER
-    // than what stands here now is a disocclusion -- something was in the way
-    // and has moved off. The other direction, a history further away than what
-    // is here, is something arriving in front, and there the colour test needs
-    // no help: a surface that has just covered this pixel looks nothing like
-    // what the pixel used to be. Testing both directions would also make every
-    // silhouette flicker, because the distance behind a shape is the far plane
-    // and a jittering camera moves the edge across the pixel each frame.
+    // One-sided: only a history NEARER than what stands here is a
+    // disocclusion. The other direction is something arriving in front, which
+    // the colour test catches easily -- and testing it would make every
+    // silhouette flicker, the distance behind a shape being the far plane.
     float depthThen = NearestHistoryDepth(historyUv, texel);
     float revealed = max(nearest.Depth - depthThen, 0.0) / max(nearest.Depth, 0.0001);
     // Eased rather than cut, because a hard threshold draws its own visible
     // outline around everything that fails it
     float believable = 1.0 - smoothstep(disocclusion, disocclusion * 3.0, revealed);
 
-    // Weighted against brightness, so one frame of a bright highlight cannot
-    // outvote the several dimmer frames around it. Without this a specular
-    // glint crawling across a surface flickers rather than resolving.
+    // Weighted against brightness, so one bright frame cannot outvote the
+    // dimmer ones around it and a crawling glint resolves instead of flickering
     float currentWeight = (1.0 - feedback) * sampleWeight / (1.0 + max(centre.x, 0.0));
     float historyWeight = believable * feedback / (1.0 + max(history.x, 0.0));
 

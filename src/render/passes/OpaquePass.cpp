@@ -39,7 +39,6 @@ namespace gargantuan {
 	};
 
 	namespace {
-		// Iterating nothing, for the frame where the batched path already drew
 		const std::vector<BasePart *> EMPTY_PARTS;
 	} // namespace
 
@@ -67,15 +66,12 @@ namespace gargantuan {
 			glm::vec4 SurfaceTransform;
 		};
 
-		// Per-instance data, laid out to match the std430 block the instanced
-		// vertex stage reads
+		// Matches the std430 block the instanced vertex stage reads
 		struct alignas(16) InstanceData {
 			glm::mat4 ModelMatrix;
 			glm::vec4 Color;
-			// Carried per instance so a part showing a picture can be batched
-			// too. Which face the picture lands on depends on how the part is
-			// turned, so it is genuinely per part; whether there is a picture
-			// at all is per batch and pushed as a uniform.
+			// Per instance because which face the picture lands on depends on
+			// how the part is turned. Whether there is one at all is per batch.
 			glm::vec4 SurfaceNormal;
 			glm::vec4 SurfaceTransform;
 		};
@@ -93,8 +89,7 @@ namespace gargantuan {
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
 		uint32_t InstanceCapacity = 0;
-		// Held between frames rather than built each time, so a hundred
-		// thousand instances is one allocation for the run
+		// Held between frames: a hundred thousand instances is one allocation
 		std::vector<InstanceData> InstanceScratch;
 		struct Batch {
 			GpuMesh *Mesh = nullptr;
@@ -109,15 +104,8 @@ namespace gargantuan {
 		// Parallel to the visible list: which batch each part went into
 		static constexpr uint32_t SKIPPED = 0xFFFFFFFFu;
 		std::vector<uint32_t> PartBatch;
-		// Where each batch's next instance goes, kept so it is not allocated
-		// afresh every frame
 		std::vector<uint32_t> Cursors;
-		// Visible parts that cannot be batched, drawn the old way after the
-		// batches have gone in
-		std::vector<BasePart *> Individual;
-		// The three things building the instance buffer actually does, timed at
-		// their own boundaries rather than per part. Phases of a loop can be
-		// measured for nothing; the inside of one cannot.
+		// Timed at their own boundaries rather than per part
 		uint64_t InstanceBucketNanoseconds = 0;
 		uint64_t InstanceFillNanoseconds = 0;
 		uint64_t InstanceUploadNanoseconds = 0;
@@ -147,8 +135,7 @@ namespace gargantuan {
 			RenderPass::Destroy(gpu);
 		}
 
-		// Grown in powers of two and kept, so a steady scene stops reallocating
-		// after its first frame
+		// Doubling, so a steady scene stops reallocating after its first frame
 		bool EnsureInstanceCapacity(SDL_GPUDevice *gpu, uint32_t count) {
 			if (count <= InstanceCapacity && InstanceBuffer && InstanceTransfer) {
 				return true;
@@ -182,10 +169,8 @@ namespace gargantuan {
 			return InstanceCapacity > 0;
 		}
 
-		// Buckets the visible parts by mesh, writes them into one buffer and
-		// uploads it. False when there is nothing to do or the buffer could not
-		// be had, in which case the caller falls back to drawing a part at a
-		// time.
+		// Buckets by mesh and texture, writes one buffer, uploads it. False
+		// when there is nothing to do or the buffer could not be had.
 		bool PrepareInstances(
 			SDL_GPUDevice *gpu,
 			FrameContext &context,
@@ -198,10 +183,8 @@ namespace gargantuan {
 			uint64_t started = SDL_GetTicksNS();
 
 			Batches.clear();
-			// Grown, never shrunk, and never cleared. Every element written this
-			// frame is written before it is read, so zeroing them first is a
-			// nine megabyte memset at a hundred thousand parts for values that
-			// are about to be overwritten.
+			// Never cleared: every element is written before it is read, so
+			// zeroing first is a nine megabyte memset for nothing
 			if (InstanceScratch.size() < parts.size()) {
 				InstanceScratch.resize(parts.size());
 			}
@@ -209,12 +192,10 @@ namespace gargantuan {
 			// A handful of meshes, so a linear scan finds the bucket faster
 			// than hashing would. Parts of a shape end up contiguous, which is
 			// what lets each shape be one draw.
-			// Which bucket each part landed in, remembered rather than worked
-			// out twice. The second pass would otherwise ask every part for its
-			// mesh again and scan the buckets again to find where it goes.
+			// Remembered so the second pass does not ask for the mesh and scan
+			// the buckets all over again
 			PartBatch.clear();
 			PartBatch.reserve(parts.size());
-			Individual.clear();
 			// The upload only ever reads the first `running` of them, so a
 			// larger vector left over from a busier frame costs nothing
 
@@ -230,10 +211,8 @@ namespace gargantuan {
 				// same one. It used to be drawn on its own, because the face
 				// the picture lands on differs per part and that lived in a
 				// uniform; it rides in the instance buffer now.
-				// Two pointer tests before the map. The map holds only the parts
-				// that show something, but it was being asked about every part
-				// of every camera -- a hash of a pointer to answer "no" for the
-				// great majority, when the part is carrying the answer itself.
+				// Two pointer tests before the map, which holds only the parts
+				// that show something but was being asked about all of them
 				SDL_GPUTexture *texture = context.WhiteTexture;
 				if (anyPartTextures && (part->SurfaceCamera || part->SurfaceImage)) {
 					auto found = context.PartTextures->find(part);
@@ -268,8 +247,7 @@ namespace gargantuan {
 
 			uint64_t fillStarted = SDL_GetTicksNS();
 
-			// Where each shape's run starts, so the parts can be written
-			// straight into their own stretch on one pass over the list
+			// Where each run starts, so the second pass writes straight in
 			uint32_t running = 0;
 			for (Batch &batch : Batches) {
 				batch.First = running;
@@ -292,11 +270,9 @@ namespace gargantuan {
 				BasePart *part = parts[index];
 				InstanceData &instance = InstanceScratch[Cursors[bucket]++];
 
-				// The model matrix written straight into its slot, in plain
-				// floats. GetModelMatrix returns a mat4 by value and builds it
-				// out of glm temporaries, all of which are function calls until
-				// something inlines them; this is the same arithmetic with none
-				// of the ceremony, and it runs once per visible part per frame.
+				// Written straight into the slot in plain floats. The same
+				// arithmetic as GetModelMatrix without the glm temporaries,
+				// which are calls until something inlines them.
 				//
 				//   T * R * S  =  [ r0*sx  r1*sy  r2*sz  position ]
 				const glm::mat3 &rotation = part->CFrame.Rotation;
@@ -327,18 +303,15 @@ namespace gargantuan {
 				instance.Color.z = colour.z;
 				instance.Color.w = 1.0f - part->Transparency;
 
-				// Only for the parts that actually show something. The shader
-				// reads these two behind a flag that is off for the rest, and
-				// working them out for every part meant a matrix multiply and a
-				// normalise apiece for the great majority that never look.
+				// The shader reads these behind a flag that is off for the
+				// rest, so a matrix multiply and a normalise for nothing
 				if (Batches[bucket].Texture == White) {
 					continue;
 				}
 
-				// Carried through the same transform the vertex stage puts the
-				// mesh's own normals through, rather than the correct inverse
-				// transpose. Wrong the same way on both sides, so the two still
-				// line up, which is all a match needs.
+				// The same transform the vertex stage puts the mesh's normals
+				// through, not the correct inverse transpose. Wrong the same
+				// way on both sides, which is all a match needs.
 				glm::vec4 match = part->GetSurfaceMatch();
 				float nx = match.x, ny = match.y, nz = match.z;
 				if (nx * nx + ny * ny + nz * nz > 0.0f) {
@@ -383,8 +356,8 @@ namespace gargantuan {
 			SDL_GPUBufferRegion destination{
 				.buffer = InstanceBuffer, .offset = 0, .size = running * (uint32_t)sizeof(InstanceData)
 			};
-			// Cycled, so this frame's upload does not wait on the GPU still
-			// reading last frame's copy
+			// Cycled, so this upload does not wait on the GPU still reading
+			// last frame's copy
 			SDL_UploadToGPUBuffer(copyPass, &source, &destination, true);
 			SDL_EndGPUCopyPass(copyPass);
 
@@ -417,10 +390,8 @@ namespace gargantuan {
 		};
 
 		SDL_GPURenderPass *Draw(SDL_GPUDevice *gpu, FrameContext &context) override {
-			// Read once. Two clock reads a part is affordable; asking the
-			// profiler whether it is switched on, for every part of every
-			// frame, is not something a measurement should be doing to the
-			// thing it is measuring.
+			// Read once: asking per part is not something a measurement should
+			// do to the thing it measures
 			Profiler *profiler = Profiler::GetCurrent();
 			const bool measuring = profiler && profiler->IsEnabled();
 			uint64_t transformNanoseconds = 0;
@@ -430,17 +401,13 @@ namespace gargantuan {
 			// batched ones so the chart can price them separately
 			uint64_t individualParts = 0;
 
-			// Tallied here and handed over once at the end. Calling the
-			// profiler per part meant a linear scan of the counter list with a
-			// string compare at every step, twice, for every part -- a couple
-			// of million string comparisons a frame at this part count, all of
-			// it inside the region being timed.
+			// Handed over once at the end. Per part this was a linear scan of
+			// the counter list with a string compare at every step, twice.
 			std::array<uint64_t, magic_enum::enum_count<Enums::PartType>()> shapeDraws{};
 			std::array<uint64_t, magic_enum::enum_count<Enums::PartType>()> shapeTriangles{};
 
-			// Everything the pass needs to decide before it opens, because the
-			// instance upload is a copy pass and a copy pass cannot run inside
-			// a render pass.
+			// Decided before the pass opens: the instance upload is a copy
+			// pass, and a copy pass cannot run inside a render pass
 			std::vector<BasePart *> everything;
 			const std::vector<BasePart *> *drawList = nullptr;
 			if (context.Visible) {
@@ -457,11 +424,9 @@ namespace gargantuan {
 
 			const bool anyPartTextures = context.PartTextures && !context.PartTextures->empty();
 
-			// One draw per shape rather than one per part. Only when nothing
-			// needs saying about a part on its own: a surface shader has taken
-			// the fragment stage over, or something in the world is showing a
-			// picture and wants its own uniforms. Those keep the per-part path,
-			// which is the one every other example has always used.
+			// One draw per shape and texture rather than one per part. A
+			// SurfaceShader has taken the fragment stage over and keeps the
+			// per-part path.
 			bool instanced = InstancedPipeline && !context.SurfacePipeline && !drawList->empty() &&
 				PrepareInstances(gpu, context, *drawList, anyPartTextures);
 
@@ -520,26 +485,19 @@ namespace gargantuan {
 				);
 			}
 
-			// What is currently bound, so the loop below can tell a binding that
-			// would change something from one that would not. Reset per pass
-			// rather than kept, because a render pass starts with nothing bound.
+			// Reset per pass: a render pass starts with nothing bound
 			SDL_GPUTexture *boundSurfaceTexture = nullptr;
 			SDL_GPUBuffer *boundVertexBuffer = nullptr;
 			SDL_GPUBuffer *boundIndexBuffer = nullptr;
-			// Whether the fragment uniforms currently hold the "no picture on
-			// this part" values, which every bare part would otherwise push again
 			bool pushedBareFragment = false;
 
 			if (instanced) {
-				// The whole visible set in one buffer, and a draw per shape.
-				// Everything below this is the per-part path, which is what
-				// runs when a scene has pictures on its surfaces.
 				SDL_BindGPUVertexStorageBuffers(pass, 0, &InstanceBuffer, 1);
 
 				uint64_t submitStart = measuring ? SDL_GetTicksNS() : 0;
 				for (const Batch &batch : Batches) {
-					// Per batch, not per part: everything in it shares a
-					// texture, so it shares the answer to whether it has one
+					// Per batch: everything in it shares a texture, so it
+					// shares the answer to whether it has one
 					PartFragmentUniforms shared{
 						.HasSurfaceTexture =
 							glm::vec4(batch.Texture != context.WhiteTexture ? 1.0f : 0.0f, 0, 0, 0),
@@ -563,7 +521,7 @@ namespace gargantuan {
 					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
 					// gl_InstanceIndex counts from here, so it indexes the
-					// buffer directly and each shape reads its own run of it
+					// buffer directly
 					SDL_DrawGPUIndexedPrimitives(
 						pass, batch.Mesh->IndexCount, batch.Count, 0, 0, batch.First
 					);
@@ -572,9 +530,6 @@ namespace gargantuan {
 
 				if (measuring) {
 					submitNanoseconds += SDL_GetTicksNS() - submitStart;
-					// The three phases in their own right rather than one lump
-					// called Transforms, which is what the per-part path calls
-					// a different thing
 					profiler->AddZoneTime("Bucket", InstanceBucketNanoseconds, 1);
 					profiler->AddZoneTime("Fill Instances", InstanceFillNanoseconds, (uint64_t)InstanceScratch.size());
 					profiler->AddZoneTime("Upload", InstanceUploadNanoseconds, 1);
@@ -588,14 +543,6 @@ namespace gargantuan {
 				}
 			}
 
-			if (instanced && !Individual.empty()) {
-				// Back to the pipeline that takes one object at a time, and the
-				// world uniforms again because the slot belongs to whichever
-				// pipeline is bound
-				SDL_BindGPUGraphicsPipeline(pass, Pipeline);
-				SDL_PushGPUVertexUniformData(context.Commands, 0, &worldUniforms, sizeof(WorldUniforms));
-			}
-
 			// What the instanced path left bound, so the loop below knows what
 			// it can skip rebinding
 			if (instanced) {
@@ -603,7 +550,7 @@ namespace gargantuan {
 				pushedBareFragment = true;
 			}
 
-			for (BasePart *part : instanced ? Individual : *drawList) {
+			for (BasePart *part : instanced ? EMPTY_PARTS : *drawList) {
 				uint64_t partStart = measuring ? SDL_GetTicksNS() : 0;
 
 				auto &mesh = part->GetMesh();
@@ -615,11 +562,8 @@ namespace gargantuan {
 					.ModelMatrix = part->GetModelMatrix(),
 					.Color = glm::vec4((glm::vec3)part->Color, 1.0f - part->Transparency),
 				};
-				// Everything above is this pass working out what to say;
-				// everything below is saying it. The two answer different
-				// questions -- one is arithmetic and the other is driver calls
-				// -- and which of them is larger decides what is worth doing
-				// about it.
+				// Above is working out what to say, below is saying it: one is
+				// arithmetic and the other is driver calls
 				uint64_t partSubmit = measuring ? SDL_GetTicksNS() : 0;
 				SDL_PushGPUVertexUniformData(context.Commands, 1, &uniforms, sizeof(PartUniforms));
 
@@ -636,17 +580,10 @@ namespace gargantuan {
 
 					bool textured = surfaceTexture != context.WhiteTexture;
 
-					// A part with no picture on it makes this block of uniforms
-					// identical to the last one that also had none: the shader
-					// reads nothing but the flag once the flag is zero. Pushing
-					// it again for each of thousands of bare parts is a driver
-					// call apiece to say the same thing.
+					// A bare part makes this block identical to the last bare
+					// one: past the flag, the shader reads nothing
 					if (textured || !pushedBareFragment) {
-						// Carried through the same transform the vertex stage
-						// puts the mesh's own normals through, rather than the
-						// correct inverse transpose. Wrong the same way on both
-						// sides, so the two still line up, which is all a match
-						// needs.
+						// See the note in PrepareInstances
 						glm::vec3 surfaceNormal(0.0f);
 						glm::vec4 surfaceMatch(0.0f);
 						if (textured) {
@@ -688,10 +625,8 @@ namespace gargantuan {
 					}
 				}
 
-				// Same again for the geometry. Every part of a given shape
-				// shares one primitive mesh, so a scene of blocks and balls
-				// binds two pairs of buffers however many parts it has -- as
-				// long as it only rebinds when the mesh changes.
+				// Every part of a shape shares one primitive mesh, so this
+				// binds once per shape however many parts there are
 				if (mesh->VertexBuffer != boundVertexBuffer) {
 					SDL_GPUBufferBinding vertexBinding{.buffer = mesh->VertexBuffer, .offset = 0};
 					SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
@@ -706,14 +641,8 @@ namespace gargantuan {
 
 				SDL_DrawGPUIndexedPrimitives(pass, mesh->IndexCount, 1, 0, 0, 0);
 
-				// Counted by shape rather than timed by shape. Timing one draw
-				// would measure how long it took to write a command into a
-				// buffer, which has almost nothing to do with what a cylinder
-				// costs; how many of them went in, and how many triangles they
-				// carried, is the part the CPU here actually decides.
-				if (measuring) {
-					// Indexed, not named. The names are attached once the loop
-					// is over.
+					if (measuring) {
+					// Indexed, not named; names are attached after the loop
 					auto *primitive = part->Cast<Part>();
 					auto index = magic_enum::enum_index(primitive ? primitive->Shape : Enums::PartType::Block);
 					if (index && *index < shapeDraws.size()) {
@@ -735,17 +664,14 @@ namespace gargantuan {
 				// Handed over once, rather than opened and closed per part.
 				// Calls is the part count, so the chart can report a per-part
 				// cost rather than only a total.
-				// Whatever the per-part loop actually did, which in a scene that
-				// mixes the two paths is the textured minority rather than
-				// nothing. Suppressing these whenever a batch ran left the
-				// larger half of this pass off its own chart.
+				// Whatever the per-part loop actually did. Suppressing these
+				// whenever a batch ran left half the pass off its own chart.
 				if (individualParts > 0) {
 					profiler->AddZoneTime("Individual Transforms", transformNanoseconds, individualParts);
 					profiler->AddZoneTime("Individual Submit", submitNanoseconds, individualParts);
 				}
 			}
 			if (measuring) {
-				// One call per shape rather than two per part
 				for (size_t index = 0; index < shapeDraws.size(); index++) {
 					if (shapeDraws[index] == 0) {
 						continue;
@@ -754,9 +680,7 @@ namespace gargantuan {
 					profiler->Add(names.first, shapeDraws[index]);
 					profiler->Add(names.second, shapeTriangles[index]);
 				}
-				// The total as well as the split. Adding up eight rows in your
-				// head to find out whether the frame got heavier is not what a
-				// readout is for, and the balls alone are usually most of it.
+				// The total as well as the split
 				uint64_t totalTriangles = 0;
 				for (uint64_t count : shapeTriangles) {
 					totalTriangles += count;
@@ -770,12 +694,8 @@ namespace gargantuan {
 		};
 
 	  private:
-		// The two counter names for a shape, formatted once for the run.
-		//
-		// Building them per part per frame is what this replaced, and it was
-		// not free: two string allocations for every part drawn, which at a few
-		// thousand parts was a measurable slice of this pass -- reported by the
-		// profiler, as part of the pass it was inflating.
+		// Formatted once for the run. Per part this was two string allocations
+		// apiece, inflating the very pass it was reporting on.
 		static const std::pair<std::string, std::string> &CounterNames(Enums::PartType shape) {
 			static const std::vector<std::pair<std::string, std::string>> NAMES = [] {
 				std::vector<std::pair<std::string, std::string>> names;

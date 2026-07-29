@@ -1,21 +1,11 @@
 #version 450
 
-// Motion vectors and view depth: where the point under each pixel was on the
-// previous frame, and how far away it is on this one. The camera only draws
-// this when a pass in its chain asked for Enum.RenderTexture.Velocity or
-// .Depth, which in practice means a temporal pass that has to find the same
-// surface again in last frame's picture and tell whether it really is the same
-// surface.
+// Where the point under each pixel was last frame, and how far away it is now.
+// Only drawn when a pass asked for one of them.
 //
-// The depth rides along because it is already here: a perspective projection
-// puts the distance from the camera in w, so the fragment stage has it without
-// being asked. Drawing the scene a third time to arrive at the same number
-// would be the only alternative.
-//
-// Both positions come from unjittered projections. The sub-pixel offset a
-// jittering camera adds is a property of the sampling, not of the scene, and
-// letting it into the motion vector would make a still object read as moving
-// by whatever the offset changed by between the two frames.
+// The depth rides along because a perspective projection already puts the
+// distance in w. Both positions are unjittered: the sub-pixel offset belongs to
+// the sampling, not the scene, and would make a still object read as moving.
 
 layout(location = 0) in vec3 VertexPosition;
 

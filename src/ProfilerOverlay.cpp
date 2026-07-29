@@ -13,8 +13,7 @@ namespace gargantuan {
 		constexpr int BAR = DebugText::GLYPH_HEIGHT * SCALE + 5;
 		constexpr int PANEL_WIDTH = 760;
 		constexpr int CHART_WIDTH = PANEL_WIDTH - PADDING * 2;
-		// A bar narrower than this has nowhere to put even one character, so it
-		// is drawn as a block of colour and left unlabelled
+		// Narrower than this has nowhere to put a character
 		constexpr float LABEL_MINIMUM = 26.0f;
 
 		const Color3 INK = Color3::fromRGB(236, 240, 248);
@@ -27,16 +26,14 @@ namespace gargantuan {
 			return buffer;
 		}
 
-		// Hue from the name, so a zone keeps its colour from one second to the
-		// next and the eye can follow a row without reading it
+		// Hue from the name, so a row keeps its colour between snapshots
 		Color3 ZoneColour(std::string_view name, int depth) {
 			uint32_t hash = 2166136261u;
 			for (char character : name) {
 				hash = (hash ^ (uint32_t)(unsigned char)character) * 16777619u;
 			}
 
-			// Deeper rows are lighter, so nesting reads as depth even where two
-			// zones landed on similar hues
+			// Deeper rows lighter, so nesting reads even on similar hues
 			float value = std::min(0.52f + (float)depth * 0.08f, 0.86f);
 			return Color3::fromHSV((float)(hash % 360) / 360.0f, 0.55f, value);
 		}
@@ -79,8 +76,7 @@ namespace gargantuan {
 				);
 
 				if (width >= LABEL_MINIMUM) {
-					// However much of the name fits, rather than a name that
-					// runs out of its own bar and into the next one
+					// However much fits, rather than running into the next bar
 					int room = (int)((width - 6.0f) / (DebugText::ADVANCE * SCALE));
 					std::string label = zone.Name.substr(0, (size_t)std::max(room, 0));
 					DebugText::Draw(
@@ -94,9 +90,8 @@ namespace gargantuan {
 				}
 			}
 
-			// Laid end to end inside the parent. Whatever is left over at the
-			// right is the parent's own time, which is the gap that makes a
-			// flame chart worth reading.
+			// End to end inside the parent; the gap left at the right is the
+			// parent's own time
 			float childLeft = left;
 			for (size_t child : zone.Children) {
 				DrawZone(image, snapshot, child, childLeft, top, rootDepth);
@@ -110,8 +105,7 @@ namespace gargantuan {
 	) {
 		ProfilerPanelLayout layout;
 
-		// Worked out before anything is drawn, because the image has to be the
-		// right size before the first rectangle lands in it
+		// Before anything is drawn: the image has to be sized first
 		int height = PADDING + LINE;
 		for (size_t root : snapshot.Roots) {
 			height += LINE;
@@ -159,8 +153,7 @@ namespace gargantuan {
 			DebugText::Draw(image, Vector2((float)PADDING, y), "COUNTS PER FRAME", ACCENT, 0.0f, SCALE);
 			y += (float)LINE;
 
-			// Three to a row, because a counter is a short name and a small
-			// number and one per line would be mostly empty panel
+			// Three to a row; one per line would be mostly empty panel
 			int column = 0;
 			float rowTop = y;
 			for (const auto &counter : snapshot.Counters) {

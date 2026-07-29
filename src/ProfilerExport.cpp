@@ -47,8 +47,7 @@ namespace gargantuan {
 			return std::clamp(milliseconds / snapshot.FrameMilliseconds, 0.0, 1.0);
 		}
 
-		// A colour per row, from the name, so the same zone keeps the same
-		// colour between exports and two neighbours rarely collide
+		// From the name, so a zone keeps its colour between exports
 		std::string Hue(std::string_view name) {
 			uint32_t hash = 2166136261u;
 			for (char character : name) {
@@ -71,9 +70,7 @@ namespace gargantuan {
 				<< " ms/frame&#10;" << Fixed(zone.CallsPerFrame, 1) << " calls/frame\"><span>"
 				<< Escape(zone.Name) << "</span></div>\n";
 
-			// Children are laid out end to end inside the parent, which is what
-			// makes the picture a flame chart rather than a bar chart: the gap
-			// left over at the end is the parent's own time
+			// End to end inside the parent; the gap left is its own time
 			double childOffset = offset;
 			for (size_t child : zone.Children) {
 				WriteHtmlZone(out, snapshot, child, childOffset);
@@ -150,9 +147,7 @@ namespace gargantuan {
 			<< " frames averaged over " << Fixed(snapshot.Seconds, 2) << " s &middot; widths are share of a frame"
 			<< "</p>\n";
 
-		// One chart per root, because the roots are not slices of each other:
-		// the GPU wait overlaps the main thread rather than sitting inside it,
-		// and laying them end to end would claim otherwise
+		// One chart per root: the roots are not slices of each other
 		for (size_t root : snapshot.Roots) {
 			const Profiler::Zone &zone = snapshot.Zones[root];
 
@@ -206,8 +201,6 @@ namespace gargantuan {
 			return false;
 		}
 
-		// Made rather than assumed: the first export of a run is usually into a
-		// directory nothing has created yet
 		std::error_code error;
 		std::filesystem::create_directories(directory, error);
 

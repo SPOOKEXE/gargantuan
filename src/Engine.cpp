@@ -114,9 +114,8 @@ namespace gargantuan {
 	void Engine::UpdateProfiler(double now) {
 		Profiler.SetEnabled(ShowProfiler);
 
-		// An unattended run: gather for as long as it was asked to, write the
-		// report and stop. The first frame is where the clock starts, not
-		// construction, so the window is time actually spent rendering.
+		// The clock starts at the first frame, not construction, so the window
+		// is time actually spent rendering
 		if (AutomaticProfileSeconds >= 0.0) {
 			if (AutomaticProfileStarted == 0.0) {
 				AutomaticProfileStarted = now;
@@ -139,9 +138,8 @@ namespace gargantuan {
 			LastProfilerRefresh = 0.0;
 		}
 
-		// Only when a new second has been published. Redrawing the same numbers
-		// in between would be work charged to the frame that is being measured,
-		// which is the one thing a profiler must not do.
+		// Redrawing the same numbers in between would be work charged to the
+		// frame being measured
 		if (!Profiler.HasSnapshot()) {
 			if (LastProfilerRefresh == 0.0) {
 				ProfilerLayout = DrawProfilerPanel(*ProfilerPanel, Profiler::Snapshot{}, "GATHERING");
@@ -158,10 +156,8 @@ namespace gargantuan {
 			return false;
 		}
 
-		// SDL reports the pointer in window coordinates while the panel is
-		// placed in swapchain pixels, and on a display that scales those are
-		// not the same number. The window is created asking for high density,
-		// so this is the ordinary case rather than the exotic one.
+		// SDL reports the pointer in window coordinates and the panel is placed
+		// in swapchain pixels, which differ on a display that scales
 		int windowWidth = 0, windowHeight = 0;
 		int pixelWidth = 0, pixelHeight = 0;
 		SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
@@ -171,8 +167,7 @@ namespace gargantuan {
 			y *= (float)pixelHeight / (float)windowHeight;
 		}
 
-		// Both offsets, because the panel is inset from the left as well as
-		// pushed down under the frame rate counter
+		// Both offsets: the panel is inset from the left as well as pushed down
 		float left = STATISTICS_MARGIN + ProfilerLayout.ButtonPosition.GetX();
 		float top = PROFILER_TOP + ProfilerLayout.ButtonPosition.GetY();
 		float right = left + ProfilerLayout.ButtonSize.GetX();
@@ -196,30 +191,22 @@ namespace gargantuan {
 			ProfilerStatus = "EXPORT FAILED";
 		}
 
-		// Repainted at once so the answer is on screen before the next window
-		// comes round, rather than up to half a second later
+		// At once, so the answer is on screen before the next window
 		if (ProfilerPanel) {
 			ProfilerLayout = DrawProfilerPanel(*ProfilerPanel, Profiler.Latest(), ProfilerStatus);
 		}
 	}
 
 	void Engine::UpdateStatistics(double now, float deltaTime) {
-		// Recorded even while hidden. The counter is turned on because
-		// something went wrong a moment ago, and a window that only starts
-		// filling at that point has nothing to say about it for twenty seconds.
-		//
-		// Except across a resume, where the frame is an artefact of the window
-		// having been away rather than anything the engine did. Letting it in
-		// pins the maximum at whatever the catch-up burst managed and the
-		// minimum at the length of the pause, and both stay there for the whole
-		// twenty second window.
+		// Recorded even while hidden: it is turned on because something went
+		// wrong a moment ago. Except across a resume, which is an artefact of
+		// the window having been away.
 		if (now >= SettleUntil) {
 			Statistics.Record(now, deltaTime);
 		}
 
 		if (!ShowStatistics) {
-			// Handing over nothing is what takes it off the window; the panel
-			// itself is kept, so turning it back on does not have to build one
+			// The panel itself is kept, so turning it back on is free
 			RenderProvider->SetWindowOverlay(0, nullptr, glm::vec2(0.0f));
 			return;
 		}
@@ -274,9 +261,7 @@ namespace gargantuan {
 				return;
 			}
 
-			// The window coming back is not a frame anyone saw. Whatever the
-			// compositor did while it was away, the timings across the gap
-			// belong to the gap and not to the engine.
+			// Timings across the gap belong to the gap, not to the engine
 			if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED || event.type == SDL_EVENT_WINDOW_RESTORED ||
 				event.type == SDL_EVENT_WINDOW_SHOWN || event.type == SDL_EVENT_WINDOW_EXPOSED) {
 				SettleUntil = seconds + SETTLE_AFTER_RESUME;
@@ -306,8 +291,8 @@ namespace gargantuan {
 		}
 		}
 
-		// Ahead of everything the frame does, so the reading belongs to the
-		// frame that has just been measured rather than to the one being set up
+		// Ahead of the frame's work, so the reading belongs to the frame just
+		// measured
 		UpdateStatistics(seconds, deltaTime);
 		UpdateProfiler(seconds);
 		RenderProvider->SetWindowOverlay(
@@ -343,11 +328,9 @@ namespace gargantuan {
 		// Nothing else in a frame waits, so without this the backlog of
 		// submitted-but-unfinished work grows without bound.
 		{
-			// This is the only place a frame ever waits, so it is the whole of
-			// what "GPU" can honestly mean here: SDL exposes no timestamp
-			// queries, and how long the CPU sat blocked on last frame's fence
-			// is the measurement that is actually available. A frame that is
-			// GPU bound spends its time in here and nowhere else.
+			// The only place a frame waits, so the whole of what "GPU" can
+			// honestly mean: SDL exposes no timestamp queries, and this is
+			// where a GPU-bound frame spends its time
 			G_PROFILE("GPU Wait");
 			RenderProvider->BeginFrame(RenderSettings->GetFramesInFlight());
 		}
@@ -407,15 +390,11 @@ namespace gargantuan {
 		double windowNow = Workspace->DistributedGameTime;
 		float windowMaximumFps = RenderSettings->GetMaxCameraFPS();
 
-		// Whether a camera drawn into the window is due to redraw. It used to
-		// be that only offscreen cameras had a rate and a window one always
-		// drew; a pane showing a corner of the world does not need to be as
-		// current as the view the player is looking through, and at a large
-		// scene four of them at full rate is four more passes over everything.
+		// Only offscreen cameras used to have a rate. A pane showing a corner
+		// of the world need not be as current as the view being looked through.
 		auto isDue = [&](const std::shared_ptr<Camera> &camera) {
 			double interval = camera->GetRenderInterval(windowMaximumFps);
-			// On demand still means the engine never draws it, but a pane that
-			// has never drawn has nothing to show, so it gets its first frame
+			// A pane that has never drawn has nothing to show
 			if (interval <= 0.0 || camera->LastOffscreenDraw < 0.0) {
 				camera->LastOffscreenDraw = windowNow;
 				return true;

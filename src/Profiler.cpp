@@ -49,8 +49,7 @@ namespace gargantuan {
 		size_t index = Live.size();
 		Live.push_back(std::move(zone));
 
-		// Taken after the push, because pushing may have moved the vector out
-		// from under a reference held across it
+		// After the push, which may have moved the vector
 		if (parent == NONE) {
 			LiveRoots.push_back(index);
 		} else {
@@ -61,16 +60,13 @@ namespace gargantuan {
 
 	void Profiler::Begin(std::string_view name) {
 		if (!MeasuringFrame || Stack.size() >= (size_t)MAXIMUM_DEPTH) {
-			// Still pushed, so the matching End has something to take off and
-			// the tree does not reparent everything after it
+			// Still pushed, or the matching End reparents everything after it
 			Stack.push_back({NONE, 0});
 			return;
 		}
 
 		size_t parent = Stack.empty() ? NONE : Stack.back().Index;
-		// A zone opened inside one that was skipped is skipped with it, or it
-		// would attach to its grandparent and read as time that parent did not
-		// spend there
+		// Skipped with its parent, or it attaches to its grandparent
 		if (!Stack.empty() && parent == NONE) {
 			Stack.push_back({NONE, 0});
 			return;
@@ -127,13 +123,11 @@ namespace gargantuan {
 	}
 
 	void Profiler::BeginFrame(double now) {
-		// The only place the switch is honoured, so a frame is measured whole
-		// or not at all
+		// The only place the switch is honoured, so a frame is whole
 		if (PendingEnabled != Enabled) {
 			Enabled = PendingEnabled;
 
-			// Whatever was gathered belongs to a window that is now over, and
-			// the numbers in it were taken under different conditions
+			// Gathered under different conditions
 			Live.clear();
 			LiveRoots.clear();
 			LiveCounters.clear();
@@ -161,8 +155,7 @@ namespace gargantuan {
 			return;
 		}
 
-		// Anything left open is instrumentation that returned without closing
-		// its scope; closing it here keeps the next frame's tree honest
+		// Anything left open returned without closing its scope
 		while (!Stack.empty()) {
 			End();
 		}
@@ -200,8 +193,7 @@ namespace gargantuan {
 		for (const auto &live : LiveCounters) {
 			snapshot.Counters.push_back({live.Name, (double)live.Total / frames, live.Total});
 		}
-		// Alphabetical, so a class appearing or disappearing does not shuffle
-		// the rest of the list under the reader's eye
+		// Alphabetical, so one appearing does not shuffle the rest
 		std::sort(snapshot.Counters.begin(), snapshot.Counters.end(), [](const Counter &a, const Counter &b) {
 			return a.Name < b.Name;
 		});
@@ -209,9 +201,8 @@ namespace gargantuan {
 		Published = std::move(snapshot);
 		Snapshotted = true;
 
-		// The tree is kept and only its numbers are cleared: the shape of a
-		// frame is the same from one second to the next, and rebuilding it
-		// would throw away the row order the chart depends on
+		// Only the numbers are cleared: rebuilding the tree would throw away
+		// the row order the chart depends on
 		for (auto &live : Live) {
 			live.Nanoseconds = 0;
 			live.Calls = 0;
