@@ -2119,6 +2119,9 @@ namespace gargantuan {
 
 		std::vector<Instance *> &dirty = world->DirtyParts;
 		if (dirty.empty()) {
+			if (!GridStale) {
+				TightenCells();
+			}
 			return;
 		}
 
@@ -2143,9 +2146,25 @@ namespace gargantuan {
 			const float radius = std::sqrt(size.x * size.x + size.y * size.y + size.z * size.z) * 0.5f;
 
 			if (!GridStale && index < RowCells.size()) {
-				if (radius > row.Radius || (part->CastShadow && !row.CastShadow) ||
-					GridCellOf(Grid, centre) != RowCells[index]) {
+				uint32_t was = RowCells[index];
+				uint32_t now = GridCellOf(Grid, centre);
+				uint32_t slot = was < Grid.Slots.size() ? Grid.Slots[was] : PartGrid::NO_CELL;
+
+				if (slot == PartGrid::NO_CELL) {
 					GridStale = true;
+				} else if (now != was) {
+					if (!MoveRowCell((uint32_t)index, now, part, radius, part->CastShadow)) {
+						Grid.Casts[slot] = Grid.Casts[slot] | (part->CastShadow ? 1 : 0);
+						if (!StretchCell(slot, centre, radius)) {
+							GridStale = true;
+						}
+					}
+				} else {
+					Grid.Extents[slot] = std::max(Grid.Extents[slot], Grid.CellSize * 0.5f + radius);
+					Grid.Casts[slot] = Grid.Casts[slot] | (part->CastShadow ? 1 : 0);
+					if (radius != row.Radius || part->CastShadow != row.CastShadow) {
+						MarkCellLoose(slot);
+					}
 				}
 			}
 
@@ -2179,6 +2198,10 @@ namespace gargantuan {
 		}
 
 		dirty.clear();
+
+		if (!GridStale) {
+			TightenCells();
+		}
 	}
 
 	void RenderProvider::RebuildGrid(const std::shared_ptr<WorldRoot> &world) const {
@@ -2188,9 +2211,13 @@ namespace gargantuan {
 		const size_t count = PartRows.size();
 		Grid.Rows.clear();
 		Grid.Starts.clear();
+		Grid.Fill.clear();
 		Grid.Centres.clear();
 		Grid.Extents.clear();
 		Grid.Casts.clear();
+		Grid.Loose.clear();
+		Grid.LooseList.clear();
+		Grid.Slots.clear();
 		Grid.Largest = 0;
 		RowCells.assign(count, 0);
 		if (count == 0) {
@@ -2237,75 +2264,170 @@ namespace gargantuan {
 		Grid.Origin = low;
 		Grid.CellSize = cellSize;
 
-		std::vector<uint32_t> cursors((size_t)total + 1, 0);
+		std::vector<uint32_t> tally((size_t)total, 0);
 		for (size_t index = 0; index < count; index++) {
 			uint32_t cell = GridCellOf(Grid, rows[index].Centre);
 			RowCells[index] = cell;
-			cursors[cell + 1]++;
+			tally[cell]++;
 		}
 
-		size_t used = 0;
-		for (size_t cell = 0; cell < (size_t)total; cell++) {
-			if (cursors[cell + 1] != 0) {
-				used++;
-			}
-			cursors[cell + 1] += cursors[cell];
-		}
-
-		Grid.Rows.resize(count);
-		{
-			std::vector<uint32_t> place(cursors.begin(), cursors.end() - 1);
-			for (size_t index = 0; index < count; index++) {
-				Grid.Rows[place[RowCells[index]]++] = (uint32_t)index;
-			}
-		}
-
-		RowPositions.resize(count);
-		DrawInstances.resize(count);
-		DrawParts.resize(count);
-		DrawKeys.resize(count);
-		DrawKeysStale = false;
-		BasePart *const *sorted = world ? world->RawParts.data() : nullptr;
-		for (size_t at = 0; at < count; at++) {
-			uint32_t index = Grid.Rows[at];
-			RowPositions[index] = (uint32_t)at;
-			DrawInstances[at] = PartInstances[index];
-			DrawParts[at] = sorted ? sorted[index] : nullptr;
-			DrawKeys[at] = DrawParts[at] ? DrawKeyOf(DrawParts[at]) : 0;
-		}
-
-		Grid.Starts.reserve(used + 1);
-		Grid.Centres.reserve(used);
-		Grid.Extents.reserve(used);
-		Grid.Casts.reserve(used);
-
+		Grid.Slots.assign((size_t)total, PartGrid::NO_CELL);
 		const float half = cellSize * 0.5f;
-		for (size_t cell = 0; cell < (size_t)total; cell++) {
-			uint32_t start = cursors[cell];
-			uint32_t stop = cursors[cell + 1];
-			if (start == stop) {
-				continue;
-			}
+		size_t slots = 0;
 
-			float reach = 0.0f;
-			uint8_t casts = 0;
-			for (uint32_t at = start; at < stop; at++) {
-				const PartRow &row = rows[Grid.Rows[at]];
-				reach = std::max(reach, row.Radius);
-				casts |= row.CastShadow ? 1 : 0;
+		for (size_t cell = 0; cell < (size_t)total; cell++) {
+			uint32_t members = tally[cell];
+			if (members == 0) {
+				continue;
 			}
 
 			int32_t x = (int32_t)(cell % (size_t)Grid.Counts[0]);
 			int32_t y = (int32_t)((cell / (size_t)Grid.Counts[0]) % (size_t)Grid.Counts[1]);
 			int32_t z = (int32_t)(cell / ((size_t)Grid.Counts[0] * (size_t)Grid.Counts[1]));
 
-			Grid.Starts.push_back(start);
+			Grid.Slots[cell] = (uint32_t)Grid.Starts.size();
+			Grid.Starts.push_back((uint32_t)slots);
+			Grid.Fill.push_back(members);
 			Grid.Centres.push_back(low + glm::vec3((float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f) * cellSize);
-			Grid.Extents.push_back(half + reach);
-			Grid.Casts.push_back(casts);
-			Grid.Largest = std::max(Grid.Largest, (size_t)(stop - start));
+			Grid.Extents.push_back(half);
+			Grid.Casts.push_back(0);
+			Grid.Loose.push_back(0);
+			Grid.Largest = std::max(Grid.Largest, (size_t)members);
+
+			slots += members;
 		}
-		Grid.Starts.push_back((uint32_t)count);
+		Grid.Starts.push_back((uint32_t)slots);
+
+		Grid.Rows.resize(slots);
+		{
+			std::vector<uint32_t> place(Grid.Starts.begin(), Grid.Starts.end() - 1);
+			for (size_t index = 0; index < count; index++) {
+				Grid.Rows[place[Grid.Slots[RowCells[index]]]++] = (uint32_t)index;
+			}
+		}
+
+		RowPositions.resize(count);
+		DrawInstances.resize(slots);
+		DrawParts.resize(slots);
+		DrawKeys.resize(slots);
+		DrawKeysStale = false;
+		BasePart *const *sorted = world ? world->RawParts.data() : nullptr;
+
+		for (size_t cell = 0; cell < Grid.Fill.size(); cell++) {
+			const uint32_t start = Grid.Starts[cell];
+			const uint32_t stop = start + Grid.Fill[cell];
+			float reach = 0.0f;
+			uint8_t casts = 0;
+
+			for (uint32_t at = start; at < stop; at++) {
+				uint32_t index = Grid.Rows[at];
+				const PartRow &row = rows[index];
+				reach = std::max(reach, row.Radius);
+				casts |= row.CastShadow ? 1 : 0;
+
+				RowPositions[index] = at;
+				DrawInstances[at] = PartInstances[index];
+				DrawParts[at] = sorted ? sorted[index] : nullptr;
+				DrawKeys[at] = DrawParts[at] ? DrawKeyOf(DrawParts[at]) : 0;
+			}
+
+			Grid.Extents[cell] = half + reach;
+			Grid.Casts[cell] = casts;
+		}
+	}
+
+	void RenderProvider::MarkCellLoose(uint32_t slot) const {
+		if (slot < Grid.Loose.size() && Grid.Loose[slot] == 0) {
+			Grid.Loose[slot] = 1;
+			Grid.LooseList.push_back(slot);
+		}
+	}
+
+	void RenderProvider::TightenCells() const {
+		constexpr size_t PER_FRAME = 8;
+
+		const float half = Grid.CellSize * 0.5f;
+		const PartRow *rows = PartRows.data();
+
+		for (size_t done = 0; done < PER_FRAME && !Grid.LooseList.empty(); done++) {
+			uint32_t slot = Grid.LooseList.back();
+			Grid.LooseList.pop_back();
+			Grid.Loose[slot] = 0;
+
+			const glm::vec3 centre = Grid.Centres[slot];
+			const uint32_t start = Grid.Starts[slot];
+			const uint32_t stop = start + Grid.Fill[slot];
+
+			float need = half;
+			uint8_t casts = 0;
+			for (uint32_t at = start; at < stop; at++) {
+				const PartRow &row = rows[Grid.Rows[at]];
+				glm::vec3 offset = glm::abs(row.Centre - centre);
+				need = std::max(need, std::max(offset.x, std::max(offset.y, offset.z)) + row.Radius);
+				casts |= row.CastShadow ? 1 : 0;
+			}
+
+			Grid.Extents[slot] = need;
+			Grid.Casts[slot] = casts;
+		}
+	}
+
+	bool RenderProvider::StretchCell(uint32_t slot, glm::vec3 centre, float radius) const {
+		glm::vec3 offset = glm::abs(centre - Grid.Centres[slot]);
+		float need = std::max(offset.x, std::max(offset.y, offset.z)) + radius;
+
+		constexpr float STRETCH_LIMIT = 2.0f;
+		if (need > Grid.CellSize * STRETCH_LIMIT) {
+			return false;
+		}
+
+		Grid.Extents[slot] = std::max(Grid.Extents[slot], need);
+		MarkCellLoose(slot);
+		return true;
+	}
+
+	bool RenderProvider::MoveRowCell(uint32_t index, uint32_t toCell, BasePart *part, float radius, bool castShadow)
+		const {
+		if (index >= RowCells.size() || toCell >= Grid.Slots.size()) {
+			return false;
+		}
+
+		const uint32_t from = Grid.Slots[RowCells[index]];
+		const uint32_t to = Grid.Slots[toCell];
+		if (from == PartGrid::NO_CELL || to == PartGrid::NO_CELL || Grid.Fill[from] == 0) {
+			return false;
+		}
+		if (Grid.Fill[to] >= Grid.Starts[to + 1] - Grid.Starts[to]) {
+			return false;
+		}
+
+		const uint32_t at = RowPositions[index];
+		const uint32_t last = Grid.Starts[from] + Grid.Fill[from] - 1;
+		if (at < Grid.Starts[from] || at > last) {
+			return false;
+		}
+		if (at != last) {
+			uint32_t moved = Grid.Rows[last];
+			Grid.Rows[at] = moved;
+			RowPositions[moved] = at;
+			DrawInstances[at] = DrawInstances[last];
+			DrawParts[at] = DrawParts[last];
+			DrawKeys[at] = DrawKeys[last];
+		}
+		Grid.Fill[from]--;
+		MarkCellLoose(from);
+
+		const uint32_t landed = Grid.Starts[to] + Grid.Fill[to]++;
+		Grid.Rows[landed] = index;
+		RowPositions[index] = landed;
+		DrawParts[landed] = part;
+		DrawKeys[landed] = DrawKeyOf(part);
+		RowCells[index] = toCell;
+
+		Grid.Extents[to] = std::max(Grid.Extents[to], Grid.CellSize * 0.5f + radius);
+		Grid.Casts[to] = Grid.Casts[to] | (castShadow ? 1 : 0);
+		Grid.Largest = std::max(Grid.Largest, (size_t)Grid.Fill[to]);
+		return true;
 	}
 
 	void RenderProvider::EnsureDrawKeys(const std::shared_ptr<WorldRoot> &world) const {
@@ -2494,10 +2616,14 @@ namespace gargantuan {
 		BasePart *const *drawParts = DrawParts.data();
 
 		for (size_t cell = 0; cell < cellCount; cell++) {
+			const size_t memberCount = Grid.Fill[cell];
+			if (memberCount == 0) {
+				continue;
+			}
+
 			const uint32_t cellStart = Grid.Starts[cell];
 			const uint32_t *members = gridRows + cellStart;
 			BasePart *const *cellParts = drawParts + cellStart;
-			const size_t memberCount = Grid.Starts[cell + 1] - cellStart;
 			const bool cellCasts = Grid.Casts[cell] != 0;
 
 			uint64_t cullStart = measuring ? SDL_GetTicksNS() : 0;

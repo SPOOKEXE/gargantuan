@@ -93,10 +93,6 @@ eyes. What is missing is the runtime that drives them.
 - [ ] Ensure batched, parallel, vectorised and SIMD compute across the board (use stress test to find bottlenecks).
 - [ ] For shapes that are "flat" on axis, add per-cardinal 3d direction (up/down/left/right/forward/backward) face grouping so we can skip rendering faces that are pointing away from camera and are out of view. Refer to video https://www.youtube.com/watch?v=40JzyaOYJeY . Mainly for "static" objects, so Anchored = true and cardinal axis aligned (use epsilon for threshold). Also watch Anchored property as a quick dirty "i am updated" state so we can scan and check whether to put it in the flat mesh system or keep it in the dynamic one.
 - [ ] Consider using multiple larger contiguous blocks of memory for storing known primitives (cubes, cylinders, spheres) and either expanding or linked list of contiguous blocks. Helps memory location, simd over batched contiguous memory, etc.
-- [ ] Grid rebuild is the whole grid whenever one part leaves its cell, so a
-      scene with something always moving pays a counting sort over every part
-      every frame. Fine for a built-once world, bad for a busy one. Wants
-      cells that can be moved between rather than rebuilt
 - [ ] Shadow map is one fixed 60-stud box at the world origin, so nothing
       outside it casts at all. The walk rejects casters against that box now
       rather than handing the pass a whole world of them -- SkyGrid with

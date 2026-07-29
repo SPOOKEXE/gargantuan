@@ -180,18 +180,35 @@ namespace gargantuan {
 		// inside or wholly outside the view answer for all of its parts at
 		// once. Only the cells holding something are kept.
 		struct PartGrid {
+			static constexpr uint32_t NO_CELL = 0xFFFFFFFFu;
+
 			glm::vec3 Origin{0.0f};
 			float CellSize = 1.0f;
 			int32_t Counts[3] = {1, 1, 1};
 
-			// Row indices grouped by cell, and where each group starts
+			// Row indices grouped by cell. Each cell owns the slots from its
+			// Start to the next cell's and holds Fill of them, which is all of
+			// them until parts start moving. A part leaving frees a slot its
+			// cell can then let another part land in, so ordinary movement
+			// costs a swap rather than the whole grid being sorted again.
+			// Slots past a cell's Fill hold whatever was last there.
 			std::vector<uint32_t> Rows;
 			std::vector<uint32_t> Starts;
+			std::vector<uint32_t> Fill;
 			std::vector<glm::vec3> Centres;
 			// Half a cell plus the largest radius inside it, since a part
-			// reaches past the cell its centre landed in
+			// reaches past the cell its centre landed in. Only ever widened
+			// between rebuilds, which costs tightness and never correctness
 			std::vector<float> Extents;
 			std::vector<uint8_t> Casts;
+			// Cells whose Extent or Casts may claim more than their parts need,
+			// which is every cell something has been widened for or moved out
+			// of. Worked back down a few a frame.
+			std::vector<uint8_t> Loose;
+			std::vector<uint32_t> LooseList;
+			// Every cell in the lattice to the entry above, or NO_CELL for the
+			// empty air, which is most of it
+			std::vector<uint32_t> Slots;
 			size_t Largest = 0;
 		};
 		mutable PartGrid Grid;
@@ -214,6 +231,17 @@ namespace gargantuan {
 		// it left its cell without the grid being rebuilt to find out
 		mutable std::vector<uint32_t> RowCells;
 		void RebuildGrid(const std::shared_ptr<WorldRoot> &world) const;
+		// False when the cell it is headed for owns no slots or has none
+		// spare, which is the caller's cue to rebuild the lot
+		bool MoveRowCell(uint32_t index, uint32_t toCell, BasePart *part, float radius, bool castShadow) const;
+		// Widens a cell to cover a part that could not be moved out of it.
+		// False when it would have to cover so much that it answers for
+		// nothing, which is when laying the grid out again is worth it.
+		bool StretchCell(uint32_t slot, glm::vec3 centre, float radius) const;
+		void MarkCellLoose(uint32_t slot) const;
+		// Re-derives a few loose cells a frame from what they actually hold,
+		// since nothing else ever narrows one back down
+		void TightenCells() const;
 
 		// Reused culling chunk storage.
 		struct CullResult {
