@@ -16,6 +16,12 @@ want you wasting time to get a PR closed :(
 - glslc for compiling shaders
 - spirv-cross and the XCode toolchain IF compiling Metal shaders
 
+On Windows, install the
+[Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) and Visual Studio 2022
+with the "Desktop development with C++" workload. The SDK provides `glslc`, and
+its `VULKAN_SDK` environment variable is how the build finds `shaderc` so
+runtime shaders compile in-process instead of shelling out.
+
 ## Configure
 
 ```sh
@@ -23,6 +29,31 @@ rm -rf build
 mkdir build
 cmake -B build
 ```
+
+### Windows
+
+MSVC is not on `PATH` by default, so Ninja cannot find the compiler unless the
+shell has been through `vcvars64.bat` first. Run both commands from a
+**x64 Native Tools Command Prompt for VS 2022**, or set the environment up in
+the shell you already have:
+
+```bat
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+`SDL3.dll` and `shaderc_shared.dll` are copied next to `build\gargantuan.exe`
+after every link, so the executable runs from where it was built:
+
+```bat
+build\gargantuan.exe
+```
+
+Configuring without `-G Ninja` picks the Visual Studio generator instead. That
+works, but it is a multi-config generator: pass `--config Release` to
+`cmake --build` and the executable lands in `build\Release\` rather than
+`build\`.
 
 ## Testing
 

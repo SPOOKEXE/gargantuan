@@ -1,4 +1,5 @@
 build
+build-ninja
 build-release
 build-relwithdeb
 cmake-build-debug

@@ -95,6 +95,9 @@ namespace gargantuan {
 	static int LuauAssertHandler(const char *expression, const char *file, int line, const char *function) {
 		SDL_Log("Luau assertion failed:\n\tExpression: %s\n\tIn: %s:%d in %s", expression, file, line, function);
 		assert(false);
+		// assert compiles away with NDEBUG, so the handler has to return on its
+		// own. Non-zero asks Luau to break into the debugger and abort.
+		return 1;
 	}
 
 	ScriptEngine::ScriptEngine() : L(luaL_newstate()), ThreadEngine(L) {

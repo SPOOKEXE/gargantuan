@@ -319,8 +319,14 @@ namespace gargantuan {
 			Position.z + (goal.Position.z - Position.z) * alpha,
 		};
 
-		auto [x0, y0, z0, w0] = ToQuaternion();
-		auto [x1, y1, z1, w1] = goal.ToQuaternion();
+		// Read the components by name rather than decomposing: glm::qua stores
+		// them in an anonymous struct inside a union, which MSVC refuses to
+		// structured-bind.
+		const glm::quat start = ToQuaternion();
+		const glm::quat end = goal.ToQuaternion();
+
+		const float x0 = start.x, y0 = start.y, z0 = start.z, w0 = start.w;
+		float x1 = end.x, y1 = end.y, z1 = end.z, w1 = end.w;
 
 		auto dot = x0 * x1 + y0 * y1 + z0 * z1 + w0 * w1;
 

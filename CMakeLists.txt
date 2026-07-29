@@ -81,10 +81,29 @@ set(GLM_ENABLE_CXX_20 ON CACHE BOOL "" FORCE)
 # Optional: compile GLSL inside the process rather than shelling out to glslc.
 # Without it, runtime shader code needs glslc on PATH; build-time shaders are
 # unaffected either way.
-find_path(SHADERC_INCLUDE_DIR shaderc/shaderc.h)
-find_library(SHADERC_LIBRARY NAMES shaderc_shared shaderc)
+#
+# The Vulkan SDK ships shaderc but puts it nowhere the default search paths
+# look, which is how a Windows install with everything present still ends up
+# shelling out to glslc.
+set(GARGANTUAN_SHADERC_HINTS "")
+if(DEFINED ENV{VULKAN_SDK})
+	file(TO_CMAKE_PATH "$ENV{VULKAN_SDK}" GARGANTUAN_VULKAN_SDK)
+	list(APPEND GARGANTUAN_SHADERC_HINTS "${GARGANTUAN_VULKAN_SDK}")
+endif()
+
+find_path(SHADERC_INCLUDE_DIR shaderc/shaderc.h
+	HINTS ${GARGANTUAN_SHADERC_HINTS}
+	PATH_SUFFIXES include Include
+)
+find_library(SHADERC_LIBRARY NAMES shaderc_shared shaderc
+	HINTS ${GARGANTUAN_SHADERC_HINTS}
+	PATH_SUFFIXES lib Lib
+)
 if(WIN32)
-	find_file(SHADERC_DLL NAMES shaderc_shared.dll)
+	find_file(SHADERC_DLL NAMES shaderc_shared.dll
+		HINTS ${GARGANTUAN_SHADERC_HINTS}
+		PATH_SUFFIXES bin Bin
+	)
 endif()
 if(SHADERC_INCLUDE_DIR AND SHADERC_LIBRARY)
 	message(STATUS "Found shaderc, runtime shaders will compile in-process")
