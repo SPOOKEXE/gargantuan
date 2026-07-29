@@ -290,51 +290,63 @@ namespace gargantuan {
 			}
 
 			SDL_GPUTexture *White = context.WhiteTexture;
-			for (size_t index = 0; index < parts.size(); index++) {
-				uint32_t bucket = PartBatch[index];
+
+			// Raw pointers, because every one of these was a subscript call on
+			// a vector and five of them ran per part
+			const uint32_t *partBuckets = PartBatch.data();
+			BasePart *const *partList = parts.data();
+			uint32_t *cursors = Cursors.data();
+			InstanceData *scratch = InstanceScratch.data();
+			const Batch *batches = Batches.data();
+
+			const size_t count = parts.size();
+			for (size_t index = 0; index < count; index++) {
+				uint32_t bucket = partBuckets[index];
 				if (bucket == SKIPPED) {
 					continue;
 				}
 
-				BasePart *part = parts[index];
-				InstanceData &instance = InstanceScratch[Cursors[bucket]++];
+				BasePart *part = partList[index];
+				InstanceData &instance = scratch[cursors[bucket]++];
 
 				// Written straight into the slot in plain floats. The same
 				// arithmetic as GetModelMatrix without the glm temporaries,
-				// which are calls until something inlines them.
+				// which are calls until something inlines them. The rotation
+				// is read through a float pointer for the same reason: its
+				// columns are contiguous, so mat3[c][r] is rotation[c * 3 + r].
 				//
 				//   T * R * S  =  [ r0*sx  r1*sy  r2*sz  position ]
-				const glm::mat3 &rotation = part->CFrame.Rotation;
+				const float *rotation = &part->CFrame.Rotation[0][0];
 				const glm::vec3 &size = part->Size;
 				const glm::vec3 &position = part->CFrame.Position;
 				float *model = &instance.ModelMatrix[0][0];
 
-				model[0] = rotation[0][0] * size.x;
-				model[1] = rotation[0][1] * size.x;
-				model[2] = rotation[0][2] * size.x;
+				model[0] = rotation[0] * size.x;
+				model[1] = rotation[1] * size.x;
+				model[2] = rotation[2] * size.x;
 				model[3] = 0.0f;
-				model[4] = rotation[1][0] * size.y;
-				model[5] = rotation[1][1] * size.y;
-				model[6] = rotation[1][2] * size.y;
+				model[4] = rotation[3] * size.y;
+				model[5] = rotation[4] * size.y;
+				model[6] = rotation[5] * size.y;
 				model[7] = 0.0f;
-				model[8] = rotation[2][0] * size.z;
-				model[9] = rotation[2][1] * size.z;
-				model[10] = rotation[2][2] * size.z;
+				model[8] = rotation[6] * size.z;
+				model[9] = rotation[7] * size.z;
+				model[10] = rotation[8] * size.z;
 				model[11] = 0.0f;
 				model[12] = position.x;
 				model[13] = position.y;
 				model[14] = position.z;
 				model[15] = 1.0f;
 
-				glm::vec3 colour = (glm::vec3)part->Color;
-				instance.Color.x = colour.x;
-				instance.Color.y = colour.y;
-				instance.Color.z = colour.z;
+				const Color3 &colour = part->Color;
+				instance.Color.x = colour.R;
+				instance.Color.y = colour.G;
+				instance.Color.z = colour.B;
 				instance.Color.w = 1.0f - part->Transparency;
 
 				// The shader reads these behind a flag that is off for the
 				// rest, so a matrix multiply and a normalise for nothing
-				if (Batches[bucket].Texture == White) {
+				if (batches[bucket].Texture == White) {
 					continue;
 				}
 
@@ -344,9 +356,9 @@ namespace gargantuan {
 				glm::vec4 match = part->GetSurfaceMatch();
 				float nx = match.x, ny = match.y, nz = match.z;
 				if (nx * nx + ny * ny + nz * nz > 0.0f) {
-					float wx = rotation[0][0] * nx + rotation[1][0] * ny + rotation[2][0] * nz;
-					float wy = rotation[0][1] * nx + rotation[1][1] * ny + rotation[2][1] * nz;
-					float wz = rotation[0][2] * nx + rotation[1][2] * ny + rotation[2][2] * nz;
+					float wx = rotation[0] * nx + rotation[3] * ny + rotation[6] * nz;
+					float wy = rotation[1] * nx + rotation[4] * ny + rotation[7] * nz;
+					float wz = rotation[2] * nx + rotation[5] * ny + rotation[8] * nz;
 					float length = std::sqrt(wx * wx + wy * wy + wz * wz);
 					if (length > 0.0f) {
 						nx = wx / length;
@@ -355,13 +367,14 @@ namespace gargantuan {
 					}
 				}
 
-				instance.SurfaceNormal = glm::vec4(nx, ny, nz, match.w);
-				instance.SurfaceTransform = glm::vec4(
-					part->SurfaceTiling.GetX(),
-					part->SurfaceTiling.GetY(),
-					part->SurfaceOffset.GetX(),
-					part->SurfaceOffset.GetY()
-				);
+				instance.SurfaceNormal.x = nx;
+				instance.SurfaceNormal.y = ny;
+				instance.SurfaceNormal.z = nz;
+				instance.SurfaceNormal.w = match.w;
+				instance.SurfaceTransform.x = part->SurfaceTiling.GetX();
+				instance.SurfaceTransform.y = part->SurfaceTiling.GetY();
+				instance.SurfaceTransform.z = part->SurfaceOffset.GetX();
+				instance.SurfaceTransform.w = part->SurfaceOffset.GetY();
 			}
 
 			InstanceFillNanoseconds = SDL_GetTicksNS() - fillStarted;
