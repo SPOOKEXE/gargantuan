@@ -7,4 +7,4 @@ namespace gargantuan {
 		.Superclass = "ShaderScript",
 		.Constructor = ClassDefinition::WrapConstructor<SurfaceShader>(),
 	};
-} // namespace gargantuan
+}

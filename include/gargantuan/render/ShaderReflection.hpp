@@ -8,7 +8,6 @@
 #include <vector>
 
 namespace gargantuan::ShaderReflection {
-	// Where one member of a shader's uniform block lives
 	struct Member {
 		uint32_t Offset = 0;
 		// Bytes the member occupies. Writes are clamped to this so setting a
@@ -75,4 +74,4 @@ namespace gargantuan::ShaderReflection {
 	// everything, because over-reporting costs a cache that was not needed
 	// while under-reporting freezes the picture.
 	BlockUsage ReflectBlockUsage(const void *spirv, size_t bytes, uint32_t binding);
-} // namespace gargantuan::ShaderReflection
+}

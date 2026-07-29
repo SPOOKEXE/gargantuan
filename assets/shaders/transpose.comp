@@ -6,8 +6,6 @@
 //   transpose.Source = "transpose"
 //   camera:AddShader(transpose)
 //
-// Takes no parameters.
-//
 // NOTE: a camera's ping-pong textures are both the viewport's size, so a true
 // transpose only holds for a square viewport. On a non-square one the read is
 // clamped into range, which mirrors the overlapping square and leaves the rest

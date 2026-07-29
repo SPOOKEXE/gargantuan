@@ -18,12 +18,12 @@ namespace gargantuan {
 		static constexpr double WINDOW_SECONDS = 1.0;
 		static constexpr int MAXIMUM_DEPTH = 12;
 
-		// Milliseconds per frame, averaged over the window that produced it
 		struct Zone {
 			std::string Name;
 			size_t Parent = NONE;
 			int Depth = 0;
 			std::vector<size_t> Children;
+			// Per-frame average over the profiler window.
 			double Milliseconds = 0.0;
 			double CallsPerFrame = 0.0;
 		};

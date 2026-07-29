@@ -9,11 +9,9 @@ namespace gargantuan {
 		constexpr int SCALE = 2;
 		constexpr int PADDING = 8;
 		constexpr int LINE = DebugText::GLYPH_HEIGHT * SCALE + 4;
-		// Tall enough for scale-two text with a little room either side
 		constexpr int BAR = DebugText::GLYPH_HEIGHT * SCALE + 5;
 		constexpr int PANEL_WIDTH = 760;
 		constexpr int CHART_WIDTH = PANEL_WIDTH - PADDING * 2;
-		// Narrower than this has nowhere to put a character
 		constexpr float LABEL_MINIMUM = 26.0f;
 
 		const Color3 INK = Color3::fromRGB(236, 240, 248);
@@ -26,14 +24,12 @@ namespace gargantuan {
 			return buffer;
 		}
 
-		// Hue from the name, so a row keeps its colour between snapshots
 		Color3 ZoneColour(std::string_view name, int depth) {
 			uint32_t hash = 2166136261u;
 			for (char character : name) {
 				hash = (hash ^ (uint32_t)(unsigned char)character) * 16777619u;
 			}
 
-			// Deeper rows lighter, so nesting reads even on similar hues
 			float value = std::min(0.52f + (float)depth * 0.08f, 0.86f);
 			return Color3::fromHSV((float)(hash % 360) / 360.0f, 0.55f, value);
 		}
@@ -76,7 +72,6 @@ namespace gargantuan {
 				);
 
 				if (width >= LABEL_MINIMUM) {
-					// However much fits, rather than running into the next bar
 					int room = (int)((width - 6.0f) / (DebugText::ADVANCE * SCALE));
 					std::string label = zone.Name.substr(0, (size_t)std::max(room, 0));
 					DebugText::Draw(
@@ -117,7 +112,6 @@ namespace gargantuan {
 		if (counterRows > 0) {
 			height += LINE + counterRows * LINE;
 		}
-		// The status line and the export button share the last band
 		height += LINE + PADDING + 6;
 
 		Vector2 size((float)PANEL_WIDTH, (float)height);
@@ -153,7 +147,6 @@ namespace gargantuan {
 			DebugText::Draw(image, Vector2((float)PADDING, y), "COUNTS PER FRAME", ACCENT, 0.0f, SCALE);
 			y += (float)LINE;
 
-			// Three to a row; one per line would be mostly empty panel
 			int column = 0;
 			float rowTop = y;
 			for (const auto &counter : snapshot.Counters) {
@@ -175,7 +168,6 @@ namespace gargantuan {
 			y = rowTop + (column == 0 ? 0.0f : (float)LINE);
 		}
 
-		// The button, and the status line to the left of it
 		float buttonWidth = (float)(DebugText::Measure("EXPORT", SCALE) + 14);
 		float buttonHeight = (float)(DebugText::GLYPH_HEIGHT * SCALE + 8);
 		Vector2 buttonPosition((float)(PANEL_WIDTH - PADDING) - buttonWidth, y);

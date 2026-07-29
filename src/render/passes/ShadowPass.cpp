@@ -87,8 +87,6 @@ namespace gargantuan {
 				Uniforms uniforms{.ShadowMatrix = shadowMatrix, .PartMatrix = part->GetModelMatrix()};
 				SDL_PushGPUVertexUniformData(context.Commands, 0, &uniforms, sizeof(Uniforms));
 
-				// Parts of a shape share one primitive mesh, so this binds once
-				// per shape rather than once per part
 				if (mesh->VertexBuffer != boundVertexBuffer) {
 					SDL_GPUBufferBinding vertexBinding{.buffer = mesh->VertexBuffer, .offset = 0};
 					SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);

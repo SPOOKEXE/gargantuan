@@ -1,5 +1,3 @@
-// Has GPU programming gone too far?
-
 #include "gargantuan/render/PrimitiveMeshes.hpp"
 
 #include <glm/glm.hpp>
@@ -103,8 +101,6 @@ namespace gargantuan::PrimitiveMeshes {
 	}
 
 	namespace {
-		// Enough that a part-sized ball reads round without the vertex count
-		// mattering to anything
 		constexpr int SPHERE_SEGMENTS = 24;
 		constexpr int SPHERE_STACKS = 16;
 		constexpr int CYLINDER_SEGMENTS = 24;
@@ -124,7 +120,6 @@ namespace gargantuan::PrimitiveMeshes {
 		// single column of vertices cannot hold both ends of the picture
 		for (int stack = 0; stack <= SPHERE_STACKS; stack++) {
 			float v = (float)stack / (float)SPHERE_STACKS;
-			// Latitude from the top down, so v = 0 is the top of the picture
 			float phi = v * glm::pi<float>();
 			float y = glm::cos(phi);
 			float ring = glm::sin(phi);
@@ -168,7 +163,6 @@ namespace gargantuan::PrimitiveMeshes {
 			float theta = u * glm::two_pi<float>();
 			glm::vec3 normal{0.0f, glm::cos(theta), glm::sin(theta)};
 
-			// v = 0 at the +X end, so the picture runs down the length
 			vertices.push_back(Vertex{{-RADIUS, normal.y * RADIUS, normal.z * RADIUS}, normal, {u, 1.0f}});
 			vertices.push_back(Vertex{{RADIUS, normal.y * RADIUS, normal.z * RADIUS}, normal, {u, 0.0f}});
 		}

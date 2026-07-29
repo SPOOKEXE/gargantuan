@@ -32,7 +32,6 @@ namespace gargantuan::ShaderCompiler {
 	// True when a GLSL compiler can be found, ie. whether Compile can work at
 	// all on this machine
 	bool IsAvailable();
-	// Path or name of the compiler being used
 	std::string GetCompilerCommand();
 	// Overrides the compiler, mainly so tests can point at a known binary
 	void SetCompilerCommand(std::string command);
@@ -45,4 +44,4 @@ namespace gargantuan::ShaderCompiler {
 	// Compiles and throws the bytecode away, for checking a script's shader
 	// without building a pipeline from it
 	Result Validate(const std::string &source, Stage stage, const std::string &name = "shader");
-} // namespace gargantuan::ShaderCompiler
+}

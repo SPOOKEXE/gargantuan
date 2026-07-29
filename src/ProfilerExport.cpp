@@ -39,7 +39,6 @@ namespace gargantuan {
 			return buffer;
 		}
 
-		// A zone's share of the frame, which is what the widths are drawn from
 		double Share(const Profiler::Snapshot &snapshot, double milliseconds) {
 			if (snapshot.FrameMilliseconds <= 0.0) {
 				return 0.0;
@@ -47,7 +46,6 @@ namespace gargantuan {
 			return std::clamp(milliseconds / snapshot.FrameMilliseconds, 0.0, 1.0);
 		}
 
-		// From the name, so a zone keeps its colour between exports
 		std::string Hue(std::string_view name) {
 			uint32_t hash = 2166136261u;
 			for (char character : name) {

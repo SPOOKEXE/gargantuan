@@ -19,8 +19,6 @@ namespace gargantuan::MeshProvider {
 
 	} // namespace
 
-	// By reference: taken by value, every caller paid for a copy of the key on
-	// top of building it
 	std::unique_ptr<GpuMesh> &GetGpuMesh(const std::string &id) {
 		return GpuMeshes[id];
 	}
@@ -28,15 +26,11 @@ namespace gargantuan::MeshProvider {
 	std::unique_ptr<GpuMesh> *GetGpuMeshSlot(const std::string &id) {
 		return &GpuMeshes[id];
 	}
-
-
-
 	void Destroy(SDL_GPUDevice *gpu) {
 		for (auto &[meshId, gpuMesh] : GpuMeshes) {
 			gpuMesh->Destroy(gpu);
 		}
 		GpuMeshes.clear();
-		// Every slot handed out is now dangling; saying so is what stops it
 		Generation++;
 	}
 
@@ -49,10 +43,6 @@ namespace gargantuan::MeshProvider {
 		auto copyPass = SDL_BeginGPUCopyPass(cmd);
 
 		for (auto &[meshId, unloadedMesh] : UnloadedMeshes) {
-			// if (auto &gpuMesh = GpuMeshes.find(meshId)) {
-			//     gpuMesh->Destroy(Gpu);
-			// };
-
 			auto gpuMesh = std::make_unique<GpuMesh>(unloadedMesh);
 			gpuMesh->Upload(gpu, copyPass);
 			GpuMeshes[meshId] = std::move(gpuMesh);

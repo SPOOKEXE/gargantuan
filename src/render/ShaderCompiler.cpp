@@ -65,7 +65,6 @@ namespace gargantuan::ShaderCompiler {
 #endif
 		}
 
-		// Where compiled runtime shaders are kept between runs
 		std::filesystem::path CacheDirectory() {
 			static std::filesystem::path directory = [] {
 				char *preferences = SDL_GetPrefPath("TeamFireworks", "Gargantuan");
@@ -106,7 +105,7 @@ namespace gargantuan::ShaderCompiler {
 			unique << "gargantuan-" << name << "-" << generator() << extension;
 			return std::filesystem::temp_directory_path() / unique.str();
 		}
-	} // namespace
+	}
 
 #ifdef GARGANTUAN_HAVE_SHADERC
 	namespace {
@@ -122,7 +121,6 @@ namespace gargantuan::ShaderCompiler {
 			}
 		}
 
-		// Compiles in-process, so nothing has to be installed alongside the game
 		Result CompileInProcess(const std::string &source, Stage stage, const std::string &name) {
 			Result result;
 
@@ -158,7 +156,7 @@ namespace gargantuan::ShaderCompiler {
 			shaderc_compiler_release(compiler);
 			return result;
 		}
-	} // namespace
+	}
 #endif
 
 	bool IsInProcess() {
@@ -183,7 +181,7 @@ namespace gargantuan::ShaderCompiler {
 				file.write((const char *)result.Bytecode.data(), (std::streamsize)result.Bytecode.size());
 			}
 		}
-	} // namespace
+	}
 
 	void SetCacheEnabled(bool enabled) {
 		CACHE_ENABLED = enabled;
@@ -203,7 +201,6 @@ namespace gargantuan::ShaderCompiler {
 
 	bool IsAvailable() {
 #ifdef GARGANTUAN_HAVE_SHADERC
-		// Compiled in, so nothing external is needed
 		return true;
 #else
 		// Probing spawns a process, so remember the answer per command rather
@@ -230,7 +227,6 @@ namespace gargantuan::ShaderCompiler {
 			return result;
 		}
 
-		// A shader that has been compiled before does not need compiling again
 		auto cachePath = CacheDirectory() / CacheKey(source, stage);
 		if (CACHE_ENABLED) {
 			std::ifstream cached{cachePath, std::ios::binary};
@@ -310,7 +306,6 @@ namespace gargantuan::ShaderCompiler {
 				result.Error = "The compiler produced no output";
 			} else {
 				result.Success = true;
-				// Warnings still matter even when the compile succeeded
 				result.Error = diagnostics;
 			}
 		} else {
@@ -333,4 +328,4 @@ namespace gargantuan::ShaderCompiler {
 		result.Bytecode.shrink_to_fit();
 		return result;
 	}
-} // namespace gargantuan::ShaderCompiler
+}

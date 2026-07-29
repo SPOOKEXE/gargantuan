@@ -31,13 +31,11 @@ namespace gargantuan {
 			{Enums::PresetShaders::Vignette, "vignette"},
 		}};
 
-		// Adding an item to the enum and forgetting its asset is a build error
-		// rather than a shader that quietly never loads
 		static_assert(
 			PRESET_SOURCES.size() == magic_enum::enum_count<Enums::PresetShaders>(),
 			"every PresetShaders item needs an entry in PRESET_SOURCES"
 		);
-	} // namespace
+	}
 
 	std::string_view GetPresetShaderSource(Enums::PresetShaders preset) {
 		for (const auto &[item, source] : PRESET_SOURCES) {
@@ -60,8 +58,6 @@ namespace gargantuan {
 	}
 
 	std::string_view GetShaderPropertyName(Enums::ShaderProperty property) {
-		// Every property is spelled in the shader exactly as it is in the enum,
-		// which is the point of writing the enum that way
 		if (property == Enums::ShaderProperty::None) {
 			return {};
 		}
@@ -81,4 +77,4 @@ namespace gargantuan {
 		}
 		return CheckStackValue<std::string>(L, index);
 	}
-} // namespace gargantuan
+}

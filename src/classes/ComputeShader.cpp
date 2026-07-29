@@ -11,4 +11,4 @@ namespace gargantuan {
 			G_UD_READWRITE_PROP(ComputeShader, ThreadGroupSize, glm::vec3),
 		}
 	};
-} // namespace gargantuan
+}

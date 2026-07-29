@@ -37,7 +37,6 @@ void main() {
     vec2 pixel = FragmentUV * builtin.Resolution.xy;
     vec2 local = pixel - params.Position.xy;
 
-    // Outside the pasted rectangle nothing changes
     if (local.x < 0.0 || local.y < 0.0 || local.x >= overlaySize.x || local.y >= overlaySize.y) {
         OutputColor = source;
         return;

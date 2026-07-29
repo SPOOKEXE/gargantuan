@@ -93,9 +93,7 @@ namespace gargantuan {
 	}
 
 	void RenderProvider::BeginFrame(int maximumFramesInFlight) {
-		// Who followed whom is a fact about one frame only
 		RedrawnThisFrame.clear();
-		// Re-answered by whichever cameras draw motion vectors this frame
 		VelocityInUse = false;
 		// Only moves here, so everything recorded between this and EndFrame
 		// counts as the same frame and is safe from eviction
@@ -230,7 +228,6 @@ namespace gargantuan {
 		ShadowPass->Destroy(Gpu);
 		OpaquePass->Destroy(Gpu);
 		OffscreenOpaquePass->Destroy(Gpu);
-		// Only ever built if a camera asked for motion vectors
 		if (VelocityPass) {
 			VelocityPass->Destroy(Gpu);
 		}
@@ -295,7 +292,6 @@ namespace gargantuan {
 			.num_levels = 1,
 		};
 
-		// The scratch half is only paid for once a camera actually has shaders
 		if (sized) {
 			TargetGeneration++;
 			target.ScratchTexture = SDL_CreateGPUTexture(Gpu, &colorInfo);
@@ -305,14 +301,12 @@ namespace gargantuan {
 			return &target;
 		}
 
-		// The viewport changed, so the old textures are the wrong size
 		if (target.ColorTexture) SDL_ReleaseGPUTexture(Gpu, target.ColorTexture);
 		if (target.ScratchTexture) SDL_ReleaseGPUTexture(Gpu, target.ScratchTexture);
 		if (target.HistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.HistoryTexture);
 		if (target.VelocityTexture) SDL_ReleaseGPUTexture(Gpu, target.VelocityTexture);
 		if (target.ViewDepthTexture) SDL_ReleaseGPUTexture(Gpu, target.ViewDepthTexture);
 		if (target.ViewDepthHistoryTexture) SDL_ReleaseGPUTexture(Gpu, target.ViewDepthHistoryTexture);
-		// A resize invalidates the cached image along with everything else
 		if (target.CacheTexture) SDL_ReleaseGPUTexture(Gpu, target.CacheTexture);
 		target.ScratchTexture = nullptr;
 		target.HistoryTexture = nullptr;
@@ -359,7 +353,6 @@ namespace gargantuan {
 			return AcquireImageTexture(source.Image.get());
 		}
 
-		// A camera's own target, sampled straight from the GPU
 		if (source.Camera) {
 			auto it = CameraTargets.find(source.Camera.get());
 			if (it == CameraTargets.end()) {
@@ -897,7 +890,6 @@ namespace gargantuan {
 		ResolvedSurfaceSignature = SurfaceSignature;
 		PartTexturesResolved = true;
 
-		// Nothing is showing anything, so nothing to walk for
 		if (!worldRoot || !WorldHasSurfaces) {
 			return;
 		}
@@ -907,9 +899,7 @@ namespace gargantuan {
 				continue;
 			}
 
-			// A live camera feed is the more specific of the two, so it wins
-			// when a part somehow carries both
-			if (part->SurfaceCamera) {
+		if (part->SurfaceCamera) {
 				auto it = CameraTargets.find(part->SurfaceCamera.get());
 				if (it != CameraTargets.end() && it->second.ColorTexture) {
 					PartTextures[part.get()] = it->second.ColorTexture;
@@ -1006,8 +996,6 @@ namespace gargantuan {
 		return code;
 	}
 
-	// Runtime code is keyed by identity and revision so editing it rebuilds the
-	// pipeline; a named asset is keyed by its name so cameras share one
 	std::vector<uint8_t> RenderProvider::PackParameters(ShaderScript *shader, const CompiledShader &compiled) {
 		const auto &layout = compiled.ParameterLayout;
 
@@ -1025,7 +1013,6 @@ namespace gargantuan {
 		std::vector<uint8_t> packed(layout.Size, 0);
 		for (const auto &[name, value] : shader->GetParameters()) {
 			const auto *member = layout.Find(name);
-			// A parameter the shader never declared is simply ignored
 			if (!member || member->Offset >= packed.size()) {
 				continue;
 			}
@@ -1142,8 +1129,6 @@ namespace gargantuan {
 	RenderProvider::CompiledShader &RenderProvider::InsertCachedShader(
 		const std::string &key, ShaderScript *shader
 	) {
-		// Erases, so it runs before the reference the caller is about to hold
-		// is taken
 		DropSupersededShader(shader);
 
 		CompiledShader &compiled = ShaderCache[key];
@@ -1270,7 +1255,6 @@ namespace gargantuan {
 		std::string extension, entrypoint;
 		GetShaderFormat(Gpu, format, extension, entrypoint);
 
-		// Every post-process shader shares the one fullscreen vertex stage
 		if (!FullscreenVertexShader) {
 			size_t size = 0;
 			void *code = LoadShaderBytes("fullscreen", ".vert", size);
@@ -1307,7 +1291,6 @@ namespace gargantuan {
 			return nullptr;
 		}
 
-		// Ask the shader what it needs rather than assuming
 		compiled.Resources = ShaderReflection::ReflectResources(code, size);
 		uint32_t samplerCount = compiled.Resources.Found ? compiled.Resources.SampledImages : 1;
 		uint32_t uniformCount = compiled.Resources.Found ? compiled.Resources.UniformBuffers : 2;
@@ -1321,7 +1304,6 @@ namespace gargantuan {
 			.num_samplers = samplerCount,
 			.num_storage_textures = 0,
 			.num_storage_buffers = 0,
-			// slot 0 builtins, slot 1 the script's own parameters
 			.num_uniform_buffers = uniformCount,
 		};
 		SDL_GPUShader *fragment = SDL_CreateGPUShader(Gpu, &fragmentInfo);

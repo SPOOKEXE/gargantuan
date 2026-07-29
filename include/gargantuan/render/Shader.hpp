@@ -14,10 +14,8 @@ namespace gargantuan {
 		SDL_GPUShader *VertexShader = nullptr;
 		SDL_GPUShader *FragmentShader = nullptr;
 
-		/// Instantiates the vertex and fragment shaders if it doesn't exist.
 		void Init(SDL_GPUDevice *gpu);
 
-		/// Release associated shaders from the GPU.
 		void Destroy(SDL_GPUDevice *gpu);
 	};
 
@@ -39,4 +37,4 @@ namespace gargantuan {
 	  private:
 		SDL_GPUShader *CompileFile(SDL_GPUDevice *gpu, std::filesystem::path path, SDL_GPUShaderCreateInfo info);
 	};
-} // namespace gargantuan
+}

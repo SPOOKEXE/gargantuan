@@ -23,8 +23,6 @@ namespace gargantuan::ImageDecoder {
 		}
 
 		int width = 0, height = 0, channels = 0;
-		// The last argument forces RGBA, so every image comes out in the one
-		// layout EditableImage stores
 		stbi_uc *pixels = stbi_load_from_memory(
 			static_cast<const stbi_uc *>(bytes), (int)size, &width, &height, &channels, 4
 		);

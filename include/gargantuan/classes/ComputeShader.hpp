@@ -25,4 +25,4 @@ namespace gargantuan {
 
 		glm::vec3 ThreadGroupSize = glm::vec3(8, 8, 1);
 	};
-} // namespace gargantuan
+}

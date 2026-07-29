@@ -19,4 +19,4 @@ namespace gargantuan {
 			return ShaderCompiler::Stage::Fragment;
 		}
 	};
-} // namespace gargantuan
+}

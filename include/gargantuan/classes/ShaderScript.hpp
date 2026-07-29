@@ -232,4 +232,4 @@ namespace gargantuan {
 		static uint64_t NextSerial();
 		const uint64_t Serial = NextSerial();
 	};
-} // namespace gargantuan
+}

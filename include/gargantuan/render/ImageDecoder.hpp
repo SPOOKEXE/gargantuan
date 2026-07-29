@@ -14,20 +14,15 @@ namespace gargantuan::ImageDecoder {
 		std::string Error;
 	};
 
-	// Decodes an image already in memory. PNG, JPEG, BMP, TGA, GIF and PSD are
-	// all understood; the result is always converted to RGBA8.
+	// Decodes PNG, JPEG, BMP, TGA, GIF, or PSD into RGBA8 pixels.
 	Image Decode(const void *bytes, size_t size);
 
 	// Reads a file and decodes it. Relative paths resolve against the
 	// executable's directory, which is where the engine's assets live.
 	Image DecodeFile(const std::string &path);
 
-	// Write RGBA8 pixels out. PNG and BMP both carry the alpha through, BMP as
-	// a 32-bit bitmap. JPEG has nowhere to put it, so a half-transparent pixel
-	// lands as its full colour rather than blended with anything.
 	bool WritePng(const std::string &path, int width, int height, const uint8_t *rgba);
-	// Quality is stb's 1..100. High enough that the ringing around hard edges
-	// is not the first thing anyone notices in a screenshot.
+	// JPEG drops alpha; PNG and BMP preserve it.
 	constexpr int JPEG_QUALITY = 90;
 	bool WriteJpg(const std::string &path, int width, int height, const uint8_t *rgba);
 	bool WriteBmp(const std::string &path, int width, int height, const uint8_t *rgba);

@@ -23,10 +23,8 @@ namespace gargantuan {
 		.Superclass = "Instance",
 		.Properties =
 			{
+				// Accepts a preset enum but reads back as its source string.
 				{
-					// Takes either the asset name or an Enum.PresetShaders item,
-					// and always reads back as the string, since a shader outside
-					// the preset list has no item to report
 					"Source",
 					{
 						[](lua_State *L, Instance *instance) -> int {
@@ -187,7 +185,6 @@ namespace gargantuan {
 	}
 
 	uint64_t ShaderScript::NextSerial() {
-		// Starts at one, so a zero serial can never name a real shader
 		static uint64_t next = 0;
 		return ++next;
 	}
@@ -226,7 +223,7 @@ namespace gargantuan {
 			);
 			return nullptr;
 		}
-	} // namespace
+	}
 
 	int ShaderScript::LSetNumber(lua_State *L, Instance *instance) {
 		std::string name = CheckShaderPropertyArgument(L, 2);
@@ -283,7 +280,7 @@ namespace gargantuan {
 			}
 			return shader;
 		}
-	} // namespace
+	}
 
 	int ShaderScript::LSetImage(lua_State *L, Instance *instance) {
 		std::string name = CheckShaderPropertyArgument(L, 2);
@@ -501,7 +498,7 @@ namespace gargantuan {
 			sources.emplace(name, std::move(source));
 			return true;
 		}
-	} // namespace
+	}
 
 	void ShaderScript::SetImage(std::string name, std::shared_ptr<EditableImage> image) {
 		AssignTextureSource(ImageOrder, Images, name, TextureSource{std::move(image), nullptr}, MAXIMUM_IMAGES);
@@ -585,4 +582,4 @@ namespace gargantuan {
 	size_t ShaderScript::GetPackedParameterBytes() const {
 		return ParameterValues.size() * sizeof(glm::vec4);
 	}
-} // namespace gargantuan
+}

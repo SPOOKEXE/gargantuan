@@ -49,7 +49,6 @@ void main() {
     float roll = 0.94 + 0.06 * sin((uv.y + time * 0.12) * 6.28318);
     colour *= mix(1.0, scanline * roll, intensity);
 
-    // Tape grain
     float grain = Hash(uv * builtin.Resolution.xy + time * 60.0);
     colour += (grain - 0.5) * params.Noise.x * intensity;
 
@@ -59,7 +58,6 @@ void main() {
     colour *= mix(vec3(1.0), vec3(0.86, 1.02, 0.90), intensity);
     colour = mix(colour, clamp((colour - 0.06) * 1.18, 0.0, 1.0), intensity);
 
-    // Corners fall away
     vec2 centred = FragmentUV - 0.5;
     float vignette = 1.0 - dot(centred, centred) * 1.5 * intensity;
     OutputColor = vec4(clamp(colour * vignette, 0.0, 1.0), 1.0);

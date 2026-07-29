@@ -10,7 +10,6 @@ namespace gargantuan::ShaderReflection {
 		constexpr uint32_t SPIRV_MAGIC = 0x07230203;
 		constexpr size_t HEADER_WORDS = 5;
 
-		// The handful of opcodes a uniform block's layout is described with
 		constexpr uint16_t OP_MEMBER_NAME = 6;
 		constexpr uint16_t OP_TYPE_INT = 21;
 		constexpr uint16_t OP_TYPE_FLOAT = 22;
@@ -44,10 +43,10 @@ namespace gargantuan::ShaderReflection {
 
 		struct TypeInfo {
 			uint16_t Opcode = 0;
-			uint32_t Width = 0;       // scalars
-			uint32_t ComponentType = 0; // vectors and matrices
+			uint32_t Width = 0;
+			uint32_t ComponentType = 0;
 			uint32_t ComponentCount = 0;
-			uint32_t Stride = 0; // matrices and arrays
+			uint32_t Stride = 0;
 		};
 
 		// Reads a NUL-terminated, word-padded SPIR-V literal string
@@ -65,7 +64,7 @@ namespace gargantuan::ShaderReflection {
 			}
 			return text;
 		}
-	} // namespace
+	}
 
 	const Member *BlockLayout::Find(const std::string &name) const {
 		auto it = Members.find(name);
@@ -85,14 +84,13 @@ namespace gargantuan::ShaderReflection {
 			return layout;
 		}
 
-		// name and offset of every member, per struct type
 		std::unordered_map<uint32_t, std::unordered_map<uint32_t, std::string>> memberNames;
 		std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint32_t>> memberOffsets;
 		std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint32_t>> memberStrides;
 		std::unordered_map<uint32_t, uint32_t> variableBindings;
 		std::unordered_map<uint32_t, std::vector<uint32_t>> structMembers;
-		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> pointers; // id -> (storage, type)
-		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> variables; // id -> (pointerType, storage)
+		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> pointers;
+		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> variables;
 		std::unordered_map<uint32_t, TypeInfo> types;
 		std::unordered_set<uint32_t> nonWritable;
 
@@ -153,7 +151,6 @@ namespace gargantuan::ShaderReflection {
 				break;
 			}
 			case OP_VARIABLE: {
-				// result type, result id, storage class
 				if (operandCount >= 3) {
 					variables[operands[1]] = {operands[0], operands[2]};
 				}
@@ -178,7 +175,6 @@ namespace gargantuan::ShaderReflection {
 				break;
 			}
 			case OP_TYPE_IMAGE: {
-				// result, sampled type, dim, depth, arrayed, ms, sampled, format
 				if (operandCount >= 7) {
 					auto &type = types[operands[0]];
 					type.Opcode = OP_TYPE_IMAGE;
@@ -357,7 +353,6 @@ namespace gargantuan::ShaderReflection {
 		}
 
 		for (const auto &[variableId, typeAndStorage] : variables) {
-			// Only the bound resources matter; locals and builtins are not
 			if (!hasBinding.count(variableId)) {
 				continue;
 			}
@@ -418,7 +413,6 @@ namespace gargantuan::ShaderReflection {
 		std::unordered_map<uint32_t, std::vector<uint32_t>> structMembers;
 		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> pointers;
 		std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> variables;
-		// Only 32-bit integer constants, which is all a member index is
 		std::unordered_map<uint32_t, uint32_t> constants;
 
 		// SPIR-V puts names, decorations, types and globals ahead of the
@@ -464,7 +458,6 @@ namespace gargantuan::ShaderReflection {
 				}
 				break;
 			case OP_CONSTANT:
-				// result type, result id, then the literal value
 				if (operandCount >= 3) {
 					constants[operands[1]] = operands[2];
 				}
@@ -531,7 +524,6 @@ namespace gargantuan::ShaderReflection {
 			switch (opcode) {
 			case OP_ACCESS_CHAIN:
 			case OP_IN_BOUNDS_ACCESS_CHAIN: {
-				// result type, result id, base, then the indices
 				if (operandCount < 3 || !aliases.count(operands[2])) {
 					break;
 				}
@@ -579,4 +571,4 @@ namespace gargantuan::ShaderReflection {
 
 		return usage;
 	}
-} // namespace gargantuan::ShaderReflection
+}
