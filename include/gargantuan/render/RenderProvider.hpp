@@ -71,11 +71,19 @@ namespace gargantuan {
 
 		// Conservatively finds visible parts, relevant casters, and their hash.
 		void ComputeVisibleSet(
-			Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection, VisibleSet &out
+			Camera *camera,
+			const std::shared_ptr<WorldRoot> &world,
+			glm::vec3 lightDirection,
+			bool needSignature,
+			VisibleSet &out
 		);
 
 		const VisibleSet &EnsureVisibleSet(
-			Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection, uint64_t cameraSignature
+			Camera *camera,
+			const std::shared_ptr<WorldRoot> &world,
+			glm::vec3 lightDirection,
+			uint64_t cameraSignature,
+			bool needSignature = false
 		);
 
 		// Draws resized camera targets in one dependency-ordered command buffer.

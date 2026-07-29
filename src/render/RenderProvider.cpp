@@ -2069,9 +2069,14 @@ namespace gargantuan {
 	}
 
 	void RenderProvider::ComputeVisibleSet(
-		Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection, VisibleSet &out
+		Camera *camera,
+		const std::shared_ptr<WorldRoot> &world,
+		glm::vec3 lightDirection,
+		bool needSignature,
+		VisibleSet &out
 	) {
 		G_PROFILE("Frustum Walk");
+		out.SignatureValid = needSignature;
 		out.InView.clear();
 		out.ShadowsIntoView.clear();
 		out.InViewCount = 0;
@@ -2165,6 +2170,10 @@ namespace gargantuan {
 				gatherNanoseconds += SDL_GetTicksNS() - gatherStart;
 			}
 
+			if (!needSignature) {
+				continue;
+			}
+
 			uint64_t signatureStart = measuring ? SDL_GetTicksNS() : 0;
 			for (size_t index = start; index < stop; index++) {
 				BasePart *part = rawParts[index];
@@ -2205,16 +2214,22 @@ namespace gargantuan {
 	}
 
 	const VisibleSet &RenderProvider::EnsureVisibleSet(
-		Camera *camera, const std::shared_ptr<WorldRoot> &world, glm::vec3 lightDirection, uint64_t cameraSignature
+		Camera *camera,
+		const std::shared_ptr<WorldRoot> &world,
+		glm::vec3 lightDirection,
+		uint64_t cameraSignature,
+		bool needSignature
 	) {
 		VisibleSet &set = VisibleSets[camera];
 
-		// Reuse one walk while scene and camera stamps match.
-		if (set.Walked && set.SceneStamp == SceneSignature && set.CameraStamp == cameraSignature) {
+		// Reuse one walk while scene and camera stamps match, unless it was
+		// taken without the signature and this caller wants one.
+		if (set.Walked && set.SceneStamp == SceneSignature && set.CameraStamp == cameraSignature &&
+			(!needSignature || set.SignatureValid)) {
 			return set;
 		}
 
-		ComputeVisibleSet(camera, world, lightDirection, set);
+		ComputeVisibleSet(camera, world, lightDirection, needSignature, set);
 		set.SceneStamp = SceneSignature;
 		set.CameraStamp = cameraSignature;
 		set.Walked = true;
@@ -2292,12 +2307,19 @@ namespace gargantuan {
 		bool sceneMatches;
 		if (cameraMatches && camera->LastSceneSignature == SceneSignature) {
 			sceneMatches = true;
-		} else {
+		} else if (cameraMatches) {
 			uint64_t visibleSignature =
-				EnsureVisibleSet(camera, drawContext.WorldRoot, drawContext.LightDirection, cameraSignature)
+				EnsureVisibleSet(camera, drawContext.WorldRoot, drawContext.LightDirection, cameraSignature, true)
 					.Signature;
-			sceneMatches = cameraMatches && camera->LastVisibleSignature == visibleSignature;
+			sceneMatches = camera->LastVisibleSignatureValid && camera->LastVisibleSignature == visibleSignature;
 			camera->LastVisibleSignature = visibleSignature;
+			camera->LastVisibleSignatureValid = true;
+		} else {
+			// A camera that moved is redrawing whatever the signature says, so
+			// the phase that computes it is skipped and its answer disowned.
+			EnsureVisibleSet(camera, drawContext.WorldRoot, drawContext.LightDirection, cameraSignature);
+			sceneMatches = false;
+			camera->LastVisibleSignatureValid = false;
 		}
 
 		// History readers and redrawn inputs force a redraw.

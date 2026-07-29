@@ -43,6 +43,7 @@ namespace gargantuan {
 
 	struct VisibleSet {
 		uint64_t Signature = 0;
+		bool SignatureValid = false;
 		uint64_t SceneStamp = 0;
 		uint64_t CameraStamp = 0;
 		bool Walked = false;

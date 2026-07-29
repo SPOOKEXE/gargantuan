@@ -167,6 +167,7 @@ namespace gargantuan {
 		// walking about behind the camera costs it nothing.
 		uint64_t LastSceneSignature = 0;
 		uint64_t LastVisibleSignature = 0;
+		bool LastVisibleSignatureValid = false;
 		uint64_t LastCameraSignature = 0;
 		// False until a full draw has filled the target, so the first frame is
 		// never answered out of an empty cache
