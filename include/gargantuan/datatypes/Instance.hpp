@@ -43,15 +43,19 @@ namespace gargantuan {
 		static const gargantuan::InstanceClassDefinition CLASS_DEFINITION;
 
 		virtual ~Instance() = default;
-		void Destroy() {}
+		void Destroy();
 
-		std::string_view Name = CLASS_DEFINITION.ClassName;
+		bool Destroyed = false;
+
+		std::string Name = std::string(CLASS_DEFINITION.ClassName);
 
 		// This instance's entry in the registry, worked out on first use and
 		// kept. Null until something asks.
 		InstanceClassDefinition *CachedDefinition = nullptr;
 		std::vector<std::shared_ptr<Instance>> Children;
-		Instance *Parent = nullptr;
+
+		std::weak_ptr<Instance> ParentReference;
+		std::shared_ptr<Instance> GetParent();
 		void SetParent(std::shared_ptr<Instance> newParent);
 
 		G_SIGNAL(ChildAdded, Instance::Pointer);

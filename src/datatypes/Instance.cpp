@@ -39,13 +39,20 @@ namespace gargantuan {
 				},
 				{
 					"Parent",
-					Property::fromReadWrite<Instance::Pointer>(
+					Property::fromReadWrite<std::optional<Instance::Pointer>>(
 						[](Instance *instance) -> std::optional<Instance::Pointer> {
-							return instance->Parent ? instance->Parent->shared_from_this() : nullptr;
+							auto parent = instance->GetParent();
+							return parent ? std::optional(parent) : std::nullopt;
 						},
-						[](Instance *instance, Instance::Pointer newParent) { instance->SetParent(newParent); }
+						[](Instance *instance, std::optional<Instance::Pointer> newParent) {
+							instance->SetParent(newParent.value_or(nullptr));
+						}
 					),
 				},
+				{"ChildAdded", Property::fromReadonlyMember<&Instance::ChildAdded>()},
+				{"ChildRemoved", Property::fromReadonlyMember<&Instance::ChildRemoved>()},
+				{"DescendantAdded", Property::fromReadonlyMember<&Instance::DescendantAdded>()},
+				{"DescendantRemoved", Property::fromReadonlyMember<&Instance::DescendantRemoved>()},
 			},
 		.Methods = {
 			{"IsA", Method::fromMember<&Instance::IsA>()},
@@ -54,26 +61,61 @@ namespace gargantuan {
 			{"GetDescendants", Method::fromMember<&Instance::GetDescendants>()},
 			{"FindFirstChild", Method::fromMember<&Instance::FindFirstChild>()},
 			{"FindFirstChildOfClass", Method::fromMember<&Instance::FindFirstChildOfClass>()},
+			{"FindFirstChildWhichIsA", Method::fromMember<&Instance::FindFirstChildWhichIsA>()},
+			{"FindFirstDescendant", Method::fromMember<&Instance::FindFirstDescendant>()},
+			{"FindFirstDescendantOfClass", Method::fromMember<&Instance::FindFirstDescendantOfClass>()},
+			{"FindFirstDescendantWhichIsA", Method::fromMember<&Instance::FindFirstDescendantWhichIsA>()},
+			{"Destroy", Method::fromMember<&Instance::Destroy>()},
 		}
 	);
 
-	// TODO: fire DescendantAdded/Removed signals
+	std::shared_ptr<Instance> Instance::GetParent() {
+		return ParentReference.lock();
+	}
+
+	namespace {
+		void FireForSubtree(const Signal<Instance::Pointer>::Pointer &signal, const Instance::Pointer &node) {
+			signal->Fire(node);
+			for (const auto &child : node->Children) {
+				FireForSubtree(signal, child);
+			}
+		}
+	}
+
 	void Instance::SetParent(std::shared_ptr<Instance> newParent) {
 		std::shared_ptr<Instance> self = shared_from_this();
+		std::shared_ptr<Instance> oldParent = GetParent();
 
-		if (Parent != nullptr) {
-			auto &oldChildren = Parent->Children;
+		if (oldParent == newParent) {
+			return;
+		}
+
+		if (Destroyed && newParent != nullptr) {
+			return;
+		}
+
+		if (oldParent) {
+			auto &oldChildren = oldParent->Children;
 			if (auto it = std::find(oldChildren.begin(), oldChildren.end(), self); it != oldChildren.end()) {
 				oldChildren.erase(it);
-				Parent->ChildRemoved->Fire(self);
+				ParentReference.reset();
+
+				oldParent->ChildRemoved->Fire(self);
+				for (auto ancestor = oldParent; ancestor; ancestor = ancestor->GetParent()) {
+					FireForSubtree(ancestor->DescendantRemoved, self);
+				}
 			}
 		}
 
-		Parent = newParent.get();
+		ParentReference = newParent;
 
 		if (newParent != nullptr) {
 			newParent->Children.push_back(self);
+
 			newParent->ChildAdded->Fire(self);
+			for (auto ancestor = newParent; ancestor; ancestor = ancestor->GetParent()) {
+				FireForSubtree(ancestor->DescendantAdded, self);
+			}
 		}
 	}
 
@@ -159,13 +201,14 @@ namespace gargantuan {
 		std::vector<std::string_view> path;
 
 		size_t totalLength = 0;
-		Instance *current = this;
 
-		while (current) {
+		path.push_back(Name);
+		totalLength += Name.size() + 1;
+
+		for (auto current = GetParent(); current; current = current->GetParent()) {
 			auto &name = current->Name;
 			path.push_back(name);
 			totalLength += name.size() + 1;
-			current = current->Parent;
 		};
 
 		if (path.empty()) {
@@ -223,21 +266,82 @@ namespace gargantuan {
 		return descendants;
 	}
 
-	std::shared_ptr<Instance> Instance::FindFirstChild(std::string_view name, bool recursive) {
-		for (const auto &child : Children) {
-			if (child->Name == name) {
-				return child;
+	namespace {
+		template <typename Matches>
+		Instance::Pointer FindNearest(const std::vector<Instance::Pointer> &children, Matches matches, bool recursive) {
+			for (const auto &child : children) {
+				if (matches(child)) {
+					return child;
+				}
 			}
-		};
-		return nullptr;
+
+			if (recursive) {
+				for (const auto &child : children) {
+					if (auto found = FindNearest(child->Children, matches, true)) {
+						return found;
+					}
+				}
+			}
+
+			return nullptr;
+		}
+
+		auto MatchesName(std::string_view name) {
+			return [name](const Instance::Pointer &child) { return child->Name == name; };
+		}
+
+		auto MatchesClass(std::string_view className) {
+			return [className](const Instance::Pointer &child) {
+				return InstanceClassRegistry::GetDefinition(child.get())->ClassName == className;
+			};
+		}
+
+		auto MatchesIsA(std::string_view className) {
+			return [className](const Instance::Pointer &child) { return child->IsA(className); };
+		}
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstChild(std::string_view name, bool recursive) {
+		return FindNearest(Children, MatchesName(name), recursive);
 	}
 
 	std::shared_ptr<Instance> Instance::FindFirstChildOfClass(std::string_view className) {
-		for (const auto &child : Children) {
-			if (InstanceClassRegistry::GetDefinition(child.get())->ClassName == className) {
-				return child;
+		return FindNearest(Children, MatchesClass(className), false);
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstChildWhichIsA(std::string_view className) {
+		return FindNearest(Children, MatchesIsA(className), false);
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstDescendant(std::string_view name) {
+		return FindNearest(Children, MatchesName(name), true);
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstDescendantOfClass(std::string_view className) {
+		return FindNearest(Children, MatchesClass(className), true);
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstDescendantWhichIsA(std::string_view className) {
+		return FindNearest(Children, MatchesIsA(className), true);
+	}
+
+	void Instance::Destroy() {
+		SetParent(nullptr);
+		Destroyed = true;
+
+		// A copy, because each child takes itself out of Children as it goes
+		auto children = Children;
+		for (const auto &child : children) {
+			child->Destroy();
+		}
+
+		for (const auto &signal : {ChildAdded, ChildRemoved, DescendantAdded, DescendantRemoved}) {
+			for (const auto &connection : signal->Connections) {
+				if (connection) {
+					connection->Disconnect();
+				}
 			}
-		};
-		return nullptr;
+			signal->Connections.clear();
+		}
 	}
 }

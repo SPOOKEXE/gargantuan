@@ -5,7 +5,9 @@ namespace gargantuan {
 	G_INSTANCE_IMPL(
 		RunService,
 		.Properties = {
-			{"PreRender", Property::fromMember<&RunService::PreRender>(true, false)},
+			{"PreSimulation", Property::fromReadonlyMember<&RunService::PreSimulation>()},
+			{"PostSimulation", Property::fromReadonlyMember<&RunService::PostSimulation>()},
+			{"PreRender", Property::fromReadonlyMember<&RunService::PreRender>()},
 		}
 	);
 }

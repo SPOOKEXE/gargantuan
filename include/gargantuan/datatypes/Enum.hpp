@@ -21,6 +21,10 @@ namespace gargantuan {
 		Value(value),
 		EnumType(std::move(enumType)) {}
 
+		bool operator==(const EnumItem &other) const {
+			return Value == other.Value && EnumType == other.EnumType;
+		}
+
 		static int LTostring(lua_State *L, EnumItem *self);
 	);
 

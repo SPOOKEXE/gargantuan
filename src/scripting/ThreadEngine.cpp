@@ -40,18 +40,10 @@ namespace gargantuan {
 
 	void ThreadEngine::ResumeThread(lua_State *thread, int threadReference, int argumentCount) {
 		int status = lua_resume(thread, L, argumentCount);
-		switch (status) {
-		case LUA_YIELD:
-			break;
-
-		case LUA_OK:
-			lua_unref(L, threadReference);
-			break;
-
-		default:
-			lua_unref(L, threadReference);
+		if (status != LUA_OK && status != LUA_YIELD) {
 			SDL_Log("Thread error: %s", lua_tostring(thread, -1));
 		}
+		lua_unref(L, threadReference);
 	}
 
 	void ThreadEngine::Step() {

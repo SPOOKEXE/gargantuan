@@ -10,7 +10,11 @@
 	const gargantuan::InstanceClassDefinition instanceType::CLASS_DEFINITION = {                                       \
 		.ClassName = #instanceType,                                                                                    \
 		.Constructor = []() -> std::shared_ptr<gargantuan::Instance> {                                                 \
-			return std::make_shared<gargantuan::instanceType>();                                                       \
+			auto instance = std::make_shared<gargantuan::instanceType>();                                              \
+			if (instance->Name == gargantuan::Instance::CLASS_DEFINITION.ClassName) {                                   \
+				instance->Name = std::string(instanceType::CLASS_DEFINITION.ClassName);                                 \
+			}                                                                                                          \
+			return instance;                                                                                           \
 		},                                                                                                             \
 		__VA_ARGS__                                                                                                    \
 	};                                                                                                                 \
@@ -35,9 +39,6 @@
 namespace gargantuan::InstanceClassRegistry {
 	std::unordered_map<std::type_index, InstanceClassDefinition> &GetDefinitionsMap();
 
-	// Drops the name index and every flattened member table. Registering a
-	// class changes what a superclass name resolves to and what a subclass
-	// inherits, so both have to be worked out again.
 	void InvalidateCaches();
 
 	template <typename T> void Register(InstanceClassDefinition definition) {
@@ -46,9 +47,6 @@ namespace gargantuan::InstanceClassRegistry {
 		InvalidateCaches();
 	}
 
-	// Every way in goes through this one, so whatever it hands back has its
-	// flattened member tables filled in. Null for a type that was never
-	// registered.
 	InstanceClassDefinition *GetDefinitionByType(std::type_index type);
 
 	template <typename T> InstanceClassDefinition *GetDefinition() {

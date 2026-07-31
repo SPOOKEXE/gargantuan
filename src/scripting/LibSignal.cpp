@@ -6,10 +6,8 @@
 
 namespace gargantuan {
 	int LibSignal_new(lua_State *L) {
-		// auto signal = std::make_shared<UserSignal>();
-		// return StackValue<UserSignal::Pointer>::Push(L, signal);
-		luaL_error(L, "Signal.new is disabled for now");
-		return 0;
+		auto signal = std::make_shared<UserSignal>();
+		return StackValue<UserSignal::Pointer>::Push(L, signal);
 	}
 
 	luaL_Reg LibSignal[]{

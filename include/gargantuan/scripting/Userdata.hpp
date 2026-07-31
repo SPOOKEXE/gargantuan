@@ -135,6 +135,17 @@ namespace gargantuan {
 			return 0;
 		};
 
+		static int DefaultEquals(lua_State *L) {
+			auto *left = static_cast<StoredAsType *>(
+				lua_touserdatatagged(L, 1, static_cast<int>(ClassType::DEFINITION.Tag))
+			);
+			auto *right = static_cast<StoredAsType *>(
+				lua_touserdatatagged(L, 2, static_cast<int>(ClassType::DEFINITION.Tag))
+			);
+			lua_pushboolean(L, left && right && *left == *right);
+			return 1;
+		};
+
 		static int DefaultTostring(lua_State *L) {
 			const Definition &definition = ClassType::DEFINITION;
 			lua_pushlstring(L, definition.Type.data(), definition.Type.size());
@@ -162,6 +173,13 @@ namespace gargantuan {
 			lua_pushcfunction(L, ClassType::DefaultTostring, std::format("{}.__tostring", typeString).c_str());
 			lua_setfield(L, -2, "__tostring");
 
+			if constexpr (requires(const StoredAsType &left, const StoredAsType &right) {
+							  { left == right } -> std::convertible_to<bool>;
+						  }) {
+				lua_pushcfunction(L, ClassType::DefaultEquals, std::format("{}.__eq", typeString).c_str());
+				lua_setfield(L, -2, "__eq");
+			}
+
 			for (const auto &[name, method] : definition.Methods) {
 				if (name.starts_with("__")) {
 					PushMethodAsClosure(L, name, method);
@@ -170,8 +188,16 @@ namespace gargantuan {
 			}
 
 			lua_setreadonly(L, -1, true);
+			// udatamt is not a GC root unless FFlag::LuauUdataMetatablePinned is on,
+			// and it defaults to off. Unrooted, the metatable is collected and the
+			// next __namecall on one of these userdata reads a dead closure.
+			lua_ref(L, -1);
 			lua_setuserdatametatable(L, (int)definition.Tag);
-			// lua_pop(L, 1);
+			// Push placement-news StoredAsType into the userdata, so without this
+			// the shared_ptr it holds is never released.
+			lua_setuserdatadtor(L, (int)definition.Tag, [](lua_State *, void *userdata) {
+				static_cast<StoredAsType *>(userdata)->~StoredAsType();
+			});
 		};
 
 	  private:
@@ -239,6 +265,13 @@ namespace gargantuan {
 		}
 
 		static int Push(lua_State *L, StoredAs value) {
+			if constexpr (std::is_pointer_v<StoredAs> || requires(const StoredAs &pointer) { pointer.get(); }) {
+				if (value == nullptr) {
+					lua_pushnil(L);
+					return 1;
+				}
+			}
+
 			StoredAs *userdata = static_cast<StoredAs *>(
 				lua_newuserdatataggedwithmetatable(L, sizeof(StoredAs), static_cast<int>(Class::DEFINITION.Tag))
 			);
