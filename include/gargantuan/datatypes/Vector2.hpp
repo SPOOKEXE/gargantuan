@@ -5,8 +5,9 @@
 #include <glm/glm.hpp>
 
 namespace gargantuan {
-	G_USERDATA_DECL(
-		Vector2,
+	struct Vector2 : public Userdata<Vector2> {
+	  public:
+		G_UD_DECL_PRELUDE(Vector2)
 
 		glm::vec2 Value{0.0f, 0.0f};
 
@@ -36,13 +37,29 @@ namespace gargantuan {
 		static int LMul(lua_State *L, Vector2 *self);
 		static int LDiv(lua_State *L, Vector2 *self);
 
-		Vector2 operator+(const Vector2 & other) { return Value + other.Value; };
-		Vector2 operator-(const Vector2 & other) { return Value - other.Value; };
-		Vector2 operator*(const Vector2 & other) { return Value * other.Value; };
-		Vector2 operator/(const Vector2 & other) { return Value / other.Value; };
-		Vector2 operator*(float other) { return Value * other; };
-		Vector2 operator/(float other) { return Value / other; };
+		Vector2 operator+(const Vector2 &other) {
+			return Value + other.Value;
+		};
+		Vector2 operator-(const Vector2 &other) {
+			return Value - other.Value;
+		};
+		Vector2 operator*(const Vector2 &other) {
+			return Value * other.Value;
+		};
+		Vector2 operator/(const Vector2 &other) {
+			return Value / other.Value;
+		};
+		Vector2 operator*(float other) {
+			return Value * other;
+		};
+		Vector2 operator/(float other) {
+			return Value / other;
+		};
 
-		operator glm::vec2() const { return Value; }
-	)
-}
+		operator glm::vec2() const {
+			return Value;
+		}
+	};
+
+	G_UD_STACKVALUE(Vector2);
+} // namespace gargantuan

@@ -5,8 +5,7 @@
 namespace gargantuan {
 	class DataModel : public ServiceProvider {
 	  public:
-		G_INSTANCE_DECL(DataModel);
-
+		static const ClassDefinition DEFINITION;
 		const ServiceConstructors &GetServiceConstructors() const override;
 	};
 } // namespace gargantuan

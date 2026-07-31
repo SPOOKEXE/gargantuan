@@ -7,6 +7,8 @@
 #include "gargantuan/datatypes/Vector2.hpp"
 #include "gargantuan/reflection/Enums.hpp"
 
+#include <array>
+#include <glm/glm.hpp>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -23,10 +25,48 @@ namespace gargantuan {
 	typedef std::string_view Content;
 	typedef std::string_view ContentId;
 
+	// Mouse buttons carry a screen position; keys do not, so the key table is a
+	// byte apiece and this is only used for the three buttons.
+	struct InputState {
+		glm::vec3 Position{0.0f};
+		Enums::UserInputState State = Enums::UserInputState::None;
+	};
+
+	// Recycles the instances that carry an event into Luau. An object is only
+	// reused once nothing else holds it, so a script that kept a reference
+	// keeps a stable object rather than one that mutates under it.
+	class InputObjectPool {
+	  public:
+		std::shared_ptr<InputObject> Acquire();
+		void Recycle(const std::shared_ptr<InputObject> &object);
+
+	  private:
+		std::vector<std::shared_ptr<InputObject>> Free;
+	};
+
 	class UserInputService : public Instance {
 	  protected:
-		std::unordered_map<Enums::KeyCode, std::shared_ptr<InputObject>> ActiveKeys;
-		std::unordered_map<Enums::UserInputType, std::shared_ptr<InputObject>> ActiveMouseButtons;
+		// KeyCode runs to 2048 (None), so the table is that wide: one byte a
+		// key, ~2 KB allocated once. IsKeyDown becomes an array index instead
+		// of a hash probe, and a key held down allocates nothing at all -- the
+		// old map kept a whole InputObject alive for every pressed key.
+		static constexpr size_t KeyCodeCount = 2049;
+		static constexpr size_t MouseButtonCount = 3;
+
+		std::array<uint8_t, KeyCodeCount> KeysDown{};
+		std::array<InputState, MouseButtonCount> MouseButtons{};
+
+		// Dense lists of what is currently down, so GetKeysPressed walks the
+		// pressed keys rather than the whole table.
+		std::vector<Enums::KeyCode> PressedKeys;
+		std::vector<Enums::UserInputType> PressedMouseButtons;
+
+		InputObjectPool InputObjects;
+
+		void SetKeyState(Enums::KeyCode keyCode, bool down);
+		void SetMouseButtonState(Enums::UserInputType button, bool down, glm::vec3 position);
+		std::shared_ptr<InputObject> MakeInputObject(Enums::UserInputType type, Enums::KeyCode keyCode, glm::vec3 position);
+
 		Enums::UserInputType LastInputType = Enums::UserInputType::None;
 		Vector2 MouseLocation;
 		Vector2 MouseDelta;
@@ -42,7 +82,7 @@ namespace gargantuan {
 		typedef std::tuple<Vector2, bool> TouchTapInWorldSignalType;
 
 	  public:
-		G_INSTANCE_DECL(UserInputService);
+		static const ClassDefinition DEFINITION;
 
 		Enums::MouseBehavior MouseBehavior;
 		ContentId MouseIcon = "";

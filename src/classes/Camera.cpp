@@ -1,7 +1,6 @@
 #include "gargantuan/classes/Camera.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
-#include "gargantuan/reflection/InstanceClassRegistry.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 
 #include <SDL3/SDL.h>
@@ -10,13 +9,15 @@
 #include <glm/trigonometric.hpp>
 
 namespace gargantuan {
-	G_INSTANCE_IMPL(
-		Camera,
+	const Camera::ClassDefinition Camera::DEFINITION{
+		.Name = "Camera",
+		.Superclass = "Instance",
+		.Constructor = ClassDefinition::WrapConstructor<Camera>(),
 		.Properties = {
-			{"CameraType", Property::fromMember<&Camera::CameraType>(true, true)},
-			{"CFrame", Property::fromMember<&Camera::CFrame>(true, true)},
-			{"FieldOfView", Property::fromMember<&Camera::FieldOfView>(true, true)},
-			{"ViewportSize", Property::fromMember<&Camera::ViewportSize>(true, true)},
+			{"CameraType", Property::fromSimple<&Camera::CameraType>(true, true)},
+			{"CFrame", Property::fromSimple<&Camera::CFrame>(true, true)},
+			{"FieldOfView", Property::fromSimple<&Camera::FieldOfView>(true, true)},
+			{"ViewportSize", Property::fromSimple<&Camera::ViewportSize>(true, true)},
 			{
 				"HorizontalFieldOfView",
 				Property::fromReadWrite<float>(
@@ -32,7 +33,7 @@ namespace gargantuan {
 				),
 			},
 		},
-	);
+	};
 
 	float Camera::GetAspectRatio() {
 		return ViewportSize.GetY() > 0.0f ? ViewportSize.GetX() / ViewportSize.GetY() : 1.0f;

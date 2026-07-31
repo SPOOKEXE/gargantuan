@@ -8,12 +8,18 @@
 #include <memory>
 
 namespace gargantuan {
+	class OverlayImage;
+
 	struct DrawContext {
 		std::shared_ptr<WorldRoot> WorldRoot;
 		std::shared_ptr<Camera> Camera;
 
 		// Direction TOWARDS the light
 		glm::vec3 LightDirection;
+
+		// The debug panels, or null when nothing is toggled on. Borrowed for
+		// the length of the call: the engine owns it and redraws it in place.
+		const OverlayImage *Overlay = nullptr;
 	};
 
 	struct FrameContext : DrawContext {

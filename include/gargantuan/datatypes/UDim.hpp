@@ -3,19 +3,16 @@
 #include <lua.h>
 
 namespace gargantuan {
-	G_USERDATA_DECL(
-		UDim,
+	struct UDim : public Userdata<UDim> {
+	  public:
+		G_UD_DECL_PRELUDE(UDim);
 
 		float Scale = 0.0f;
 		int Offset = 0;
 
+		UDim();
 		UDim(float scale = 0.0f, int offset = 0);
+	};
 
-		UDim Lerp(const UDim &goal, float alpha) const;
-		UDim Add(const UDim &other) const;
-		UDim Sub(const UDim &other) const;
-		UDim Unm() const;
-		bool Eq(const UDim &other) const;
-		std::string Tostring() const;
-	)
+	G_UD_STACKVALUE(UDim);
 }

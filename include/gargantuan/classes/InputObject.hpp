@@ -256,7 +256,7 @@ namespace gargantuan {
 
 	class InputObject : public Instance {
 	  public:
-		G_INSTANCE_DECL(InputObject);
+		static const InputObject::ClassDefinition DEFINITION;
 
 		glm::vec3 Delta = {0.0f, 0.0f, 0.0f};
 		glm::vec3 Position = {0.0f, 0.0f, 0.0f};
@@ -266,6 +266,11 @@ namespace gargantuan {
 
 		bool IsModifierKeyDown(Enums::ModifierKey modifierKey);
 
+		void Reset();
+
+		// Fills an object that already exists, so a pooled instance can be
+		// reused rather than one allocated per event.
+		static bool FillFromEvent(InputObject &object, SDL_Event &event);
 		static std::shared_ptr<InputObject> fromEvent(SDL_Event &event);
 	};
 

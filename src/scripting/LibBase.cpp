@@ -21,6 +21,9 @@ namespace gargantuan {
 					lua_pushliteral(L, "https://github.com/teamfireworks/gargantuan.git/");
 					lua_setfield(L, -2, "url");
 				}
+				// No pushvalue here: duplicating the table shifts every index
+				// below it, so the setfield that follows would write back into
+				// the table just marked readonly instead of its parent.
 				lua_setreadonly(L, -1, true);
 				lua_setfield(L, -2, "git");
 			}

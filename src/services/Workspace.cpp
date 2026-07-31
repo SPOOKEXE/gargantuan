@@ -1,13 +1,14 @@
 #include "gargantuan/services/Workspace.hpp"
-#include "gargantuan/reflection/InstanceClassRegistry.hpp"
+#include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 
 namespace gargantuan {
-	G_INSTANCE_IMPL(
-		Workspace,
+	const Workspace::ClassDefinition Workspace::DEFINITION = {
+		.Name = "Workspace",
 		.Superclass = "WorldRoot",
+		.Constructor = ClassDefinition::WrapConstructor<Workspace>(),
 		.Properties = {
-			{"CurrentCamera", Property::fromMember<&Workspace::CurrentCamera>(true, false)},
+			{"CurrentCamera", Property::fromSimple<&Workspace::CurrentCamera>(true, false)},
 		}
-	);
+	};
 }

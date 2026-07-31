@@ -1,5 +1,4 @@
 
-#include "gargantuan/scripting/UserdataTag.hpp"
 #include <tuple>
 #define GLM_ENABLE_EXPERIMENTAL
 
@@ -20,52 +19,45 @@
 #include <lualib.h>
 
 namespace gargantuan {
-	G_USERDATA_IMPL(
+	G_UD_IMPL_PRELUDE(CFrame);
+	G_UD_IMPL_PROPS(
 		CFrame,
-		.Tag = UserdataTag::CFrame,
-		.Type = "CFrame",
 
-		.Properties =
-			//
-		{
-			{"Position", Property::fromReadonlyMember<&CFrame::Position>()},
-			{"Rotation", Property::fromRead([](CFrame *self) { return CFrame(glm::vec3(), self->Rotation); })},
-			{"X", Property::fromRead([](CFrame *self) { return self->Position.x; })},
-			{"Y", Property::fromRead([](CFrame *self) { return self->Position.y; })},
-			{"Z", Property::fromRead([](CFrame *self) { return self->Position.z; })},
-			{"XVector", Property::fromRead([](CFrame *self) { return self->GetRightVector(); })},
-			{"RightVector", Property::fromRead([](CFrame *self) { return self->GetRightVector(); })},
-			{"YVector", Property::fromRead([](CFrame *self) { return self->GetUpVector(); })},
-			{"UpVector", Property::fromRead([](CFrame *self) { return self->GetUpVector(); })},
-			{"ZVector", Property::fromRead([](CFrame *self) { return self->GetLookVector(); })},
-			{"LookVector", Property::fromRead([](CFrame *self) { return self->GetLookVector(); })},
-		},
-
-		.Methods =
-			//
-		{
-			{"Inverse", Method::fromMember<&CFrame::Inverse>()},
-			{"Lerp", Method::fromMember<&CFrame::Lerp>()},
-			{"Orthonormalize", Method::fromMember<&CFrame::Orthonormalize>()},
-			{"ToWorldSpace", Method::fromMember<&CFrame::ToWorldSpace>()},
-			{"ToObjectSpace", Method::fromMember<&CFrame::ToObjectSpace>()},
-			{"PointToWorldSpace", Method::fromMember<&CFrame::PointToWorldSpace>()},
-			{"PointToObjectSpace", Method::fromMember<&CFrame::PointToObjectSpace>()},
-			{"VectorToWorldSpace", Method::fromMember<&CFrame::VectorToWorldSpace>()},
-			{"VectorToObjectSpace", Method::fromMember<&CFrame::VectorToObjectSpace>()},
-			{"GetComponents", Method::fromMember<&CFrame::GetComponents>()},
-			{"ToEulerAngles", Method::fromMember<&CFrame::ToEulerAngles>()},
-			{"ToEulerAnglesXYZ", Method::fromMember<&CFrame::ToEulerAnglesXYZ>()},
-			{"ToEulerAnglesYXZ", Method::fromMember<&CFrame::ToEulerAnglesYXZ>()},
-			{"ToOrientation", Method::fromMember<&CFrame::ToOrientation>()},
-			{"ToAxisAngle", Method::fromMember<&CFrame::ToAxisAngle>()},
-			{"FuzzyEq", Method::fromMember<&CFrame::FuzzyEq>()},
-			{"AngleBetween", Method::fromMember<&CFrame::AngleBetween>()},
-			{"__add", Method{CFrame::LAdd}},
-			{"__sub", Method{CFrame::LSub}},
-			{"__mul", Method{CFrame::LMul}},
-			{"__tostring", Method{CFrame::LTostring}},
-		}
+		{"Position", Property::fromSimple<&CFrame::Position>(true, false)},
+		{"Rotation", Property::fromRead([](CFrame *self) { return CFrame(glm::vec3(), self->Rotation); })},
+		{"X", Property::fromRead([](CFrame *self) { return self->Position.x; })},
+		{"Y", Property::fromRead([](CFrame *self) { return self->Position.y; })},
+		{"Z", Property::fromRead([](CFrame *self) { return self->Position.z; })},
+		{"XVector", Property::fromRead([](CFrame *self) { return self->GetRightVector(); })},
+		{"RightVector", Property::fromRead([](CFrame *self) { return self->GetRightVector(); })},
+		{"YVector", Property::fromRead([](CFrame *self) { return self->GetUpVector(); })},
+		{"UpVector", Property::fromRead([](CFrame *self) { return self->GetUpVector(); })},
+		{"ZVector", Property::fromRead([](CFrame *self) { return self->GetLookVector(); })},
+		{"LookVector", Property::fromRead([](CFrame *self) { return self->GetLookVector(); })},
+	);
+	G_UD_IMPL_METHODS(
+		CFrame,
+		G_UD_METHOD(CFrame, Inverse),
+		G_UD_METHOD(CFrame, Lerp),
+		G_UD_METHOD(CFrame, Orthonormalize),
+		G_UD_METHOD(CFrame, ToWorldSpace),
+		G_UD_METHOD(CFrame, ToObjectSpace),
+		G_UD_METHOD(CFrame, PointToWorldSpace),
+		G_UD_METHOD(CFrame, PointToObjectSpace),
+		G_UD_METHOD(CFrame, VectorToWorldSpace),
+		G_UD_METHOD(CFrame, VectorToObjectSpace),
+		G_UD_METHOD(CFrame, GetComponents),
+		G_UD_METHOD(CFrame, ToEulerAngles),
+		G_UD_METHOD(CFrame, ToEulerAnglesXYZ),
+		G_UD_METHOD(CFrame, ToEulerAnglesYXZ),
+		G_UD_METHOD(CFrame, ToOrientation),
+		G_UD_METHOD(CFrame, ToAxisAngle),
+		G_UD_METHOD(CFrame, FuzzyEq),
+		G_UD_METHOD(CFrame, AngleBetween),
+		{"__add", Method{CFrame::LAdd}},
+		{"__sub", Method{CFrame::LSub}},
+		{"__mul", Method{CFrame::LMul}},
+		{"__tostring", Method{CFrame::LTostring}},
 	);
 
 	CFrame::CFrame() : Position(0.0f, 0.0f, 0.0f), Rotation(CFrame::DEFAULT_ROTATION) {};

@@ -1,7 +1,6 @@
 #include "gargantuan/datatypes/Enum.hpp"
 #include "gargantuan/scripting/StackValue.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
-#include "gargantuan/scripting/UserdataTag.hpp"
 
 #include <cstring>
 #include <lua.h>
@@ -12,20 +11,25 @@
 #include <string_view>
 
 namespace gargantuan {
-	G_USERDATA_IMPL(
+	G_UD_IMPL_PRELUDE(EnumItem);
+	G_UD_IMPL_PROPS(
 		EnumItem,
-		.Tag = UserdataTag::EnumItem,
-		.Type = "EnumItem",
-		.Properties =
-			{
-				{"Name", Property::fromMember<&EnumItem::Name>(true, false)},
-				{"Value", Property::fromMember<&EnumItem::Value>(true, false)},
-				{"EnumType", Property::fromMember<&EnumItem::EnumType>(true, false)},
-			},
-		.Methods = {
-			{"__tostring", Method{&EnumItem::LTostring}},
-		}
+
+		{"Name", Property::fromSimple<&EnumItem::Name>(true, false)},
+		{"Value", Property::fromSimple<&EnumItem::Value>(true, false)},
+		{"EnumType", Property::fromSimple<&EnumItem::EnumType>(true, false)}
 	);
+	G_UD_IMPL_METHODS(EnumItem, {"__tostring", {&EnumItem::LTostring}}, {"__eq", {&EnumItem::LEquals}});
+
+	int EnumItem::LEquals(lua_State *L, EnumItem *self) {
+		// Luau only dispatches __eq when both operands share this metatable, so
+		// the second operand is always an EnumItem here.
+		EnumItem other = StackValue<EnumItem>::From(L, 2);
+		bool equal = self->Value == other.Value && self->EnumType && other.EnumType &&
+					 self->EnumType->Name == other.EnumType->Name;
+		lua_pushboolean(L, equal);
+		return 1;
+	};
 
 	int EnumItem::LTostring(lua_State *L, EnumItem *self) {
 		std::ostringstream ss;
@@ -35,17 +39,16 @@ namespace gargantuan {
 		return 1;
 	};
 
-	G_USERDATA_IMPL(
+	G_UD_IMPL_PRELUDE(Enum);
+	G_UD_IMPL_PROPS(Enum);
+	G_UD_IMPL_METHODS(
 		Enum,
-		.Tag = UserdataTag::Enum,
-		.Type = "Enum",
-		.Methods = {
-			{"GetEnumItems", Method::fromMember<&Enum::GetEnumItems>()},
-			{"FromName", Method::fromMember<&Enum::FromName>()},
-			{"FromValue", Method::fromMember<&Enum::FromValue>()},
-			{"__index", Method{&Enum::LIndex}},
-			{"__tostring", Method{&Enum::LTostring}},
-		}
+
+		G_UD_METHOD(Enum, GetEnumItems),
+		G_UD_METHOD(Enum, FromName),
+		G_UD_METHOD(Enum, FromValue),
+		{"__index", {&Enum::LIndex}},
+		{"__tostring", {&Enum::LTostring}}
 	);
 
 	std::vector<EnumItem> &Enum::GetEnumItems() {

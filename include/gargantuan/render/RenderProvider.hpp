@@ -10,6 +10,7 @@
 namespace gargantuan {
 	std::unique_ptr<RenderPass> CreateOpaquePass(SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchainFormat);
 	std::unique_ptr<RenderPass> CreateShadowPass(SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchainFormat);
+	std::unique_ptr<RenderPass> CreateOverlayPass(SDL_GPUDevice *gpu, SDL_GPUTextureFormat swapchainFormat);
 
 	class RenderProvider {
 	  public:
@@ -34,5 +35,6 @@ namespace gargantuan {
 
 		std::unique_ptr<RenderPass> ShadowPass;
 		std::unique_ptr<RenderPass> OpaquePass;
+		std::unique_ptr<RenderPass> OverlayPass;
 	};
 } // namespace gargantuan

@@ -1,28 +1,12 @@
 #include "gargantuan/classes/InputObject.hpp"
 #include "gargantuan/datatypes/Vector3.hpp"
-#include "gargantuan/reflection/InstanceClassRegistry.hpp"
-
+#include "gargantuan/scripting/Userdata.hpp"
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_keycode.h>
 #include <memory>
 #include <unordered_map>
 
 namespace gargantuan {
-	G_INSTANCE_IMPL(
-		InputObject,
-		.Properties =
-			{
-				{"Delta", Property::fromMember<&InputObject::Delta>(true, false)},
-				{"Position", Property::fromMember<&InputObject::Position>(true, false)},
-				{"KeyCode", Property::fromMember<&InputObject::KeyCode>(true, false)},
-				{"UserInputState", Property::fromMember<&InputObject::UserInputState>(true, false)},
-				{"UserInputType", Property::fromMember<&InputObject::UserInputType>(true, false)},
-			},
-		.Methods = {
-			{"IsModifierKeyDown", Method::fromMember<&InputObject::IsModifierKeyDown>()},
-		},
-	);
-
 	const std::unordered_map<SDL_Keycode, Enums::KeyCode> SDL_TO_KEYCODE = {
 		{SDLK_BACKSPACE, Enums::KeyCode::Backspace},
 		{SDLK_TAB, Enums::KeyCode::Tab},
@@ -194,54 +178,84 @@ namespace gargantuan {
 		{SDL_BUTTON_MIDDLE, Enums::UserInputType::MouseButton3},
 	};
 
+	const InputObject::ClassDefinition InputObject::DEFINITION = {
+		.Name = "InputObject",
+		.Superclass = "Instance",
+		.Properties =
+			{
+				{"Delta", Property::fromSimple<&InputObject::Delta>(true, false)},
+				{"Position", Property::fromSimple<&InputObject::Position>(true, false)},
+				{"KeyCode", Property::fromSimple<&InputObject::KeyCode>(true, false)},
+				{"UserInputState", Property::fromSimple<&InputObject::UserInputState>(true, false)},
+				{"UserInputType", Property::fromSimple<&InputObject::UserInputType>(true, false)},
+			},
+		.Methods = {
+			G_UD_METHOD(InputObject, IsModifierKeyDown),
+		},
+	};
+
 	bool InputObject::IsModifierKeyDown(Enums::ModifierKey modifierKey) {
 		return MODIFIER_TO_KEYCODE.at(modifierKey).contains(KeyCode);
 	}
 
-	std::shared_ptr<InputObject> InputObject::fromEvent(SDL_Event &event) {
+	void InputObject::Reset() {
+		Delta = {0.0f, 0.0f, 0.0f};
+		Position = {0.0f, 0.0f, 0.0f};
+		KeyCode = Enums::KeyCode::None;
+		UserInputState = Enums::UserInputState::None;
+		UserInputType = Enums::UserInputType::None;
+	}
+
+	bool InputObject::FillFromEvent(InputObject &object, SDL_Event &event) {
+		object.Reset();
+
 		switch (event.type) {
 
 		case SDL_EVENT_KEY_UP:
 		case SDL_EVENT_KEY_DOWN: {
 			auto keyResult = SDL_TO_KEYCODE.find(event.key.key);
-			if (keyResult == SDL_TO_KEYCODE.end()) return nullptr;
+			if (keyResult == SDL_TO_KEYCODE.end()) return false;
 
-			auto self = std::make_shared<InputObject>();
-			self->UserInputType = Enums::UserInputType::Keyboard;
-			self->UserInputState = event.key.down ? Enums::UserInputState::Begin : Enums::UserInputState::End;
-			self->KeyCode = keyResult->second;
-			return self;
+			object.UserInputType = Enums::UserInputType::Keyboard;
+			object.UserInputState = event.key.down ? Enums::UserInputState::Begin : Enums::UserInputState::End;
+			object.KeyCode = keyResult->second;
+			return true;
 		}
 
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP: {
-			auto self = std::make_shared<InputObject>();
-			self->UserInputType = SDL_TO_USER_INPUT_TYPE.at(event.button.button);
-			self->UserInputState = event.button.down ? Enums::UserInputState::Begin : Enums::UserInputState::End;
-			self->Position = glm::vec3(event.button.x, event.button.y, 0.0f);
-			return self;
+			auto buttonResult = SDL_TO_USER_INPUT_TYPE.find(event.button.button);
+			if (buttonResult == SDL_TO_USER_INPUT_TYPE.end()) return false;
+
+			object.UserInputType = buttonResult->second;
+			object.UserInputState = event.button.down ? Enums::UserInputState::Begin : Enums::UserInputState::End;
+			object.Position = glm::vec3(event.button.x, event.button.y, 0.0f);
+			return true;
 		}
 
 		case SDL_EVENT_MOUSE_MOTION: {
-			auto self = std::make_shared<InputObject>();
-			self->UserInputType = Enums::UserInputType::MouseMovement;
-			self->UserInputState = Enums::UserInputState::Change;
-			self->Delta = glm::vec3(event.motion.xrel, event.motion.yrel, 0.0f);
-			self->Position = glm::vec3(event.motion.x, event.motion.y, 0.0f);
-			return self;
+			object.UserInputType = Enums::UserInputType::MouseMovement;
+			object.UserInputState = Enums::UserInputState::Change;
+			object.Delta = glm::vec3(event.motion.xrel, event.motion.yrel, 0.0f);
+			object.Position = glm::vec3(event.motion.x, event.motion.y, 0.0f);
+			return true;
 		}
 
 		case SDL_EVENT_MOUSE_WHEEL: {
-			auto self = std::make_shared<InputObject>();
-			self->UserInputType = Enums::UserInputType::MouseWheel;
-			self->UserInputState = Enums::UserInputState::Change;
-			self->Delta = glm::vec3(event.wheel.x, event.wheel.y, 0.0f);
-			self->Position = glm::vec3(event.wheel.mouse_x, event.wheel.mouse_y, 0.0f);
-			return self;
+			object.UserInputType = Enums::UserInputType::MouseWheel;
+			object.UserInputState = Enums::UserInputState::Change;
+			object.Delta = glm::vec3(event.wheel.x, event.wheel.y, 0.0f);
+			object.Position = glm::vec3(event.wheel.mouse_x, event.wheel.mouse_y, 0.0f);
+			return true;
 		}
 
 		default:
-			return nullptr;
+			return false;
 		}
+	}
+
+	std::shared_ptr<InputObject> InputObject::fromEvent(SDL_Event &event) {
+		auto self = std::make_shared<InputObject>();
+		return FillFromEvent(*self, event) ? self : nullptr;
 	}
 }

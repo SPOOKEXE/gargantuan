@@ -25,8 +25,12 @@ namespace gargantuan {
 
 	int Enums_namecall(lua_State *L) {
 		const char *key = lua_namecallatom(L, nullptr);
+		if (!key) {
+			luaL_error(L, "Missing method name");
+			return 0;
+		}
 
-		if (std::strcmp(key, "GetEnums")) {
+		if (std::strcmp(key, "GetEnums") == 0) {
 			auto &enums = Enums::GetEnums();
 			lua_createtable(L, enums.size(), 0);
 
@@ -37,12 +41,10 @@ namespace gargantuan {
 				lua_rawseti(L, -2, tblIndex);
 			}
 
-			lua_pushvalue(L, -1);
 			return 1;
-		} else {
-			luaL_typeerror(L, 1, "string");
 		}
 
+		luaL_error(L, "Unknown method named %s", key);
 		return 0;
 	};
 
@@ -66,8 +68,10 @@ namespace gargantuan {
 		lua_pushcfunction(L, Enums_tostring, "Enums.__tostring");
 		lua_setfield(L, -2, "__tostring");
 
-		// lua_pushvalue(L, -1);
-		// lua_setreadonly(L, -1, true);
+		lua_setreadonly(L, -1, true);
+		// As in Userdata::CreateUserdataMetatable: g->udatamt is not a GC root
+		// unless FFlag::LuauUdataMetatablePinned is on, so root it here
+		lua_ref(L, -1);
 		lua_setuserdatametatable(L, (int)UserdataTag::Enums);
 
 		void *p = lua_newuserdatataggedwithmetatable(L, 0, (int)UserdataTag::Enums);

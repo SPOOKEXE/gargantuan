@@ -52,6 +52,12 @@ namespace gargantuan {
 		auto workspace = this->DataModel->GetService("Workspace");
 		this->Workspace = std::dynamic_pointer_cast<gargantuan::Workspace>(workspace);
 
+		auto lighting = this->DataModel->GetService("Lighting");
+		this->Lighting = std::dynamic_pointer_cast<gargantuan::Lighting>(lighting);
+		// The second user of InstanceRegistry: PointLights anywhere under the
+		// world register themselves, with no storage code of their own.
+		this->Lighting->Attach(this->Workspace.get());
+
 		auto runService = this->DataModel->GetService("RunService");
 		this->RunService = std::dynamic_pointer_cast<gargantuan::RunService>(runService);
 
@@ -61,6 +67,76 @@ namespace gargantuan {
 		StackValue<Instance::Pointer>::Push(ScriptEngine->L, this->DataModel);
 		lua_pushvalue(ScriptEngine->L, -1);
 		lua_setglobal(ScriptEngine->L, "game");
+
+		RegisterSystems();
+	}
+
+	// Systems run in phase order, and in declaration order within a phase.
+	// Nothing here names another system as a dependency; if the ordering needs
+	// to change, a system moves phase rather than growing a reference to a
+	// neighbour.
+	void Engine::RegisterSystems() {
+		using ecs::Phase;
+
+		Scheduler.Add(Phase::OnLoad, "input.poll", [this](float) {
+			SDL_Event event;
+			while (SDL_PollEvent(&event)) {
+				if (event.type == SDL_EVENT_QUIT) {
+					IsRunning = false;
+					return;
+				}
+
+				// Held down, these would repeat and flicker the panel on and off
+				if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
+					if (event.key.key == SDLK_F3) {
+						ShowStatistics = !ShowStatistics;
+					} else if (event.key.key == SDLK_F5) {
+						ShowSystems = !ShowSystems;
+					}
+				}
+
+				UserInputService->ProcessEvent(event);
+				Workspace->CurrentCamera->OnEvent(Window, event);
+			}
+		});
+
+		Scheduler.Add(Phase::PreUpdate, "run.preSimulation", [this](float deltaTime) {
+			RunService->PreSimulation->Fire(deltaTime);
+		});
+
+		Scheduler.Add(Phase::OnUpdate, "camera.step", [this](float deltaTime) {
+			Workspace->CurrentCamera->Step(deltaTime);
+		});
+
+		Scheduler.Add(Phase::OnUpdate, "physics.step", [this](float deltaTime) {
+			Workspace->StepPhysics(deltaTime);
+		});
+
+		Scheduler.Add(Phase::PostUpdate, "run.postSimulation", [this](float deltaTime) {
+			RunService->PostSimulation->Fire(deltaTime);
+		});
+
+		Scheduler.Add(Phase::PreStore, "run.preRender", [this](float deltaTime) {
+			RunService->PreRender->Fire(deltaTime);
+		});
+
+		Scheduler.Add(Phase::PreStore, "mesh.upload", [this](float) { MeshProvider::UploadToGpu(Gpu); });
+
+		// Refreshes only the rows whose part changed since the last frame.
+		Scheduler.Add(Phase::PreStore, "world.syncPartRows", [this](float) { Workspace->SyncPartRows(); });
+
+		Scheduler.Add(Phase::PreStore, "lighting.syncRows", [this](float) { Lighting->SyncLightRows(); });
+
+		Scheduler.Add(Phase::OnStore, "render.draw", [this](float) {
+			if (!IsRunning) return;
+			RenderProvider->Draw({
+				.WorldRoot = std::static_pointer_cast<gargantuan::WorldRoot>(Workspace),
+				.Camera = Workspace->CurrentCamera,
+				.Overlay = &Overlay,
+			});
+		});
+
+		Scheduler.Add(Phase::OnStore, "script.step", [this](float) { ScriptEngine->Step(); });
 	}
 
 	Engine::~Engine() {
@@ -88,6 +164,37 @@ namespace gargantuan {
 		}
 	}
 
+	// The panel reports the frame that just finished, so it is composed before
+	// the schedule runs rather than after: the systems' timings are last
+	// frame's either way, and building it here keeps it out of render.draw.
+	void Engine::UpdateOverlay(double now, float deltaTime) {
+		// Recorded even while hidden. The panel gets opened because something
+		// went wrong a moment ago, and the history is the whole answer.
+		Statistics.Record(now, deltaTime);
+
+		if (!ShowStatistics && !ShowSystems) {
+			Overlay.Resize(0, 0);
+			return;
+		}
+
+		if (ShowSystems) {
+			SystemTimings.clear();
+			for (size_t index = 0; index < (size_t)ecs::Phase::Count; index++) {
+				auto phase = (ecs::Phase)index;
+				for (const auto &system : Scheduler.GetSystems(phase)) {
+					SystemTimings.push_back({ecs::GetPhaseName(phase), system.Name, system.LastMilliseconds});
+				}
+			}
+		}
+
+		DrawDebugPanels(
+			Overlay,
+			ShowStatistics ? &Statistics : nullptr,
+			ShowSystems ? &SystemTimings : nullptr,
+			G_PROFILE_ACTIVE()
+		);
+	}
+
 	void Engine::Step() {
 		if (!IsRunning) {
 			return;
@@ -99,49 +206,11 @@ namespace gargantuan {
 		}
 		float deltaTime = GetDeltaTime();
 
+		UpdateOverlay((double)CurrentTick / 1000.0, deltaTime);
+
 		{
 			G_PROFILE("Main Thread");
-
-			SDL_Event event;
-			{
-				G_PROFILE("Events");
-				while (SDL_PollEvent(&event)) {
-					if (event.type == SDL_EVENT_QUIT) {
-						IsRunning = false;
-						return;
-					}
-					UserInputService->ProcessEvent(event);
-					Workspace->CurrentCamera->OnEvent(Window, event);
-				}
-			}
-
-			{
-				G_PROFILE("Simulation");
-				RunService->PreSimulation->Fire(deltaTime);
-				Workspace->CurrentCamera->Step(deltaTime);
-				RunService->PostSimulation->Fire(deltaTime);
-			}
-
-			{
-				G_PROFILE("PreRender");
-				RunService->PreRender->Fire(deltaTime);
-			}
-			{
-				G_PROFILE("Mesh Upload");
-				MeshProvider::UploadToGpu(Gpu);
-			}
-			{
-				G_PROFILE("Draw");
-				RenderProvider->Draw({
-					.WorldRoot = std::static_pointer_cast<WorldRoot>(Workspace),
-					.Camera = Workspace->CurrentCamera,
-				});
-			}
-
-			{
-				G_PROFILE("Scripts");
-				ScriptEngine->Step();
-			}
+			Scheduler.Run(deltaTime);
 		}
 
 		// Outside the zone: it separates frames rather than belonging to one

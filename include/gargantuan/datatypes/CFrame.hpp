@@ -12,8 +12,9 @@
 namespace gargantuan {
 	G_ENUM(RotationOrder, XYZ, XZY, YZX, YXZ, ZXY, ZYX);
 
-	G_USERDATA_DECL(
-		CFrame,
+	struct CFrame : public Userdata<CFrame> {
+	  public:
+		G_UD_DECL_PRELUDE(CFrame)
 
 		static constexpr float CF_EPSILON = 1e-6;
 		static constexpr glm::mat3 DEFAULT_ROTATION =
@@ -88,12 +89,16 @@ namespace gargantuan {
 		static glm::vec3 SafeUnit(glm::vec3 vec, glm::vec3 fallback);
 		static glm::mat3 BuildLookRotation(glm::vec3 position, glm::vec3 target, glm::vec3 up = {0, 1, 0});
 
-		glm::vec3 operator*(const glm::vec3 & other) const { return Position + (Rotation * other); };
+		glm::vec3 operator*(const glm::vec3 &other) const {
+			return Position + (Rotation * other);
+		};
 
-		CFrame operator*(const CFrame & other) const {
+		CFrame operator*(const CFrame &other) const {
 			glm::vec3 transformedPosition = Position + (Rotation * other.Position);
 			glm::mat3 transformedRotation = Rotation * other.Rotation;
 			return CFrame(transformedPosition, transformedRotation);
 		};
-	);
+	};
+
+	G_UD_STACKVALUE(CFrame);
 } // namespace gargantuan

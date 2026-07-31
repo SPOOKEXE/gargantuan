@@ -1,6 +1,7 @@
 // #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
 #include "gargantuan/render/RenderProvider.hpp"
+#include "gargantuan/DebugOverlay.hpp"
 #include "gargantuan/render/RenderPass.hpp"
 
 #include <SDL3/SDL.h>
@@ -52,6 +53,9 @@ namespace gargantuan {
 
 		SDL_Log("Creating opaque pass");
 		OpaquePass = CreateOpaquePass(Gpu, SwapchainFormat);
+
+		SDL_Log("Creating overlay pass");
+		OverlayPass = CreateOverlayPass(Gpu, SwapchainFormat);
 	}
 
 	void RenderProvider::Destroy() {
@@ -74,6 +78,7 @@ namespace gargantuan {
 
 		ShadowPass->Destroy(Gpu);
 		OpaquePass->Destroy(Gpu);
+		OverlayPass->Destroy(Gpu);
 	}
 
 	void RenderProvider::Draw(DrawContext drawContext) {
@@ -91,6 +96,7 @@ namespace gargantuan {
 		frameContext.Commands = commands;
 		frameContext.WorldRoot = drawContext.WorldRoot;
 		frameContext.Camera = drawContext.Camera;
+		frameContext.Overlay = drawContext.Overlay;
 
 		frameContext.ShadowMapTexture = ShadowMapTexture;
 		frameContext.ShadowSampler = ShadowSampler;
@@ -144,6 +150,14 @@ namespace gargantuan {
 
 		SDL_EndGPURenderPass(ShadowPass->Draw(Gpu, frameContext));
 		SDL_EndGPURenderPass(OpaquePass->Draw(Gpu, frameContext));
+
+		// Last, and only when something is toggled on. The pass loads the
+		// swapchain rather than clearing it, so it has to run after the scene.
+		if (frameContext.Overlay && !frameContext.Overlay->IsEmpty()) {
+			if (auto *overlay = OverlayPass->Draw(Gpu, frameContext)) {
+				SDL_EndGPURenderPass(overlay);
+			}
+		}
 
 		SDL_SubmitGPUCommandBuffer(frameContext.Commands);
 	}

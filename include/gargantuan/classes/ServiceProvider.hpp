@@ -9,9 +9,9 @@
 namespace gargantuan {
 	class ServiceProvider : public Instance {
 	  public:
-		G_INSTANCE_DECL(ServiceProvider);
-
 		typedef std::unordered_map<std::string, std::function<Instance::Pointer()>> ServiceConstructors;
+
+		static const ClassDefinition DEFINITION;
 		std::unordered_map<std::string, Instance::Pointer> Services;
 
 		virtual Instance::Pointer FindService(std::string_view name);

@@ -1,24 +1,22 @@
 #include "gargantuan/datatypes/Axes.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
-#include "gargantuan/scripting/UserdataTag.hpp"
 
 namespace gargantuan {
-	G_USERDATA_IMPL(
+	G_UD_IMPL_PRELUDE(Axes);
+	G_UD_IMPL_PROPS(
 		Axes,
-		.Tag = UserdataTag::Axes,
-		.Type = "Axes",
-		.Properties = {
-			{"Top", Property::fromReadonlyMember<&Axes::Top>()},
-			{"Bottom", Property::fromReadonlyMember<&Axes::Bottom>()},
-			{"Left", Property::fromReadonlyMember<&Axes::Left>()},
-			{"Right", Property::fromReadonlyMember<&Axes::Right>()},
-			{"Front", Property::fromReadonlyMember<&Axes::Front>()},
-			{"Back", Property::fromReadonlyMember<&Axes::Back>()},
-			{"X", Property::fromRead([](Axes *self) { return self->Left && self->Right; })},
-			{"Y", Property::fromRead([](Axes *self) { return self->Top && self->Bottom; })},
-			{"Z", Property::fromRead([](Axes *self) { return self->Front && self->Back; })},
-		}
+
+		{"Top", Property::fromSimple<&Axes::Top>(true, false)},
+		{"Bottom", Property::fromSimple<&Axes::Bottom>(true, false)},
+		{"Left", Property::fromSimple<&Axes::Left>(true, false)},
+		{"Right", Property::fromSimple<&Axes::Right>(true, false)},
+		{"Front", Property::fromSimple<&Axes::Front>(true, false)},
+		{"Back", Property::fromSimple<&Axes::Back>(true, false)},
+		{"X", Property::fromRead([](Axes *self) { return self->Left && self->Right; })},
+		{"Y", Property::fromRead([](Axes *self) { return self->Top && self->Bottom; })},
+		{"Z", Property::fromRead([](Axes *self) { return self->Front && self->Back; })}
 	)
+	G_UD_IMPL_METHODS(Axes)
 
 	void Axes::SetNormal(const Enums::NormalId &normal) {
 		switch (normal) {

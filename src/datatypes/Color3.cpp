@@ -1,20 +1,18 @@
 #include "gargantuan/datatypes/Color3.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
-#include "gargantuan/scripting/UserdataTag.hpp"
 
 #include <common.hpp>
 
 namespace gargantuan {
-	G_USERDATA_IMPL(
+	G_UD_IMPL_PRELUDE(Color3);
+	G_UD_IMPL_PROPS(
 		Color3,
-		.Tag = UserdataTag::Color3,
-		.Type = "Color3",
-		.Properties = {
-			{"R", Color3::Property::fromReadonlyMember<&Color3::R>()},
-			{"G", Color3::Property::fromReadonlyMember<&Color3::G>()},
-			{"B", Color3::Property::fromReadonlyMember<&Color3::B>()}
-		}
-	);
+
+		{"R", Property::fromSimple<&Color3::R>(true, false)},
+		{"G", Property::fromSimple<&Color3::G>(true, false)},
+		{"B", Property::fromSimple<&Color3::B>(true, false)}
+	)
+	G_UD_IMPL_METHODS(Color3)
 
 	Color3::Color3() : R(0.0f), G(0.0f), B(0.0f) {};
 

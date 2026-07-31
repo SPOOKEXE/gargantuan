@@ -1,6 +1,5 @@
 #include "gargantuan/datatypes/Vector2.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
-#include "gargantuan/scripting/UserdataTag.hpp"
 
 #include <cstdlib>
 #include <lua.h>
@@ -8,34 +7,33 @@
 #include <sstream>
 
 namespace gargantuan {
-	G_USERDATA_IMPL(
+
+	G_UD_IMPL_PRELUDE(Vector2);
+	G_UD_IMPL_PROPS(
 		Vector2,
-		.Tag = UserdataTag::Vector2,
-		.Type = "Vector2",
-		.Properties =
-			{
-				{"X", Property::fromRead([](Vector2 *self) { return self->GetX(); })},
-				{"Y", Property::fromRead([](Vector2 *self) { return self->GetY(); })},
-				{"Unit", Property::fromRead([](Vector2 *self) { return self->GetUnit(); })},
-				{"Magnitude", Property::fromRead([](Vector2 *self) { return self->GetMagnitude(); })},
-			},
-		.Methods = {
-			{"Cross", Method::fromMember<&Vector2::Cross>()},
-			{"Abs", Method::fromMember<&Vector2::Abs>()},
-			{"Ceil", Method::fromMember<&Vector2::Ceil>()},
-			{"Floor", Method::fromMember<&Vector2::Floor>()},
-			{"Sign", Method::fromMember<&Vector2::Sign>()},
-			{"Angle", Method::fromMember<&Vector2::Angle>()},
-			{"Dot", Method::fromMember<&Vector2::Dot>()},
-			{"Lerp", Method::fromMember<&Vector2::Lerp>()},
-			{"Max", Method::fromMember<&Vector2::Max>()},
-			{"Min", Method::fromMember<&Vector2::Min>()},
-			{"__tostring", Method{Vector2::LTostring}},
-			{"__add", Method{Vector2::LAdd}},
-			{"__sub", Method{Vector2::LSub}},
-			{"__mul", Method{Vector2::LMul}},
-			{"__div", Method{Vector2::LDiv}}
-		}
+		{"X", Property::fromRead([](Vector2 *self) { return self->GetX(); })},
+		{"Y", Property::fromRead([](Vector2 *self) { return self->GetY(); })},
+		{"Unit", Property::fromRead([](Vector2 *self) { return self->GetUnit(); })},
+		{"Magnitude", Property::fromRead([](Vector2 *self) { return self->GetMagnitude(); })}
+	)
+	G_UD_IMPL_METHODS(
+		Vector2,
+		G_UD_METHOD(Vector2, Cross),
+		G_UD_METHOD(Vector2, Abs),
+		G_UD_METHOD(Vector2, Ceil),
+		G_UD_METHOD(Vector2, Floor),
+		G_UD_METHOD(Vector2, Sign),
+		G_UD_METHOD(Vector2, Angle),
+		G_UD_METHOD(Vector2, Dot),
+		G_UD_METHOD(Vector2, Lerp),
+		G_UD_METHOD(Vector2, Max),
+		G_UD_METHOD(Vector2, Min),
+		G_UD_METHOD(Vector2, FuzzyEq),
+		{"__tostring", {Vector2::LTostring}},
+		{"__add", {Vector2::LAdd}},
+		{"__sub", {Vector2::LSub}},
+		{"__mul", {Vector2::LMul}},
+		{"__div", {Vector2::LDiv}}
 	)
 
 	Vector2::Vector2(float x, float y) : Value(x, y) {};
@@ -44,15 +42,12 @@ namespace gargantuan {
 	float Vector2::GetX() const {
 		return Value.x;
 	};
-
 	float Vector2::GetY() const {
 		return Value.y;
 	};
-
 	float Vector2::GetMagnitude() const {
 		return glm::length(Value);
 	};
-
 	Vector2 Vector2::GetUnit() const {
 		return glm::normalize(Value);
 	};
@@ -60,44 +55,34 @@ namespace gargantuan {
 	float Vector2::Cross(const Vector2 &other) const {
 		return (GetX() * other.GetY()) - (GetY() * GetX());
 	};
-
 	Vector2 Vector2::Abs() const {
 		return glm::abs(Value);
 	};
-
 	Vector2 Vector2::Ceil() const {
 		return glm::ceil(Value);
 	};
-
 	Vector2 Vector2::Floor() const {
 		return glm::floor(Value);
 	};
-
 	Vector2 Vector2::Sign() const {
 		return glm::sign(Value);
 	};
-
 	float Vector2::Angle(const Vector2 &other, bool isSigned) const {
 		float angle = atan2(Cross(other), Dot(other));
 		return isSigned ? angle : abs(angle);
 	};
-
 	float Vector2::Dot(const Vector2 &other) const {
 		return GetX() * other.GetX() + GetY() * other.GetY();
 	};
-
 	Vector2 Vector2::Lerp(const Vector2 &goal, float alpha) const {
 		return Value + (goal.Value - Value) * alpha;
 	};
-
 	Vector2 Vector2::Max(const Vector2 &other) const {
 		return glm::max(Value, other.Value);
 	};
-
 	Vector2 Vector2::Min(const Vector2 &other) const {
 		return glm::min(Value, other.Value);
 	};
-
 	Vector2 Vector2::FuzzyEq(const Vector2 &other, float epsilon) const {
 		return glm::abs(Value.x - this->Value.x) <= epsilon && glm::abs(Value.y - this->Value.y) <= epsilon;
 	};

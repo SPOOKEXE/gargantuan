@@ -26,16 +26,18 @@ namespace gargantuan {
 
 	class Tween : public Instance {
 	  public:
-		G_INSTANCE_DECL(Tween);
+		static const ClassDefinition DEFINITION;
 
 		Instance::Pointer Instance;
 		TweenInfo TweenInfo;
 
 		using TweenableValue = std::variant<float, Color3, Vector2, glm::vec3>;
 		using GoalPropertyMap = std::unordered_map<std::string, TweenableValue>;
-		GoalPropertyMap GoalProperties;
+		GoalPropertyMap goalProperties;
 
 		Enums::PlaybackState PlaybackState;
+
+		Tween(Instance::Pointer instance, gargantuan::TweenInfo tweenInfo, GoalPropertyMap goalProperties);
 
 		void Play();
 		void Cancel();

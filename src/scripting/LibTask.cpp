@@ -106,6 +106,7 @@ namespace gargantuan {
 
 	int OpenLibTask(lua_State *L, ThreadEngine *threadEngine) {
 		luaL_register(L, "task", LibTask);
+		lua_pop(L, 1);
 		return 0;
 	}
 } // namespace gargantuan

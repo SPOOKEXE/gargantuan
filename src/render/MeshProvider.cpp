@@ -2,6 +2,8 @@
 #include "gargantuan/render/PrimitiveMeshes.hpp"
 
 #include <SDL3/SDL.h>
+#include <array>
+#include <iterator>
 #include <memory>
 
 namespace gargantuan::MeshProvider {
@@ -15,7 +17,28 @@ namespace gargantuan::MeshProvider {
 		};
 
 		std::unordered_map<std::string, std::unique_ptr<GpuMesh>> GpuMeshes;
+
+		// Indexed by Enums::PartType. Resolved once, because the map's values
+		// are node-based and their addresses are stable for the process.
+		std::array<std::unique_ptr<GpuMesh> *, PrimitiveMeshCount> PrimitiveSlots{};
+
+		const char *PRIMITIVE_KEYS[] = {
+			"gargantuan://meshes/Ball",
+			"gargantuan://meshes/Block",
+			"gargantuan://meshes/Cylinder",
+			"gargantuan://meshes/Wedge",
+			"gargantuan://meshes/CornerWedge",
+		};
 	} // namespace
+
+	std::unique_ptr<GpuMesh> &GetPrimitiveMesh(uint8_t meshId) {
+		static std::unique_ptr<GpuMesh> missing;
+		if (meshId >= std::size(PRIMITIVE_KEYS)) return missing;
+
+		std::unique_ptr<GpuMesh> *&slot = PrimitiveSlots[meshId];
+		if (!slot) slot = &GpuMeshes[PRIMITIVE_KEYS[meshId]];
+		return *slot;
+	}
 
 	std::unique_ptr<GpuMesh> &GetGpuMesh(std::string id) {
 		return GpuMeshes[id];

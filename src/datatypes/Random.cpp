@@ -1,7 +1,6 @@
 #include "gargantuan/datatypes/Random.hpp"
 #include "gargantuan/datatypes/Vector3.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
-#include "gargantuan/scripting/UserdataTag.hpp"
 
 #include <SDL3/SDL.h>
 #include <glm/ext/scalar_constants.hpp>
@@ -11,17 +10,16 @@
 #include <utility>
 
 namespace gargantuan {
-	G_USERDATA_IMPL(
+	G_UD_IMPL_PRELUDE(Random);
+	G_UD_IMPL_PROPS(Random)
+	G_UD_IMPL_METHODS(
 		Random,
-		.Tag = UserdataTag::Random,
-		.Type = "Random",
-		.Methods = {
-			{"Clone", Method::fromMember<&Random::Clone>()},
-			{"NextInteger", Method::fromMember<&Random::NextInteger>()},
-			{"NextUnitVector", Method::fromMember<&Random::NextUnitVector>()},
-			{"NextNumber", Method{&Random::LNextNumber}},
-			{"Shuffle", Method{&Random::LShuffle}},
-		}
+
+		G_UD_METHOD(Random, Clone),
+		G_UD_METHOD(Random, NextInteger),
+		G_UD_METHOD(Random, NextUnitVector),
+		{"NextNumber", {&Random::LNextNumber}},
+		{"Shuffle", {&Random::LShuffle}}
 	)
 
 	Random::Random() : Generator(SDL_GetTicksNS()) {}

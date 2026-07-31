@@ -1,23 +1,19 @@
 #include "gargantuan/datatypes/TweenInfo.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
-#include "gargantuan/scripting/UserdataTag.hpp"
 
 namespace gargantuan {
-	G_USERDATA_IMPL(
+	G_UD_IMPL_PRELUDE(TweenInfo);
+	G_UD_IMPL_PROPS(
 		TweenInfo,
-		.Tag = UserdataTag::TweenInfo,
-		.Type = "TweenInfo",
-		.Properties = {
-			{"TweenInfo", Property::fromReadonlyMember<&TweenInfo::Time>()},
-			{"EasingStyle", Property::fromReadonlyMember<&TweenInfo::EasingStyle>()},
-			{"EasingDirection", Property::fromReadonlyMember<&TweenInfo::EasingDirection>()},
-			{"RepeatCount", Property::fromReadonlyMember<&TweenInfo::RepeatCount>()},
-			{"Reverses", Property::fromReadonlyMember<&TweenInfo::Reverses>()},
-			{"DelayTime", Property::fromReadonlyMember<&TweenInfo::DelayTime>()},
-			{"TweenInfo", Property::fromReadonlyMember<&TweenInfo::Time>()},
-		}
-	);
-
+		{"TweenInfo", Property::fromSimple<&TweenInfo::Time>(true, false)},
+		{"EasingStyle", Property::fromSimple<&TweenInfo::EasingStyle>(true, false)},
+		{"EasingDirection", Property::fromSimple<&TweenInfo::EasingDirection>(true, false)},
+		{"RepeatCount", Property::fromSimple<&TweenInfo::RepeatCount>(true, false)},
+		{"Reverses", Property::fromSimple<&TweenInfo::Reverses>(true, false)},
+		{"DelayTime", Property::fromSimple<&TweenInfo::DelayTime>(true, false)},
+		{"TweenInfo", Property::fromSimple<&TweenInfo::Time>(true, false)}
+	)
+	G_UD_IMPL_METHODS(TweenInfo)
 	TweenInfo::TweenInfo(
 		float time,
 		Enums::EasingStyle easingStyle,

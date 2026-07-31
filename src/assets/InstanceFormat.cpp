@@ -1,11 +1,11 @@
 #include "gargantuan/assets/InstanceFormat.hpp"
+#include "gargantuan/ClassRegistry.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
 #include "gargantuan/datatypes/Color3.hpp"
 #include "gargantuan/datatypes/Enum.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/datatypes/UDim.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
-#include "gargantuan/reflection/InstanceClassRegistry.hpp"
 
 #include <SDL3/SDL_log.h>
 #include <cstring>
@@ -87,7 +87,7 @@ namespace gargantuan::InstanceFormat {
 		}
 	}
 
-	void SerializeProperties(InstanceClassDefinition *definition, Instance::Pointer instance, json &properties) {
+	void SerializeProperties(Instance::ClassDefinition *definition, Instance::Pointer instance, json &properties) {
 		for (auto &[key, property] : definition->Properties) {
 			if (key == "Parent" || !property.Serializable || !property.Read || !property.Write) continue;
 
@@ -98,12 +98,12 @@ namespace gargantuan::InstanceFormat {
 		}
 
 		if (definition->Superclass.has_value()) {
-			auto *superclass = InstanceClassRegistry::GetDefinitionByName(definition->Superclass.value());
+			auto *superclass = ClassRegistry::GetDefinitionByName(definition->Superclass.value());
 			SerializeProperties(superclass, instance, properties);
 		}
 	}
 
-	nlohmann::ordered_json SerializeInstance(Instance::Pointer instance, SerializationState &state) {
+	json SerializeInstance(Instance::Pointer instance, SerializationState &state) {
 		if (state.InstanceMap.contains(instance)) {
 			return state.InstanceMap.at(instance);
 		}
@@ -114,13 +114,13 @@ namespace gargantuan::InstanceFormat {
 			children.emplace_back(SerializeInstance(child, state));
 		}
 
-		auto *definition = InstanceClassRegistry::GetDefinition(instance.get());
+		auto *definition = ClassRegistry::GetDefinition(instance.get());
 		auto properties = json::object();
 		SerializeProperties(definition, instance, properties);
 
 		nlohmann::ordered_json serialized;
 		serialized["Name"] = instance->Name;
-		serialized["ClassName"] = definition->ClassName;
+		serialized["ClassName"] = definition->Name;
 		serialized["Properties"] = properties;
 		serialized["Children"] = children;
 
@@ -325,7 +325,7 @@ namespace gargantuan::InstanceFormat {
 		}
 
 		auto className = maybeClassName.get<std::string>();
-		auto definition = InstanceClassRegistry::GetDefinitionByName(className);
+		auto definition = ClassRegistry::GetDefinitionByName(className);
 		if (!definition) {
 			state.PushError("Instance {} has unknown ClassName '{}'", state.FormatCurrentPath(), className);
 			return std::nullopt;
@@ -335,6 +335,8 @@ namespace gargantuan::InstanceFormat {
 		}
 
 		auto instance = definition->Constructor();
+		// temporary
+		instance->Name = definition->Name;
 		while (true) {
 			for (auto &[key, property] : definition->Properties) {
 				if (key == "Parent" || !property.Serializable || !property.Write || !properties.contains(key)) continue;
@@ -381,7 +383,7 @@ namespace gargantuan::InstanceFormat {
 			}
 
 			if (definition->Superclass.has_value()) {
-				definition = InstanceClassRegistry::GetDefinitionByName(definition->Superclass.value());
+				definition = ClassRegistry::GetDefinitionByName(definition->Superclass.value());
 			} else {
 				break;
 			}

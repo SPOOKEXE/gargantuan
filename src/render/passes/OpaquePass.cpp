@@ -102,15 +102,25 @@ namespace gargantuan {
 			SDL_PushGPUVertexUniformData(context.Commands, 0, &worldUniforms, sizeof(WorldUniforms));
 			SDL_PushGPUFragmentUniformData(context.Commands, 0, &worldUniforms, sizeof(WorldUniforms));
 
-			for (auto part : context.WorldRoot->Parts) {
-				auto &mesh = part->GetMesh();
+			// Walks the dense columns, not the parts. Everything this loop needs
+			// is already in a row, so it never dereferences a part object.
+			auto matrices = context.WorldRoot->GetModelMatrices();
+			auto colors = context.WorldRoot->GetPartColors();
+			auto meshes = context.WorldRoot->GetPartMeshes();
+
+			for (size_t index = 0; index < meshes.size(); index++) {
+				const PartMeshRow &row = meshes[index];
+				if (!row.Slot) {
+					continue;
+				}
+				auto &mesh = *row.Slot;
 				if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
 					continue;
 				}
 
 				PartUniforms uniforms{
-					.ModelMatrix = part->GetModelMatrix(),
-					.Color = glm::vec4((glm::vec3)part->Color, 1.0f - part->Transparency),
+					.ModelMatrix = matrices[index],
+					.Color = colors[index],
 				};
 				SDL_PushGPUVertexUniformData(context.Commands, 1, &uniforms, sizeof(PartUniforms));
 

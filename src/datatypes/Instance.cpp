@@ -1,7 +1,8 @@
 #include "gargantuan/datatypes/Instance.hpp"
-#include "gargantuan/reflection/InstanceClassRegistry.hpp"
+#include "gargantuan/ClassRegistry.hpp"
+#include "gargantuan/ecs/ChangeFlags.hpp"
+#include "gargantuan/scripting/StackValue.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
-#include "gargantuan/scripting/UserdataTag.hpp"
 
 #include <SDL3/SDL_log.h>
 #include <algorithm>
@@ -9,55 +10,136 @@
 #include <lua.h>
 #include <lualib.h>
 #include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace gargantuan {
-	G_USERDATA_IMPL(
-		Instance,
-		.Tag = UserdataTag::Instance,
-		.Type = "Instance",
-		.Methods = {
-			{"__index", Method{&Instance::LIndex}},
-			{"__newindex", Method{&Instance::LNewIndex}},
-			{"__namecall", Method{&Instance::LNamecall}},
-		}
-	);
-	G_INSTANCE_IMPL(
-		Instance,
-		.Superclass = std::nullopt,
+	G_UD_IMPL_PRELUDE(Instance);
+	G_UD_IMPL_PROPS(Instance);
+	G_UD_IMPL_METHODS(Instance);
+
+	const Instance::ClassDefinition Instance::DEFINITION = {
+		.Name = "Instance",
 		.Properties =
 			{
-				{"Name", Property::fromMember<&Instance::Name>(true, true)},
+				{"Name", Property::fromSimple<&Instance::Name>(true, true)},
 				{
 					"ClassName",
 					Property::fromRead([](Instance *instance) -> std::string_view {
-						return InstanceClassRegistry::GetDefinition(instance)->ClassName;
+						return instance->GetClassDefinition().Name;
 					}),
 				},
 				{
 					"Parent",
-					Property::fromReadWrite<Instance::Pointer>(
+					// Writable with nil, which is how an instance is taken out
+					// of the tree -- and how a registry learns to drop its row.
+					Property::fromReadWrite<std::optional<Instance::Pointer>>(
 						[](Instance *instance) -> std::optional<Instance::Pointer> {
-							return instance->Parent ? instance->Parent->shared_from_this() : nullptr;
+							// nullopt, not an engaged optional holding null:
+							// the latter pushes a userdata wrapping a null
+							// pointer instead of nil.
+							if (!instance->Parent) return std::nullopt;
+							return instance->Parent->shared_from_this();
 						},
-						[](Instance *instance, Instance::Pointer newParent) { instance->SetParent(newParent); }
+						[](Instance *instance, std::optional<Instance::Pointer> newParent) {
+							instance->SetParent(newParent.value_or(nullptr));
+						}
 					),
+				},
+				{
+					"ChildAdded",
+					Property::fromRead([](Instance *instance) { return instance->GetChildAdded(); }),
+				},
+				{
+					"ChildRemoved",
+					Property::fromRead([](Instance *instance) { return instance->GetChildRemoved(); }),
+				},
+				{
+					"DescendantAdded",
+					Property::fromRead([](Instance *instance) { return instance->GetDescendantAdded(); }),
+				},
+				{
+					"DescendantRemoved",
+					Property::fromRead([](Instance *instance) { return instance->GetDescendantRemoved(); }),
 				},
 			},
 		.Methods = {
-			{"IsA", Method::fromMember<&Instance::IsA>()},
-			{"GetFullName", Method::fromMember<&Instance::GetFullName>()},
-			{"GetChildren", Method::fromMember<&Instance::GetChildren>()},
-			{"GetDescendants", Method::fromMember<&Instance::GetDescendants>()},
-			{"FindFirstChild", Method::fromMember<&Instance::FindFirstChild>()},
-			{"FindFirstChildOfClass", Method::fromMember<&Instance::FindFirstChildOfClass>()},
+			{"IsA", Method::Wrap<(bool (Instance::*)(std::string_view) const) & Instance::IsA>()},
+			{"Destroy", Method::Wrap<&Instance::Destroy>()},
+			{"GetFullName", Method::Wrap<&Instance::GetFullName>()},
+			{"GetChildren", Method::Wrap<&Instance::GetChildren>()},
+			{"GetDescendants", Method::Wrap<&Instance::GetDescendants>()},
+			{"FindFirstChild", Method::Wrap<&Instance::FindFirstChild>()},
+			{"FindFirstChildOfClass", Method::Wrap<&Instance::FindFirstChildOfClass>()},
 		}
-	);
+	};
 
-	// TODO: fire DescendantAdded/Removed signals
+	Instance::SignalBlock &Instance::EnsureSignals() {
+		if (!Signals) {
+			Signals = std::make_unique<SignalBlock>();
+		}
+		return *Signals;
+	}
+
+#define G_LAZY_SIGNAL(name)                                                                                            \
+	Signal<Instance::Pointer>::Pointer &Instance::Get##name() {                                                        \
+		auto &block = EnsureSignals();                                                                                 \
+		if (!block.name) block.name = std::make_shared<Signal<Instance::Pointer>>();                                   \
+		return block.name;                                                                                             \
+	}
+
+	G_LAZY_SIGNAL(ChildAdded)
+	G_LAZY_SIGNAL(ChildRemoved)
+	G_LAZY_SIGNAL(DescendantAdded)
+	G_LAZY_SIGNAL(DescendantRemoved)
+
+#undef G_LAZY_SIGNAL
+
+	const Instance::ClassDefinition &Instance::GetClassDefinition() const {
+		if (!CachedDefinition) {
+			CachedDefinition = ClassRegistry::GetDefinitionForType(typeid(*this));
+			// A class that was never registered still needs to answer IsA and
+			// ClassName without crashing.
+			if (!CachedDefinition) CachedDefinition = &Instance::DEFINITION;
+		}
+		return *CachedDefinition;
+	}
+
+	bool Instance::IsA(std::string_view className) const {
+		const ClassDefinition *target = ClassRegistry::GetDefinitionByName(className);
+		return target != nullptr && IsA(*target);
+	}
+
+	// Fires DescendantAdded/DescendantRemoved for this instance and everything
+	// under it, at every ancestor from `from` upwards. Firing the whole subtree
+	// is what lets a registry track parts nested inside models rather than only
+	// direct children of the world.
+	void Instance::FireDescendantSignals(Instance *from, bool added) {
+		bool anyListener = false;
+		for (Instance *ancestor = from; ancestor; ancestor = ancestor->Parent) {
+			if (!ancestor->Signals) continue;
+			if (added ? (bool)ancestor->Signals->DescendantAdded : (bool)ancestor->Signals->DescendantRemoved) {
+				anyListener = true;
+				break;
+			}
+		}
+		if (!anyListener) return;
+
+		std::vector<Pointer> subtree;
+		subtree.push_back(shared_from_this());
+		CollectDescendants(subtree);
+
+		for (Instance *ancestor = from; ancestor; ancestor = ancestor->Parent) {
+			if (!ancestor->Signals) continue;
+			auto &signal = added ? ancestor->Signals->DescendantAdded : ancestor->Signals->DescendantRemoved;
+			if (!signal) continue;
+			for (auto &node : subtree) {
+				signal->Fire(node);
+			}
+		}
+	}
+
 	void Instance::SetParent(std::shared_ptr<Instance> newParent) {
 		std::shared_ptr<Instance> self = shared_from_this();
 
@@ -65,7 +147,12 @@ namespace gargantuan {
 			auto &oldChildren = Parent->Children;
 			if (auto it = std::find(oldChildren.begin(), oldChildren.end(), self); it != oldChildren.end()) {
 				oldChildren.erase(it);
-				Parent->ChildRemoved->Fire(self);
+				// Still linked to the old ancestors here, deliberately: the
+				// removal has to be announced before the chain is broken.
+				FireDescendantSignals(Parent, false);
+				if (Parent->Signals && Parent->Signals->ChildRemoved) {
+					Parent->Signals->ChildRemoved->Fire(self);
+				}
 			}
 		}
 
@@ -73,45 +160,47 @@ namespace gargantuan {
 
 		if (newParent != nullptr) {
 			newParent->Children.push_back(self);
-			newParent->ChildAdded->Fire(self);
-		}
-	}
-
-	const Instance::Self::Property *Instance::FindProperty(std::string_view name) {
-		const InstanceClassDefinition *definition = InstanceClassRegistry::GetDefinition(this);
-		if (!definition) {
-			return nullptr;
+			if (newParent->Signals && newParent->Signals->ChildAdded) {
+				newParent->Signals->ChildAdded->Fire(self);
+			}
+			FireDescendantSignals(newParent.get(), true);
 		}
 
-		auto it = definition->AllProperties.find(name);
-		return it != definition->AllProperties.end() ? it->second : nullptr;
+		MarkChanged(ecs::ChangeFlags::Hierarchy);
 	}
 
-	const Instance::Self::Method *Instance::FindMethod(std::string_view name) {
-		const InstanceClassDefinition *definition = InstanceClassRegistry::GetDefinition(this);
-		if (!definition) {
-			return nullptr;
+	std::optional<Instance::Userdata::Property> Instance::FindProperty(std::string_view name) {
+		const ClassDefinition &definition = GetClassDefinition();
+		if (auto it = definition.AllProperties.find(name); it != definition.AllProperties.end()) {
+			return *it->second;
 		}
-
-		auto it = definition->AllMethods.find(name);
-		return it != definition->AllMethods.end() ? it->second : nullptr;
+		return {};
 	}
 
-	int Instance::LIndex(lua_State *L, Instance *self) {
+	std::optional<Instance::Userdata::Method> Instance::FindMethod(std::string_view name) {
+		const ClassDefinition &definition = GetClassDefinition();
+		if (auto it = definition.AllMethods.find(name); it != definition.AllMethods.end()) {
+			return *it->second;
+		}
+		return {};
+	}
+
+	int Instance::UserdataIndex(lua_State *L) {
+		Instance::Pointer instance = CheckStackValue<Instance::Pointer>(L, 1);
 		const char *key = luaL_checkstring(L, 2);
 
-		if (key && self) {
-			const auto *property = self->FindProperty(key);
-			if (property) {
+		if (key && instance) {
+			auto property = instance->FindProperty(key);
+			if (property.has_value()) {
 				if (property->Read) {
-					// lua_remove(L, 1);
-					// lua_remove(L, 1);
-					return property->PushStack(L, property->Read(self));
+					lua_remove(L, 1);
+					lua_remove(L, 1);
+					return property->PushStack(L, property->Read(instance.get()));
 				} else {
 					luaL_error(L, "Property %s is write-only", key);
 				}
-			} else if (auto child = self->FindFirstChild(key)) {
-				// lua_settop(L, 0);
+			} else if (auto child = instance->FindFirstChild(key)) {
+				lua_settop(L, 0);
 				StackValue<Instance::Pointer>::Push(L, child);
 				return 1;
 			}
@@ -120,15 +209,16 @@ namespace gargantuan {
 		return 0;
 	};
 
-	int Instance::LNewIndex(lua_State *L, Instance *self) {
+	int Instance::UserdataNewIndex(lua_State *L) {
+		Instance::Pointer instance = CheckStackValue<Instance::Pointer>(L, 1);
 		const char *key = luaL_checkstring(L, 2);
 
-		if (key && self) {
-			const auto *property = self->FindProperty(key);
-			if (property) {
+		if (key && instance) {
+			auto property = instance->FindProperty(key);
+			if (property.has_value()) {
 				if (property->Write) {
 					auto value = property->CheckStack(L, 3);
-					property->Write(self, value);
+					property->Write(instance.get(), value);
 					return 0;
 				} else {
 					luaL_error(L, "Property %s is read-only", key);
@@ -141,19 +231,52 @@ namespace gargantuan {
 		return 0;
 	};
 
-	int Instance::LNamecall(lua_State *L, Instance *self) {
+	int Instance::UserdataNamecall(lua_State *L) {
+		Instance::Pointer instance = CheckStackValue<Instance::Pointer>(L, 1);
 		const char *key = lua_namecallatom(L, nullptr);
 
-		if (key && self) {
-			const auto *method = self->FindMethod(key);
-			if (method) {
-				return method->Call(L, self);
+		if (key && instance) {
+			auto method = instance->FindMethod(key);
+			if (method.has_value()) {
+				return method->Call(L, instance.get());
 			}
 		}
 
-		luaL_error(L, "%s is not a valid method of %s", key, self->Name.data());
+		luaL_error(L, "%s is not a valid method of %s", key, instance->Name.data());
 		return 0;
 	};
+
+	void Instance::Destroy() {
+		if (Destroyed) return;
+		Destroyed = true;
+
+		// Unparent first: the descendant signals this fires are how registries
+		// learn that the whole subtree is leaving.
+		SetParent(nullptr);
+
+		auto children = Children;
+		for (auto &child : children) {
+			child->Destroy();
+		}
+		Children.clear();
+
+		// Disconnecting is what releases each handler's registry reference; the
+		// signals going out of scope on their own would leave them pinned.
+		if (Signals) {
+			for (auto &signal :
+				 {Signals->ChildAdded, Signals->ChildRemoved, Signals->DescendantAdded, Signals->DescendantRemoved}) {
+				if (!signal) {
+					continue;
+				}
+				for (const auto &connection : signal->Connections) {
+					if (connection) {
+						connection->Disconnect();
+					}
+				}
+				signal->Connections.clear();
+			}
+		}
+	}
 
 	std::string Instance::GetFullName() {
 		std::vector<std::string_view> path;
@@ -190,22 +313,6 @@ namespace gargantuan {
 		return fullName;
 	};
 
-	bool Instance::IsA(std::string_view className) {
-		auto currentDefinition = InstanceClassRegistry::GetDefinition(this);
-		while (true) {
-			if (currentDefinition->ClassName == className) {
-				return true;
-			}
-
-			auto superclass = currentDefinition->Superclass;
-			if (superclass.has_value()) {
-				currentDefinition = InstanceClassRegistry::GetDefinitionByName(superclass.value());
-			} else {
-				return false;
-			}
-		}
-	}
-
 	std::vector<std::shared_ptr<Instance>> &Instance::GetChildren() {
 		return Children;
 	}
@@ -234,10 +341,47 @@ namespace gargantuan {
 
 	std::shared_ptr<Instance> Instance::FindFirstChildOfClass(std::string_view className) {
 		for (const auto &child : Children) {
-			if (InstanceClassRegistry::GetDefinition(child.get())->ClassName == className) {
+			if (child->GetClassDefinition().Name == className) {
 				return child;
 			}
 		};
 		return nullptr;
 	}
-}
+
+	std::shared_ptr<Instance> Instance::FindFirstDescendant(std::string_view name) {
+		for (const auto &child : Children) {
+			if (child->Name == name) return child;
+			if (auto found = child->FindFirstDescendant(name)) return found;
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstDescendantOfClass(std::string_view className) {
+		for (const auto &child : Children) {
+			if (child->GetClassDefinition().Name == className) return child;
+			if (auto found = child->FindFirstDescendantOfClass(className)) return found;
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstDescendantWhichIsA(std::string_view className) {
+		const ClassDefinition *target = ClassRegistry::GetDefinitionByName(className);
+		if (!target) return nullptr;
+		for (const auto &child : Children) {
+			if (child->IsA(*target)) return child;
+			if (auto found = child->FindFirstDescendantWhichIsA(className)) return found;
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<Instance> Instance::FindFirstChildWhichIsA(std::string_view className) {
+		const ClassDefinition *target = ClassRegistry::GetDefinitionByName(className);
+		if (!target) return nullptr;
+		for (const auto &child : Children) {
+			if (child->IsA(*target)) {
+				return child;
+			}
+		}
+		return nullptr;
+	}
+} // namespace gargantuan

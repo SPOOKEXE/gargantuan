@@ -57,17 +57,23 @@ namespace gargantuan {
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(context.Commands, nullptr, 0, &depthTarget);
 			SDL_BindGPUGraphicsPipeline(pass, Pipeline);
 
-			for (auto part : context.WorldRoot->Parts) {
-				if (!part->CastShadow) {
+			// The colour column is deliberately not read here: this pass has no
+			// use for it, and with the rows split it never enters cache.
+			auto matrices = context.WorldRoot->GetModelMatrices();
+			auto meshes = context.WorldRoot->GetPartMeshes();
+
+			for (size_t index = 0; index < meshes.size(); index++) {
+				const PartMeshRow &row = meshes[index];
+				if (!row.CastShadow || !row.Slot) {
 					continue;
 				}
 
-				auto &mesh = part->GetMesh();
+				auto &mesh = *row.Slot;
 				if (!mesh || !mesh->VertexBuffer || !mesh->IndexBuffer) {
 					continue;
 				}
 
-				Uniforms uniforms{.ShadowMatrix = shadowMatrix, .PartMatrix = part->GetModelMatrix()};
+				Uniforms uniforms{.ShadowMatrix = shadowMatrix, .PartMatrix = matrices[index]};
 				SDL_PushGPUVertexUniformData(context.Commands, 0, &uniforms, sizeof(Uniforms));
 
 				SDL_GPUBufferBinding vertexBinding{.buffer = mesh->VertexBuffer, .offset = 0};

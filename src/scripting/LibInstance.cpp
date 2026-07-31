@@ -1,5 +1,5 @@
+#include "gargantuan/ClassRegistry.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
-#include "gargantuan/reflection/InstanceClassRegistry.hpp"
 #include "gargantuan/scripting/ScriptEngine.hpp"
 
 #include <lualib.h>
@@ -8,7 +8,7 @@ namespace gargantuan {
 	int LibInstance_new(lua_State *L) {
 		auto className = luaL_checkstring(L, 1);
 
-		auto classDefinition = InstanceClassRegistry::GetDefinitionByName(className);
+		auto classDefinition = ClassRegistry::GetDefinitionByName(className);
 		if (!classDefinition) {
 			luaL_error(L, "Unknown instance class named %s", className);
 			return 0;

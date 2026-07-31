@@ -17,7 +17,7 @@ namespace gargantuan {
 
 	class Part : public BasePart {
 	  public:
-		G_INSTANCE_DECL(Part);
+		static const ClassDefinition DEFINITION;
 
 		Enums::PartType Shape = Enums::PartType::Block;
 		std::unique_ptr<GpuMesh> &GetMesh() const override;
