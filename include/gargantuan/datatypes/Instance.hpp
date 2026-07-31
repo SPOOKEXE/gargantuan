@@ -25,41 +25,25 @@ namespace gargantuan {
 		typedef Userdata<Instance, std::shared_ptr<Instance>> This;
 		G_UD_DECL_PRELUDE(Instance)
 
-		// Deep enough for the Roblox tree several times over. Ancestors is a
-		// fixed array so IsA stays a plain indexed load.
 		static constexpr size_t MaxClassDepth = 16;
 
-		// A class *is* an archetype. An instance's property set is fixed by its
-		// ClassName at construction and never changes, so everything below is
-		// computed once at registry init rather than per instance.
 		struct ClassDefinition final {
 			std::string_view Name;
 			std::optional<std::string_view> Superclass;
 
 			std::function<Pointer()> Constructor;
-			// Defined out of line: it needs the class registry, which is
-			// declared below.
 			template <typename T> static std::function<std::shared_ptr<Instance>()> WrapConstructor();
 
-			// Instances of this class are cut from here, so they land on shared
-			// pages instead of wherever malloc put each one.
 			std::shared_ptr<ecs::InstanceArena> Arena = std::make_shared<ecs::InstanceArena>();
 
 			std::unordered_map<std::string_view, This::Property> Properties = {};
 			std::unordered_map<std::string_view, This::Method> Methods = {};
 
-			// --- Filled in by ClassRegistry at startup; do not set by hand. ---
 
-			// Dense id, and the materialised chain from the root down to this
-			// class. Ancestors[Depth] == ClassId, so an IsA test is a depth
-			// compare and one integer compare instead of a walk up the chain
-			// with a hash lookup and a string compare at every level.
 			uint16_t ClassId = 0;
 			uint8_t Depth = 0;
 			std::array<uint16_t, MaxClassDepth> Ancestors = {};
 
-			// The superclass chain unioned once, so property and method lookup
-			// is a single probe rather than one probe per level.
 			bool Flattened = false;
 			std::unordered_map<std::string_view, const This::Property *> AllProperties = {};
 			std::unordered_map<std::string_view, const This::Method *> AllMethods = {};
@@ -69,28 +53,21 @@ namespace gargantuan {
 
 		virtual ~Instance() = default;
 
-		// Owning, not a view: Name is writable from Luau, and StackValue's
-		// string_view reads point straight into the Luau string's bytes
 		std::string Name = std::string(DEFINITION.Name);
 		std::vector<std::shared_ptr<Instance>> Children;
 		Instance *Parent = nullptr;
 		void SetParent(std::shared_ptr<Instance> newParent);
 
-		// --- Entity handle ------------------------------------------------
-		// Set when the instance joins a registry. Component storage is keyed by
-		// WorldIndex; Registry is how a property write reports the change back
-		// without the instance knowing which registry it landed in.
 		uint32_t WorldIndex = ecs::InvalidIndex;
 		ecs::RegistryBase *Registry = nullptr;
 
-		void MarkChanged(ecs::ChangeFlags flags) {
+		uint16_t QuickHash = 0;
+
+		void MarkChanged(ecs::ChangeFlags flags = ecs::ChangeFlags::All) {
+			QuickHash++;
 			if (Registry) Registry->Mark(WorldIndex, flags);
 		}
 
-		// --- Signals ------------------------------------------------------
-		// Allocated on first use. Most instances never have anything connected
-		// to them, and an eager shared_ptr per signal costs both the pointer
-		// and a heap allocation on every single Instance.new.
 		struct SignalBlock {
 			Signal<Pointer>::Pointer ChildAdded;
 			Signal<Pointer>::Pointer ChildRemoved;
@@ -103,7 +80,6 @@ namespace gargantuan {
 		Signal<Pointer>::Pointer &GetDescendantAdded();
 		Signal<Pointer>::Pointer &GetDescendantRemoved();
 
-		// --- Class identity -----------------------------------------------
 		const ClassDefinition &GetClassDefinition() const;
 
 		bool IsA(const ClassDefinition &target) const {
@@ -123,15 +99,13 @@ namespace gargantuan {
 			return IsA<T>() ? static_cast<const T *>(this) : nullptr;
 		}
 
-		std::optional<This::Property> FindProperty(std::string_view name);
-		std::optional<This::Method> FindMethod(std::string_view name);
+		const This::Property *FindProperty(std::string_view name) const;
+		const This::Method *FindMethod(std::string_view name) const;
 
 		static int UserdataIndex(lua_State *L);
 		static int UserdataNewIndex(lua_State *L);
 		static int UserdataNamecall(lua_State *L);
 
-		// Unparents this instance and everything under it. Registries drop the
-		// rows on the way out because the descendant signals still fire.
 		void Destroy();
 		bool IsDestroyed() const {
 			return Destroyed;
@@ -154,8 +128,6 @@ namespace gargantuan {
 
 		SignalBlock &EnsureSignals();
 		void CollectDescendants(std::vector<std::shared_ptr<Instance>> &descendants);
-		// Walks up from `from` firing DescendantAdded/Removed at every ancestor,
-		// once per node in this instance's subtree.
 		void FireDescendantSignals(Instance *from, bool added);
 	};
 
@@ -170,8 +142,6 @@ namespace gargantuan {
 
 	template <typename T> std::function<std::shared_ptr<Instance>()> Instance::ClassDefinition::WrapConstructor() {
 		return []() -> std::shared_ptr<Instance> {
-			// The registry's copy of the definition owns the arena that
-			// instances of this class actually come from.
 			ClassDefinition *definition = ClassRegistry::GetDefinitionForType(typeid(T));
 			if (!definition || !definition->Arena) {
 				return std::make_shared<T>();
@@ -206,4 +176,4 @@ namespace gargantuan {
 			return gargantuan::StackValue<Instance::Pointer>::Push(L, value);
 		};
 	};
-} // namespace gargantuan
+}

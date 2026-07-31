@@ -44,9 +44,6 @@ namespace gargantuan {
 		static int LGarbageCollect(lua_State *L, SignalConnection *signal);
 	};
 
-	// NOTE: Split the Luau implementation into BaseSignal a class to avoid
-	// needing a template, which makes StackValue implementations trivial.
-	// TODO: Unref the connection callbacks somewhere
 	struct BaseSignal : public Userdata<BaseSignal, std::shared_ptr<BaseSignal>>,
 						public std::enable_shared_from_this<BaseSignal> {
 	  public:
@@ -173,4 +170,4 @@ namespace gargantuan {
 			return StackValue<BaseSignal::Pointer>::Push(L, std::static_pointer_cast<BaseSignal>(value));
 		};
 	};
-} // namespace gargantuan
+}

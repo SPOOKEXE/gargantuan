@@ -1,10 +1,16 @@
 #include "gargantuan/scripting/ScriptEngine.hpp"
 #include "gargantuan/datatypes/CFrame.hpp"
 #include "gargantuan/datatypes/Color3.hpp"
+#include "gargantuan/datatypes/Color4.hpp"
 #include "gargantuan/datatypes/Enum.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
+#include "gargantuan/datatypes/PhysicalProperties.hpp"
+#include "gargantuan/datatypes/Axes.hpp"
+#include "gargantuan/datatypes/Random.hpp"
 #include "gargantuan/datatypes/Signal.hpp"
+#include "gargantuan/datatypes/TweenInfo.hpp"
 #include "gargantuan/datatypes/UDim.hpp"
+#include "gargantuan/datatypes/UDim2.hpp"
 #include "gargantuan/datatypes/Vector2.hpp"
 #include "gargantuan/scripting/ThreadEngine.hpp"
 
@@ -16,6 +22,7 @@
 #include <lua.h>
 #include <luacode.h>
 #include <lualib.h>
+#include <filesystem>
 #include <stdexcept>
 
 namespace gargantuan {
@@ -72,15 +79,18 @@ namespace gargantuan {
 
 		{"CFrame", OpenLibCFrame},
 		{"Color3", OpenLibColor3},
+		{"Color4", OpenLibColor4},
 		{"Enum", OpenLibEnum},
 		{"Instance", OpenLibInstance},
+		{"PhysicalProperties", OpenLibPhysicalProperties},
+		{"Axes", OpenLibAxes},
+		{"Random", OpenLibRandom},
 		{"UDim", OpenLibUDim},
+		{"UDim2", OpenLibUDim2},
 		{"Signal", OpenLibSignal},
 		{"Vector2", OpenLibVector2},
 		{"Vector3", OpenLibVector3},
 		{"TweenInfo", OpenLibTweenInfo},
-		{"Axes", OpenLibAxes},
-		{"Random", OpenLibRandom},
 
 		{nullptr, nullptr},
 	};
@@ -88,6 +98,9 @@ namespace gargantuan {
 	static int LuauAssertHandler(const char *expression, const char *file, int line, const char *function) {
 		SDL_Log("Luau assertion failed:\n\tExpression: %s\n\tIn: %s:%d in %s", expression, file, line, function);
 		assert(false);
+		// assert compiles away with NDEBUG, so the handler has to return on its
+		// own. Non-zero asks Luau to break into the debugger and abort.
+		return 1;
 	}
 
 	ScriptEngine::ScriptEngine() : L(luaL_newstate()), ThreadEngine(L) {
@@ -103,11 +116,17 @@ namespace gargantuan {
 		BaseSignal::CreateUserdataMetatable(L);
 		CFrame::CreateUserdataMetatable(L);
 		Color3::CreateUserdataMetatable(L);
+		Color4::CreateUserdataMetatable(L);
 		Enum::CreateUserdataMetatable(L);
 		EnumItem::CreateUserdataMetatable(L);
 		Instance::CreateUserdataMetatable(L);
+		PhysicalProperties::CreateUserdataMetatable(L);
+		Axes::CreateUserdataMetatable(L);
+		Random::CreateUserdataMetatable(L);
 		SignalConnection::CreateUserdataMetatable(L);
+		TweenInfo::CreateUserdataMetatable(L);
 		UDim::CreateUserdataMetatable(L);
+		UDim2::CreateUserdataMetatable(L);
 		Vector2::CreateUserdataMetatable(L);
 
 		const luaL_Reg *lib = SCRIPT_LIBS;
@@ -120,15 +139,19 @@ namespace gargantuan {
 		CreateTestbedThread();
 	}
 
+	std::string ScriptEngine::StartupScriptPath = "Testbed.luau";
+
 	void ScriptEngine::CreateTestbedThread() {
 		testbedThread = lua_newthread(L);
 		size_t fileSize;
-		void *code = SDL_LoadFile("Testbed.luau", &fileSize);
+		const std::string &path = StartupScriptPath;
+		void *code = SDL_LoadFile(path.c_str(), &fileSize);
 
 		if (code == nullptr) {
-			SDL_Log("Failed to load Testbed.luau");
+			SDL_Log("Failed to load %s", path.c_str());
 			return;
 		}
+		SDL_Log("Running %s", path.c_str());
 
 		std::string contents((char *)code, fileSize);
 		SDL_free(code);
@@ -136,7 +159,8 @@ namespace gargantuan {
 		size_t bytecodeSize;
 		char *bytecode = luau_compile(contents.c_str(), contents.length(), nullptr, &bytecodeSize);
 
-		luau_load(testbedThread, "Testbed", bytecode, bytecodeSize, 0);
+		std::string chunkName = std::filesystem::path(path).stem().string();
+		luau_load(testbedThread, chunkName.c_str(), bytecode, bytecodeSize, 0);
 		std::free(bytecode);
 
 		ThreadEngine.QueueDeferredTask(testbedThread, 0);

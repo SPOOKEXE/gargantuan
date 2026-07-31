@@ -37,6 +37,9 @@ end
 Workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
 Workspace.CurrentCamera.CFrame = CFrame.new((hrp.CFrame * CFrame.new(0, 20, 0)).Position, hrp.Position)
 
+local WALK_SPEED = 16
+local CAMERA_CATCHUP = 2
+
 RunService.PreRender:Connect(function(dt: number)
 	local walkDirection = Vector3.zero
 	if UserInputService:IsKeyDown(Enum.KeyCode.W) then
@@ -52,9 +55,13 @@ RunService.PreRender:Connect(function(dt: number)
 		walkDirection -= Vector3.new(0.5, 0, 0)
 	end
 
-	walkDirection *= 16 * dt
-	hrp.CFrame = CFrame.new(hrp.Position + walkDirection, hrp.Position)
+	-- Normalize before scaling so facing is frame-rate independent.
+	if walkDirection ~= Vector3.zero then
+		hrp.CFrame = CFrame.new(hrp.Position + walkDirection.Unit * WALK_SPEED * dt, hrp.Position)
+	end
 
 	local lookCFrame = CFrame.new((hrp.CFrame * CFrame.new(0, 20, 0)).Position, hrp.Position)
-	Workspace.CurrentCamera.CFrame = Workspace.CurrentCamera.CFrame:Lerp(lookCFrame, dt * 2)
+	-- Exponential smoothing avoids frame-rate dependence and long-frame overshoot.
+	local alpha = 1 - math.exp(-CAMERA_CATCHUP * dt)
+	Workspace.CurrentCamera.CFrame = Workspace.CurrentCamera.CFrame:Lerp(lookCFrame, alpha)
 end)

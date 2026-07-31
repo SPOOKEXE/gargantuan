@@ -5,6 +5,7 @@ namespace gargantuan {
 	enum class UserdataTag : int {
 		Instance = 1,
 		Color3,
+		Color4,
 		CFrame,
 		Enum,
 		Enums,
@@ -16,8 +17,9 @@ namespace gargantuan {
 		Vector2,
 		Vector3,
 		TweenInfo,
-		Axes,
 		Random,
+		Axes,
+		PhysicalProperties,
 	};
 
 }

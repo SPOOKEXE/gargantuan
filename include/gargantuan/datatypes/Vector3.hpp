@@ -1,3 +1,6 @@
+
+#pragma once
+
 #include "gargantuan/scripting/StackValue.hpp"
 
 #include <glm/glm.hpp>

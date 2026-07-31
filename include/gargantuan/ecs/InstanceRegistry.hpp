@@ -4,6 +4,8 @@
 #include "gargantuan/ecs/ChangeChannel.hpp"
 #include "gargantuan/ecs/ComponentSet.hpp"
 
+#include <array>
+#include <bit>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -11,16 +13,8 @@
 #include <vector>
 
 namespace gargantuan::ecs {
-	// Tracks every descendant of a root that is a T, keeps them in a dense
-	// array, and keeps any component storage registered against it in step.
-	//
-	// This is the piece WorldRoot used to hand-roll. Hooking DescendantAdded
-	// rather than ChildAdded is the important part: a part nested inside a model
-	// belongs to the world just as much as a direct child does.
 	template <typename T> class InstanceRegistry final : public RegistryBase {
 	  public:
-		// Called after a row is appended and before it is removed, so a world
-		// can wire up whatever else the entity needs while its index is valid.
 		std::function<void(T *, uint32_t)> OnAdded;
 		std::function<void(T *, uint32_t)> OnRemoved;
 
@@ -28,14 +22,11 @@ namespace gargantuan::ecs {
 			root->GetDescendantAdded()->Connect([this](Instance::Pointer instance) { Add(instance); });
 			root->GetDescendantRemoved()->Connect([this](Instance::Pointer instance) { Remove(instance); });
 
-			// Anything parented before the hooks went in.
 			for (auto &descendant : root->GetDescendants()) {
 				Add(descendant);
 			}
 		}
 
-		// Component storage is registered up front, before any entity joins.
-		// Registering late is supported but replays every existing row.
 		void Register(ComponentSetBase *set) {
 			Columns.push_back(set);
 			for (uint32_t index = 0; index < Rows.size(); index++) {
@@ -47,14 +38,24 @@ namespace gargantuan::ecs {
 			Channels.emplace_back(mask);
 			ChangeChannel &channel = Channels.back();
 			channel.MarkAll((uint32_t)Rows.size());
+
+			for (int bit = 0; bit < 8; bit++) {
+				if (Overlaps(mask, (ChangeFlags)(1u << bit))) {
+					ChannelsByFlag[bit].push_back(&channel);
+				}
+			}
 			return channel;
 		}
 
 		void Mark(uint32_t index, ChangeFlags flags) override {
 			if (index >= Rows.size()) return;
-			for (auto &channel : Channels) {
-				if (Overlaps(channel.Mask, flags)) {
-					channel.Mark(index);
+
+			uint8_t bits = (uint8_t)flags;
+			while (bits) {
+				int bit = std::countr_zero(bits);
+				bits &= (uint8_t)(bits - 1);
+				for (ChangeChannel *channel : ChannelsByFlag[bit]) {
+					channel->Mark(index);
 				}
 			}
 		}
@@ -127,9 +128,10 @@ namespace gargantuan::ecs {
 			instance->Registry = nullptr;
 		}
 
-		std::vector<std::shared_ptr<T>> Owned; // keeps the instances alive
-		std::vector<T *> Rows;                 // what systems walk
+		std::vector<std::shared_ptr<T>> Owned;
+		std::vector<T *> Rows;
 		std::vector<ComponentSetBase *> Columns;
-		std::deque<ChangeChannel> Channels; // deque: subscribers hold references
+		std::deque<ChangeChannel> Channels; // Subscribers retain channel references.
+		std::array<std::vector<ChangeChannel *>, 8> ChannelsByFlag;
 	};
-} // namespace gargantuan::ecs
+}

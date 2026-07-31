@@ -33,13 +33,17 @@ for index, flowerColor in FLOWERS do
 	flowerParts[index] = flowerSoul
 end
 
-RunService.PreRender:Connect(function()
+-- Use one scene-relative time value for every axis.
+local elapsed = 0
+
+RunService.PreRender:Connect(function(deltaTime)
+	elapsed += deltaTime
 	for index, flowerSoul in flowerParts do
 		local step = index / TOTAL_FLOWERS
-		local angle = step * math.tau
-		local x = math.cos(angle + os.clock()) * RADIUS
-		local z = math.sin(angle + os.clock()) * RADIUS
-		local y = math.sin(os.clock() + step) * AMPLITUDE
+		local angle = step * math.tau + elapsed
+		local x = math.cos(angle) * RADIUS
+		local z = math.sin(angle) * RADIUS
+		local y = math.sin(elapsed + step) * AMPLITUDE
 		flowerSoul.Position = Vector3.new(x, y, z)
 	end
 end)

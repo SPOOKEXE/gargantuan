@@ -9,6 +9,7 @@
 
 #include <SDL3/SDL_log.h>
 #include <cstring>
+#include <any>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
@@ -21,20 +22,14 @@
 #include <variant>
 #include <vector>
 
-// NOTE: InstanceFormat is based off Rojo's model format with a few exceptions:
-// - All properties are assumed to be explicit for forward compatibility
-// - Serializables are not restricted to just instances, ie. it can also be used
-//   for configuration files
-// - Because of this, removed Enum's explicit format to implement a new EnumItem
-//   explicit format that also specifies the EnumType
-// - Int32 and Int64 are merged into Int as those are irrelevant to Gargantuan
+// Rojo-derived format: properties are explicit, values need not be instances,
+// EnumItem includes EnumType, and integers share one representation.
 
 namespace gargantuan::InstanceFormat {
 	using json = nlohmann::json;
 	using Serializable =
 		std::variant<bool, CFrame, Color3, double, EnumItem, float, glm::vec3, int, std::string_view, UDim, Vector2>;
 
-	// Serialization
 
 	struct SerializationState {
 		std::unordered_map<Instance::Pointer, json> InstanceMap;
@@ -89,11 +84,11 @@ namespace gargantuan::InstanceFormat {
 
 	void SerializeProperties(Instance::ClassDefinition *definition, Instance::Pointer instance, json &properties) {
 		for (auto &[key, property] : definition->Properties) {
-			if (key == "Parent" || !property.Serializable || !property.Read || !property.Write) continue;
+			if (key == "Parent" || key == "Name" || !property.Serializable || !property.ReadValue) continue;
 
-			auto value = property.Read(instance.get());
+			auto value = property.ReadValue(instance.get());
 			if (auto serialized = TrySerializeValue(value); serialized.has_value()) {
-				properties[key] = json::object({serialized.value()});
+				properties[key] = json::object({{serialized->first, serialized->second}});
 			}
 		}
 
@@ -135,9 +130,7 @@ namespace gargantuan::InstanceFormat {
 		return serialized;
 	};
 
-	// Deserialization
-	// FIXME: Current path refers to the parent when it really should refer to
-	// the current child
+	// FIXME: Current path names the parent rather than the current child.
 
 	std::string DeserializationState::FormatCurrentPath() {
 		std::ostringstream stream;
@@ -335,11 +328,12 @@ namespace gargantuan::InstanceFormat {
 		}
 
 		auto instance = definition->Constructor();
-		// temporary
 		instance->Name = definition->Name;
 		while (true) {
 			for (auto &[key, property] : definition->Properties) {
-				if (key == "Parent" || !property.Serializable || !property.Write || !properties.contains(key)) continue;
+				if (key == "Parent" || key == "Name" || !property.Serializable || !property.WriteValue ||
+					!properties.contains(key))
+					continue;
 
 				auto value = properties[key];
 				if (!value.is_object()) {
@@ -360,7 +354,7 @@ namespace gargantuan::InstanceFormat {
 				auto deserialized = maybeDeserialized.value();
 
 				try {
-					property.Write(instance.get(), deserialized);
+					property.WriteValue(instance.get(), deserialized);
 				} catch (const std::bad_any_cast &e) {
 					instance->Destroy();
 					return state.ReturnError(

@@ -10,11 +10,17 @@ namespace gargantuan {
 	  public:
 		SDL_GPUBuffer *VertexBuffer = nullptr;
 		uint32_t VertexCount;
-		uint32_t VertexBufferSize;
+		uint32_t VertexBufferBytes;
 
 		SDL_GPUBuffer *IndexBuffer = nullptr;
 		uint32_t IndexCount;
-		uint32_t IndexBufferSize;
+		uint32_t IndexBufferBytes;
+
+		SDL_GPUBuffer *PositionBuffer = nullptr;
+		SDL_GPUBuffer *NormalBuffer = nullptr;
+		SDL_GPUBuffer *UVBuffer = nullptr;
+
+		uint32_t CollectStreamBuffers(VertexStreams streams, SDL_GPUBuffer **out, uint32_t outBufferCapacity) const;
 
 		GpuMesh(Mesh mesh);
 
@@ -31,4 +37,4 @@ namespace gargantuan {
 		GpuMesh(const GpuMesh &) = delete;
 		GpuMesh &operator=(const GpuMesh &) = delete;
 	};
-} // namespace gargantuan
+}

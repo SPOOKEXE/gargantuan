@@ -18,7 +18,7 @@
 
 #define GENERIC_IN_OUT_IMPL(style)                                                                                     \
 	float EaseInOut##style(float x) {                                                                                  \
-		return x > 0.5 ? EaseIn##style(2 * x) / 2 : EaseOut##style(2 * x - 1) / 2 + 0.5;                               \
+		return x < 0.5 ? EaseIn##style(2 * x) / 2 : EaseOut##style(2 * x - 1) / 2 + 0.5;                               \
 	}
 
 // Bounce and Elastic implementations are from BoatTween
@@ -122,7 +122,7 @@ namespace gargantuan::EasingCurves {
 			return 7.5625 * x * x;
 		} else if (x < 0.72727272727273) {
 			return 3 + x * (11 * x - 12) * 0.6875;
-		} else if (x < 0.090909090909091) {
+		} else if (x < 0.90909090909091) {
 			return 6 + x * (11 * x - 18) * 0.6875;
 		} else {
 			return 7.875 + x * (11 * x - 21) * 0.6875;
@@ -132,12 +132,69 @@ namespace gargantuan::EasingCurves {
 	GENERIC_IN_OUT_IMPL(Bounce);
 
 	// Elastic
+	static const float ELASTIC_C4 = (2 * PI) / 3;
+	static const float ELASTIC_C5 = (2 * PI) / 4.5;
+
+	float EaseInElastic(float x) {
+		if (x <= 0) return 0;
+		if (x >= 1) return 1;
+		return -glm::pow(2.0f, 10 * x - 10) * glm::sin((10 * x - 10.75f) * ELASTIC_C4);
+	}
+
+	float EaseOutElastic(float x) {
+		if (x <= 0) return 0;
+		if (x >= 1) return 1;
+		return glm::pow(2.0f, -10 * x) * glm::sin((10 * x - 0.75f) * ELASTIC_C4) + 1;
+	}
+
+	float EaseInOutElastic(float x) {
+		if (x <= 0) return 0;
+		if (x >= 1) return 1;
+		return x < 0.5 ? -(glm::pow(2.0f, 20 * x - 10) * glm::sin((20 * x - 11.125f) * ELASTIC_C5)) / 2
+					   : (glm::pow(2.0f, -20 * x + 10) * glm::sin((20 * x - 11.125f) * ELASTIC_C5)) / 2 + 1;
+	}
 
 	// Exponential
+	float EaseInExponential(float x) {
+		return x <= 0 ? 0 : glm::pow(2.0f, 10 * x - 10);
+	}
+
+	float EaseOutExponential(float x) {
+		return x >= 1 ? 1 : 1 - glm::pow(2.0f, -10 * x);
+	}
+
+	float EaseInOutExponential(float x) {
+		if (x <= 0) return 0;
+		if (x >= 1) return 1;
+		return x < 0.5 ? glm::pow(2.0f, 20 * x - 10) / 2 : (2 - glm::pow(2.0f, -20 * x + 10)) / 2;
+	}
 
 	// Circular
+	float EaseInCircular(float x) {
+		return 1 - glm::sqrt(1 - x * x);
+	}
+
+	float EaseOutCircular(float x) {
+		return glm::sqrt(1 - glm::pow(x - 1, 2));
+	}
+
+	float EaseInOutCircular(float x) {
+		return x < 0.5 ? (1 - glm::sqrt(1 - glm::pow(2 * x, 2))) / 2
+					   : (glm::sqrt(1 - glm::pow(-2 * x + 2, 2)) + 1) / 2;
+	}
 
 	// Cubic
+	float EaseInCubic(float x) {
+		return x * x * x;
+	}
+
+	float EaseOutCubic(float x) {
+		return 1 - glm::pow(1 - x, 3);
+	}
+
+	float EaseInOutCubic(float x) {
+		return x < 0.5 ? 4 * x * x * x : 1 - glm::pow(-2 * x + 2, 3) / 2;
+	}
 
 	const CurveMap CURVES = {
 		CURVE_ENTRY_MANUAL(Linear, EaseLinear, EaseLinear, EaseLinear),
@@ -147,13 +204,23 @@ namespace gargantuan::EasingCurves {
 		CURVE_ENTRY(Quart),
 		CURVE_ENTRY(Quint),
 		CURVE_ENTRY(Bounce),
-		CURVE_ENTRY_MANUAL(Elastic, EaseLinear, EaseLinear, EaseLinear),
-		CURVE_ENTRY_MANUAL(Exponential, EaseLinear, EaseLinear, EaseLinear),
-		CURVE_ENTRY_MANUAL(Circular, EaseLinear, EaseLinear, EaseLinear),
-		CURVE_ENTRY_MANUAL(Cubic, EaseLinear, EaseLinear, EaseLinear),
+		CURVE_ENTRY(Elastic),
+		CURVE_ENTRY(Exponential),
+		CURVE_ENTRY(Circular),
+		CURVE_ENTRY(Cubic),
 	};
 
 	float CalculateAlpha(float x, Enums::EasingStyle style, Enums::EasingDirection direction) {
-		return CURVES.at(style).at(direction)(x);
+		auto style_it = CURVES.find(style);
+		if (style_it == CURVES.end()) {
+			return x;
+		}
+
+		auto direction_it = style_it->second.find(direction);
+		if (direction_it == style_it->second.end()) {
+			return x;
+		}
+
+		return direction_it->second(x);
 	}
 }

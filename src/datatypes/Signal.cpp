@@ -1,5 +1,6 @@
 #include "gargantuan/Profiler.hpp"
 #include "gargantuan/datatypes/Signal.hpp"
+#include "gargantuan/scripting/StackGuard.hpp"
 #include "gargantuan/scripting/Userdata.hpp"
 #include "gargantuan/scripting/UserdataTag.hpp"
 
@@ -26,14 +27,12 @@ namespace gargantuan {
 		{"__gc", {&SignalConnection::LGarbageCollect}}
 	);
 
-	// The main thread, not the caller's: a coroutine that connects and then
-	// finishes is collected, and the reference outlives it.
+	// Registry references use the main thread, which outlives connecting coroutines.
 	SignalConnection::SignalConnection(CallbackType callback, lua_State *L, int callbackReference)
 		: Callback(std::move(callback)), L(L ? lua_mainthread(L) : nullptr), CallbackReference(callbackReference),
 		  Connected(true) {}
 
-	// Not guarded on Connected: Once clears it before running the handler and
-	// disconnects afterwards, so a guard here would strand the reference.
+	// Do not guard on Connected: Once clears it before its deferred disconnect.
 	void SignalConnection::Disconnect() {
 		Connected = false;
 		if (L && CallbackReference != LUA_NOREF && CallbackReference != LUA_REFNIL) {
@@ -86,6 +85,7 @@ namespace gargantuan {
 		connection->Callback = [weakConnection, callback](CallbackArgument value) {
 			auto conn = weakConnection.lock();
 
+			// Mark spent before invocation to prevent re-entrant double firing.
 			if (conn) {
 				conn->Connected = false;
 			}
@@ -103,16 +103,17 @@ namespace gargantuan {
 	};
 
 	void BaseSignal::Fire(CallbackArgument value) {
-		size_t count = Connections.size();
+		// Snapshot ownership protects iteration from re-entrant mutation and destruction.
+		auto connections = Connections;
 		FiringDepth++;
 
-		for (size_t index = 0; index < count; index++) {
-			auto connection = Connections[index];
+		for (auto &connection : connections) {
 			if (connection && connection->Connected && connection->Callback) {
 				connection->Callback(value);
 			}
 		}
 
+		// Compact only after the outermost fire; enclosing snapshots may still be active.
 		FiringDepth--;
 		if (FiringDepth == 0) {
 			std::erase_if(Connections, [](const SignalConnection::Pointer &connection) {
@@ -182,8 +183,7 @@ namespace gargantuan {
 	}
 
 	int BaseSignal::LFire(lua_State *L, BaseSignal *signal) {
-		// TODO: This should be on a per-signal basis, ie. you might wanna fire
-		// RunService.PreRender on the server or smshit
+		// TODO: Select execution context per signal.
 		if (signal->GetSignalType() != Enums::SignalType::User) {
 			luaL_error(L, "Cannot fire Signals created by the engine");
 			return 0;
@@ -191,6 +191,8 @@ namespace gargantuan {
 
 		auto stackCount = lua_gettop(L);
 		auto argumentCount = std::max(stackCount - 1, 0);
+		EnsureStackSpace(L, 1);
+
 		auto argumentVector = std::make_shared<std::vector<int>>();
 		argumentVector->reserve(argumentCount);
 
@@ -224,9 +226,17 @@ namespace gargantuan {
 			return 0;
 		}
 
-		int pushedCount = 0;
+		auto &arguments = **argumentsPointer;
 
-		for (int ref : **argumentsPointer) {
+		// Script-controlled arity requires an explicit stack-capacity check.
+		int slots = (int)arguments.size();
+		if (!TryEnsureStackSpace(L, slots + 1)) {
+			SDL_Log("Dropping a signal firing with %d arguments: the Luau stack cannot grow that far", slots);
+			return 0;
+		}
+
+		int pushedCount = 0;
+		for (int ref : arguments) {
 			lua_getref(L, ref);
 			pushedCount++;
 		}
@@ -242,10 +252,7 @@ namespace gargantuan {
 		return lua_ref(L, idx);
 	}
 
-	// The handler gets a thread of its own rather than running on mainState:
-	// mainState is what the ThreadEngine resumes from, and a handler that yields
-	// on it cannot. The thread is referenced for the duration because the only
-	// other thing rooting it is a stack slot the handler itself can move.
+	// Use a rooted handler thread: yielding on mainState would block ThreadEngine resumes.
 	void BaseSignal::LRunCallback(lua_State *mainState, BaseSignal *signal, int callbackReference, std::any value) {
 		if (callbackReference == LUA_NOREF || callbackReference == LUA_REFNIL) {
 			return;
@@ -272,14 +279,14 @@ namespace gargantuan {
 		// with nothing to say about which of them is spending it, and the
 		// answer is already sitting in the function's debug info.
 		std::string label;
-		if (G_PROFILE_ACTIVE()) {
+		if (G_PROFILE_COLLECTING()) {
 			lua_Debug info;
 			if (lua_getinfo(thread, -1, "s", &info) && info.short_src) {
 				label = info.short_src;
 
 				// Luau reports a chunk loaded from a buffer as [string "Name"],
-				// which is three quarters punctuation in a row that is already
-				// short of width
+				// which is three quarters punctuation in a chart row that is
+				// already short of width
 				constexpr std::string_view WRAPPER = "[string \"";
 				if (label.starts_with(WRAPPER) && label.ends_with("\"]")) {
 					label = label.substr(WRAPPER.size(), label.size() - WRAPPER.size() - 2);
@@ -300,4 +307,4 @@ namespace gargantuan {
 		lua_unref(mainState, threadReference);
 		lua_settop(mainState, stackTop);
 	}
-} // namespace gargantuan
+}

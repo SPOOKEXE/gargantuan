@@ -19,7 +19,22 @@ namespace gargantuan {
 	  public:
 		static const ClassDefinition DEFINITION;
 
-		Enums::PartType Shape = Enums::PartType::Block;
+		Enums::PartType GetShape() const {
+			return Shape;
+		}
+		void SetShape(Enums::PartType shape) {
+			Shape = shape;
+			Visual.MeshId = (uint8_t)((size_t)shape + 1);
+			MarkChanged(ecs::ChangeFlags::Visual);
+		}
+
+		Part() {
+			SetShape(Shape);
+		}
+
 		std::unique_ptr<GpuMesh> &GetMesh() const override;
+
+	  private:
+		Enums::PartType Shape = Enums::PartType::Block;
 	};
-} // namespace gargantuan
+}

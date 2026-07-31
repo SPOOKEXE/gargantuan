@@ -46,16 +46,17 @@ namespace gargantuan {
 			float r22
 		);
 
-		static CFrame lookAt(glm::vec3 from, glm::vec3 to, glm::vec3 up);
-		static CFrame lookAlong(glm::vec3 from, glm::vec3 to, glm::vec3 up);
-		static CFrame fromRotationBetweenVectors(glm::vec3 from, glm::vec3 to);
-		static CFrame fromEulerAngles(float rx, float ry, float rz, Enums::RotationOrder order);
-		static CFrame fromEulerAnglesXYZ(float rx, float ry, float rz);
-		static CFrame fromEulerAnglesYXZ(float rx, float ry, float rz);
 		static CFrame Angles(float x, float y, float z);
-		static CFrame fromAxisAngle(glm::vec3 v, float r);
-		static CFrame fromOrientation(float rx, float ry, float rz);
-		static CFrame fromMatrix(glm::vec3 position, glm::vec3 right, glm::vec3 up, glm::vec3 look);
+		static CFrame fromEulerAnglesXYZ(float x, float y, float z);
+		static CFrame fromEulerAnglesYXZ(float x, float y, float z);
+		static CFrame fromEulerAngles(float x, float y, float z, Enums::RotationOrder order);
+		static CFrame fromOrientation(float x, float y, float z);
+		static CFrame fromAxisAngle(glm::vec3 axis, float angle);
+		static CFrame fromRotationBetweenVectors(glm::vec3 from, glm::vec3 to);
+		static CFrame lookAt(glm::vec3 at, glm::vec3 target, glm::vec3 up = {0, 1, 0});
+		static CFrame lookAlong(glm::vec3 at, glm::vec3 direction, glm::vec3 up = {0, 1, 0});
+		// `back` points opposite the look vector.
+		static CFrame fromMatrix(glm::vec3 position, glm::vec3 right, glm::vec3 up, glm::vec3 back);
 		static CFrame fromQuaternion(float x, float y, float z, float w, glm::vec3 position);
 
 		glm::vec3 GetRightVector() const;
@@ -85,9 +86,11 @@ namespace gargantuan {
 		static int LSub(lua_State *L, CFrame *self);
 		static int LMul(lua_State *L, CFrame *self);
 		static int LTostring(lua_State *L, CFrame *self);
+		static int LEq(lua_State *L, CFrame *self);
 
 		static glm::vec3 SafeUnit(glm::vec3 vec, glm::vec3 fallback);
 		static glm::mat3 BuildLookRotation(glm::vec3 position, glm::vec3 target, glm::vec3 up = {0, 1, 0});
+		static glm::mat3 MultiplyRotation(glm::mat3 lhs, glm::mat3 rhs);
 
 		glm::vec3 operator*(const glm::vec3 &other) const {
 			return Position + (Rotation * other);
@@ -101,4 +104,4 @@ namespace gargantuan {
 	};
 
 	G_UD_STACKVALUE(CFrame);
-} // namespace gargantuan
+}

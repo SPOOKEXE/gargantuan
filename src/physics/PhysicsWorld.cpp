@@ -1,4 +1,5 @@
 #include "gargantuan/physics/PhysicsWorld.hpp"
+#include "gargantuan/Profiler.hpp"
 #include "gargantuan/ecs/ChangeFlags.hpp"
 
 #include <box3d/box3d.h>
@@ -201,22 +202,33 @@ namespace gargantuan {
 			return;
 		}
 
-		// Transforms authored outside the solver win. Only the parts that were
-		// actually written are pushed back in.
-		solverChannel.Consume(parts.Size(), [&](uint32_t index) {
-			RigidBody *body = Bodies.Find(index);
-			if (!body || !b3Body_IsValid(body->Body)) return;
+		// Three zones rather than one, because they answer different questions:
+		// a step that is slow because the solver is working is a scene problem,
+		// and one that is slow either side of it is a bookkeeping problem.
+		{
+			G_PROFILE("physics.push");
+			// Transforms authored outside the solver win. Only the parts that were
+			// actually written are pushed back in.
+			solverChannel.Consume(parts.Size(), [&](uint32_t index) {
+				RigidBody *body = Bodies.Find(index);
+				if (!body || !b3Body_IsValid(body->Body)) return;
 
-			const auto &frame = parts.At(index)->Transform.CFrame;
-			glm::quat rotation = glm::quat_cast(glm::mat3(frame.Rotation));
-			b3Body_SetTransform(
-				body->Body,
-				{frame.Position.x, frame.Position.y, frame.Position.z},
-				{{rotation.x, rotation.y, rotation.z}, rotation.w}
-			);
-		});
+				const auto &frame = parts.At(index)->Transform.CFrame;
+				glm::quat rotation = glm::quat_cast(glm::mat3(frame.Rotation));
+				b3Body_SetTransform(
+					body->Body,
+					{frame.Position.x, frame.Position.y, frame.Position.z},
+					{{rotation.x, rotation.y, rotation.z}, rotation.w}
+				);
+			});
+		}
 
-		b3World_Step(Solver, deltaTime, SubStepCount);
+		{
+			G_PROFILE("physics.solve");
+			b3World_Step(Solver, deltaTime, SubStepCount);
+		}
+
+		G_PROFILE("physics.readback");
 		// Read back exactly the movers, contiguous. Anchored parts are not in
 		// this array to begin with, so there is no branch to skip them.
 		auto keys = Bodies.EntityKeys();
@@ -245,7 +257,8 @@ namespace gargantuan {
 		}
 	}
 
-	void PhysicsWorld::SyncBroadphase(ecs::InstanceRegistry<BasePart> &parts, ecs::ChangeChannel &channel) {
+	void PhysicsWorld::EnsureBroadphase(ecs::InstanceRegistry<BasePart> &parts, ecs::ChangeChannel &channel) {
+		G_PROFILE("physics.broadphase");
 		uint32_t count = parts.Size();
 		channel.Consume(count, [&](uint32_t index) {
 			BasePart *part = parts.At(index);

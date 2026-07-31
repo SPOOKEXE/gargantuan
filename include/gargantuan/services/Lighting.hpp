@@ -1,58 +1,46 @@
 #pragma once
 
-#include "gargantuan/classes/BasePart.hpp"
-#include "gargantuan/classes/PointLight.hpp"
-#include "gargantuan/classes/WorldRoot.hpp"
+#include "gargantuan/datatypes/Color3.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
-#include "gargantuan/ecs/ChangeChannel.hpp"
-#include "gargantuan/ecs/ComponentSet.hpp"
-#include "gargantuan/ecs/InstanceRegistry.hpp"
-#include "gargantuan/render/LightRow.hpp"
+#include "gargantuan/datatypes/Signal.hpp"
 
-#include <span>
-#include <unordered_map>
-#include <vector>
+#include <glm/glm.hpp>
+#include <string>
 
 namespace gargantuan {
-	// The whole class, storage included. Everything that used to have to be
-	// written out per class -- the owning vector, the raw row vector, the
-	// swap-remove, the back-index fixup, the change list -- comes from the
-	// registry, and what is left is the data and one Attach call.
 	class Lighting : public Instance {
 	  public:
 		static const ClassDefinition DEFINITION;
 
-		ecs::InstanceRegistry<PointLight> Lights;
+		Color3 Ambient = Color3(0, 0, 0);
+		Color3 OutdoorAmbient = Color3(0.5f, 0.5f, 0.5f);
+		float Brightness = 3.0f;
+		float ExposureCompensation = 0.0f;
+		bool GlobalShadows = true;
+		float ShadowSoftness = 0.5f;
 
-		// Services are constructed before the world exists, so the root is
-		// handed over once the tree is up rather than found in the constructor.
-		void Attach(WorldRoot *world);
+		Color3 ColorShiftTop = Color3(0, 0, 0);
+		Color3 ColorShiftBottom = Color3(0, 0, 0);
 
-		std::span<const LightRow> GetLightRows() const {
-			return Rows.Values();
-		}
+		Color3 FogColor = Color3(0.75f, 0.75f, 0.75f);
+		float FogStart = 0.0f;
+		float FogEnd = 100000.0f;
 
-		void SyncLightRows();
+		float GeographicLatitude = -33.87f;
+
+		float GetClockTime() const;
+		void SetClockTime(float clockTime);
+		float GetMinutesAfterMidnight() const;
+		void SetMinutesAfterMidnight(float minutes);
+		std::string GetTimeOfDay() const;
+		void SetTimeOfDay(std::string timeOfDay);
+
+		glm::vec3 GetSunDirection() const;
+		glm::vec3 GetMoonDirection() const;
+
+		G_SIGNAL(LightingChanged, bool);
 
 	  private:
-		void RebuildAnchors();
-
-		ecs::Column<LightRow> Rows;
-		// The part each light hangs off, as a pointer rather than a row index:
-		// a part's index moves when the world swap-removes, its address does
-		// not. Kept in step with the light rows by the column itself.
-		ecs::Column<BasePart *> Anchors;
-
-		// Reverse index, so a part that moved can mark just the lights on it
-		// instead of every light being re-resolved each frame.
-		std::unordered_map<const BasePart *, std::vector<uint32_t>> LightsByPart;
-		bool AnchorsStale = true;
-
-		ecs::ChangeChannel *LightChannel = nullptr;
-		// A channel on the *parts* registry: light positions are derived from
-		// part transforms, so a part moving has to reach the lights on it.
-		ecs::ChangeChannel *PartMotionChannel = nullptr;
-
-		WorldRoot *World = nullptr;
+		float ClockTime = 14.0f;
 	};
-} // namespace gargantuan
+}

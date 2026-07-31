@@ -6,34 +6,32 @@
 namespace gargantuan {
 	std::filesystem::path GetShaderPath(const std::filesystem::path &relativePath);
 
-	void
-	GetShaderFormat(SDL_GPUDevice *gpu, SDL_GPUShaderFormat &format, std::string &extension, std::string &entrypoint);
+	void GetSupportedShaderBinaryFormat(
+		SDL_GPUDevice *gpu, SDL_GPUShaderFormat &format, std::string &bytecodeExtension, std::string &entrypoint
+	);
 
-	struct Shader {
+	struct ShaderProgram {
 	  public:
 		SDL_GPUShader *VertexShader = nullptr;
 		SDL_GPUShader *FragmentShader = nullptr;
 
-		/// Instantiates the vertex and fragment shaders if it doesn't exist.
-		void Init(SDL_GPUDevice *gpu);
-
-		/// Release associated shaders from the GPU.
 		void Destroy(SDL_GPUDevice *gpu);
 	};
 
-	struct FileShader final : public Shader {
+	struct FileShader final : public ShaderProgram {
 	  public:
-		std::filesystem::path VertexFilepath;
+		std::filesystem::path VertexFilepathStem;
 		Uint32 VertexUniformBufferCount = 1;
 		Uint32 VertexSamplerCount = 0;
+		Uint32 VertexStorageBufferCount = 0;
 
-		std::filesystem::path FragmentFilepath;
+		std::filesystem::path FragmentFilepathStem;
 		Uint32 FragmentUniformBufferCount = 0;
 		Uint32 FragmentSamplerCount = 0;
 
 		void Init(SDL_GPUDevice *gpu);
 
 	  private:
-		SDL_GPUShader *CompileFile(SDL_GPUDevice *gpu, std::filesystem::path path, SDL_GPUShaderCreateInfo info);
+		SDL_GPUShader *CreateShaderFromFile(SDL_GPUDevice *gpu, std::filesystem::path path, SDL_GPUShaderCreateInfo info);
 	};
-} // namespace gargantuan
+}

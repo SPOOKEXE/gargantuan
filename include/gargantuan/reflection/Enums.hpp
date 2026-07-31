@@ -7,7 +7,6 @@
 #include <string_view>
 #include <unordered_map>
 
-// Has gargantuan gone too far?
 #define G_ENUM(name, ...)                                                                                              \
 	namespace Enums {                                                                                                  \
 		enum class name : int { __VA_ARGS__ };                                                                         \
@@ -24,7 +23,6 @@ namespace gargantuan::Enums {
 	void Register(Enum::Pointer self);
 }
 
-// NOTE: this assumes you registered an EnumItem for this Enum
 template <typename E>
 	requires std::is_enum_v<E>
 struct gargantuan::StackValue<E> {

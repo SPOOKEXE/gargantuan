@@ -1,13 +1,15 @@
 #pragma once
 
+#include <any>
+
 #include "gargantuan/scripting/StackValue.hpp"
 #include "gargantuan/scripting/UserdataTag.hpp"
 
-#include <any>
 #include <concepts>
 #include <functional>
 #include <lua.h>
 #include <lualib.h>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
@@ -18,17 +20,16 @@ namespace gargantuan {
 	  public:
 		typedef Userdata<Class, StoredAs> This;
 
+		typedef std::string (*TypeReflector)();
+
 		struct Property {
-			int (*PushStack)(lua_State *L, std::any value) = nullptr;
-			std::any (*Read)(Class *instance) = nullptr;
+			int (*Read)(lua_State *L, Class *instance) = nullptr;
+			int (*Write)(lua_State *L, Class *instance) = nullptr;
+			TypeReflector ReflectType = nullptr;
 
-			std::any (*CheckStack)(lua_State *L, int idx) = nullptr;
-			void (*Write)(Class *instance, std::any value) = nullptr;
-
-			// Whether the instance serialiser should round-trip this property.
-			// Derived views (Position over CFrame) and anything backed by
-			// engine state rather than the instance should opt out.
-			bool Serializable = true;
+			bool Serializable = false;
+			std::any (*ReadValue)(Class *instance) = nullptr;
+			void (*WriteValue)(Class *instance, const std::any &value) = nullptr;
 
 			Property WithSerializable(bool value) const {
 				Property copy = *this;
@@ -42,88 +43,133 @@ namespace gargantuan {
 				using Value = T;
 			};
 
+			template <typename ValueType> static TypeReflector reflectorFor() {
+				return []() -> std::string { return std::string(StackValue<ValueType>::ReflectedTypedef()); };
+			}
+
 			template <auto MemberPointer>
 			static Property fromSimple(bool enableRead = false, bool enableWrite = false) {
 				using MemberClass = typename MemberTraits<decltype(MemberPointer)>::Target;
 				using Value = typename MemberTraits<decltype(MemberPointer)>::Value;
 
-				Property self{nullptr, nullptr};
+				Property self{nullptr, nullptr, reflectorFor<Value>()};
 
 				if (enableRead) {
-					self.PushStack = [](lua_State *L, std::any value) -> int {
-						return StackValue<Value>::Push(L, std::any_cast<Value>(value));
-					};
-					self.Read = [](Class *instance) -> std::any {
-						return static_cast<MemberClass *>(instance)->*MemberPointer;
+					self.Read = [](lua_State *L, Class *instance) -> int {
+						return StackValue<Value>::Push(L, static_cast<MemberClass *>(instance)->*MemberPointer);
 					};
 				}
 
 				if (enableWrite) {
-					self.CheckStack = [](lua_State *L, int idx) -> std::any { return CheckStackValue<Value>(L, idx); };
-					self.Write = [](Class *instance, std::any value) {
+					self.Write = [](lua_State *L, Class *instance) -> int {
+						static_cast<MemberClass *>(instance)->*MemberPointer = CheckStackValue<Value>(L, -1);
+						return 0;
+					};
+				}
+
+				if (enableRead) {
+					self.ReadValue = [](Class *instance) -> std::any {
+						return std::any(static_cast<MemberClass *>(instance)->*MemberPointer);
+					};
+				}
+
+				if (enableWrite) {
+					self.WriteValue = [](Class *instance, const std::any &value) {
 						static_cast<MemberClass *>(instance)->*MemberPointer = std::any_cast<Value>(value);
 					};
 				}
 
+				self.Serializable = enableRead && enableWrite;
 				return self;
 			}
 
 			template <typename Reader> static Property fromRead(Reader &&read) {
-				using ReadType = std::invoke_result_t<Reader, Class *>;
-				Property self;
+				using ReadType = std::decay_t<std::invoke_result_t<Reader, Class *>>;
 
-				self.PushStack = [](lua_State *L, std::any value) -> int {
-					return StackValue<ReadType>::Push(L, std::any_cast<ReadType>(value));
-				};
 				static auto storedRead = std::forward<Reader>(read);
-				self.Read = [](Class *instance) -> std::any { return storedRead(instance); };
+
+				Property self{nullptr, nullptr, reflectorFor<ReadType>()};
+				self.Read = [](lua_State *L, Class *instance) -> int {
+					return StackValue<ReadType>::Push(L, storedRead(instance));
+				};
+				self.ReadValue = [](Class *instance) -> std::any { return std::any(storedRead(instance)); };
 
 				return self;
 			}
 
 			template <typename WriteType, typename Reader, typename Writer>
 			static Property fromReadWrite(Reader &&read, Writer &&write) {
-				using ReadType = std::invoke_result_t<Reader, Class *>;
-				Property self;
+				using ReadType = std::decay_t<std::invoke_result_t<Reader, Class *>>;
 
-				self.PushStack = [](lua_State *L, std::any value) -> int {
-					return StackValue<ReadType>::Push(L, std::any_cast<ReadType>(value));
-				};
 				static auto storedRead = std::forward<Reader>(read);
-				self.Read = [](Class *instance) -> std::any { return storedRead(instance); };
-
-				self.CheckStack = [](lua_State *L, int idx) -> std::any { return CheckStackValue<WriteType>(L, idx); };
 				static auto storedWrite = std::forward<Writer>(write);
-				self.Write = [](Class *instance, std::any value) {
+
+				Property self{nullptr, nullptr, reflectorFor<ReadType>()};
+				self.Read = [](lua_State *L, Class *instance) -> int {
+					return StackValue<ReadType>::Push(L, storedRead(instance));
+				};
+				self.Write = [](lua_State *L, Class *instance) -> int {
+					storedWrite(instance, CheckStackValue<WriteType>(L, -1));
+					return 0;
+				};
+
+				self.ReadValue = [](Class *instance) -> std::any { return std::any(storedRead(instance)); };
+				self.WriteValue = [](Class *instance, const std::any &value) {
 					storedWrite(instance, std::any_cast<WriteType>(value));
 				};
+				self.Serializable = true;
 
 				return self;
 			}
 		};
 
+		template <typename Returns, typename... Arguments> static std::string BuildSignature() {
+			std::string signature = "(self";
+
+			int index = 0;
+			((signature += ", a" + std::to_string(++index) + ": " +
+						   std::string(StackValue<std::decay_t<Arguments>>::ReflectedTypedef())),
+			 ...);
+
+			signature += "): ";
+			if constexpr (std::is_void_v<Returns>) {
+				signature += "()";
+			} else {
+				signature += std::string(StackValue<std::decay_t<Returns>>::ReflectedTypedef());
+			}
+
+			return signature;
+		}
+
 		struct Method {
 		  public:
 			int (*Call)(lua_State *L, Class *instance);
+			TypeReflector ReflectType = nullptr;
 
 			template <auto MethodPointer, typename TargetClass, typename Returns, typename... Arguments>
 			static Method Wrap(Returns (TargetClass::*)(Arguments...)) {
-				return {[](lua_State *L, Class *instance) -> int {
-					auto *derived = static_cast<TargetClass *>(instance);
-					return WrappedCall<MethodPointer, TargetClass, Arguments...>(
-						L, derived, std::index_sequence_for<Arguments...>{}
-					);
-				}};
+				return {
+					[](lua_State *L, Class *instance) -> int {
+						auto *derived = static_cast<TargetClass *>(instance);
+						return WrappedCall<MethodPointer, TargetClass, Arguments...>(
+							L, derived, std::index_sequence_for<Arguments...>{}
+						);
+					},
+					[]() -> std::string { return This::template BuildSignature<Returns, Arguments...>(); },
+				};
 			}
 
 			template <auto MethodPointer, typename TargetClass, typename Returns, typename... Arguments>
 			static Method Wrap(Returns (TargetClass::*)(Arguments...) const) {
-				return {[](lua_State *L, Class *instance) -> int {
-					auto *derived = static_cast<TargetClass *>(instance);
-					return WrappedCall<MethodPointer, TargetClass, Arguments...>(
-						L, derived, std::index_sequence_for<Arguments...>{}
-					);
-				}};
+				return {
+					[](lua_State *L, Class *instance) -> int {
+						auto *derived = static_cast<TargetClass *>(instance);
+						return WrappedCall<MethodPointer, TargetClass, Arguments...>(
+							L, derived, std::index_sequence_for<Arguments...>{}
+						);
+					},
+					[]() -> std::string { return This::template BuildSignature<Returns, Arguments...>(); },
+				};
 			}
 
 			template <auto MethodPointer> static Method Wrap() {
@@ -142,8 +188,7 @@ namespace gargantuan {
 					auto &&res = std::invoke(
 						MethodPointer, instance, StackValue<std::decay_t<Arguments>>::From(L, Indices + 2)...
 					);
-					StackValue<std::decay_t<Ret>>::Push(L, std::forward<decltype(res)>(res));
-					return 1;
+					return StackValue<std::decay_t<Ret>>::Push(L, std::forward<decltype(res)>(res));
 				}
 			}
 		};
@@ -179,8 +224,7 @@ namespace gargantuan {
 			if (auto it = properties.find(key); it != properties.end()) {
 				const Property &property = it->second;
 				if (property.Read) {
-					auto value = property.Read(instance);
-					return property.PushStack(L, value);
+					return property.Read(L, instance);
 				}
 				return 0;
 			}
@@ -200,8 +244,7 @@ namespace gargantuan {
 			if (auto it = properties.find(key); it != properties.end()) {
 				const Property &property = it->second;
 				if (property.Write) {
-					auto value = property.CheckStack(L, 3);
-					property.Write(instance, value);
+					property.Write(L, instance);
 				} else {
 					luaL_error(L, "%s is read-only", key.data());
 				}
@@ -290,14 +333,10 @@ namespace gargantuan {
 			}
 
 			lua_setreadonly(L, -1, true);
-			// Referenced because g->udatamt is only a GC root when
-			// FFlag::LuauUdataMetatablePinned is on, and it defaults to off.
-			// Unrooted, the metatable is collected and the next __namecall on one
-			// of these userdata reads a dead closure.
+			// udatamt is not a GC root unless LuauUdataMetatablePinned is enabled.
 			lua_ref(L, -1);
 			lua_setuserdatametatable(L, (int)Class::GetUserdataTag());
-			// Push placement-news StoredAs into the userdata, so without this the
-			// shared_ptr it holds is never released
+			// placement-new StoredAs must release ownership through this destructor.
 			lua_setuserdatadtor(L, (int)Class::GetUserdataTag(), [](lua_State *, void *userdata) {
 				static_cast<StoredAs *>(userdata)->~StoredAs();
 			});
@@ -340,6 +379,9 @@ namespace gargantuan {
 
 		static StoredAs From(lua_State *L, int idx) {
 			StoredAs *userdata = static_cast<StoredAs *>(lua_touserdatatagged(L, idx, (int)This::GetUserdataTag()));
+			if (!userdata) {
+				return StoredAs{};
+			}
 			return *userdata;
 		};
 
@@ -359,8 +401,64 @@ namespace gargantuan {
 		};
 	};
 
+#define G_UD_READONLY_PROP_IMPL(classType, propertyName, valueType)                                                    \
+	[](lua_State *L, void *rawInstance) -> int {                                                                       \
+		auto *instance = static_cast<classType *>(rawInstance);                                                        \
+		::gargantuan::StackValue<valueType>::Push(L, instance->propertyName);                                          \
+		return 1;                                                                                                      \
+	}
+
+#define G_UD_WRITEONLY_PROP_IMPL(classType, propertyName, valueType)                                                   \
+	[](lua_State *L, void *rawInstance) -> int {                                                                       \
+		auto *instance = static_cast<classType *>(rawInstance);                                                        \
+		valueType value = ::gargantuan::CheckStackValue<valueType>(L, -1);                                             \
+		instance->propertyName = value;                                                                                \
+		return 0;                                                                                                      \
+	}
+
+#define G_UD_REFLECT_TYPE(valueType)                                                                                   \
+	[]() -> std::string { return std::string(::gargantuan::StackValue<valueType>::ReflectedTypedef()); }
+
+#define G_UD_READONLY_PROP(classType, propertyName, valueType)                                                         \
+	{                                                                                                                  \
+		#propertyName, {                                                                                               \
+			[](lua_State *L, auto *inst) -> int {                                                                      \
+				return G_UD_READONLY_PROP_IMPL(classType, propertyName, valueType)(L, inst);                           \
+			},                                                                                                         \
+				nullptr, G_UD_REFLECT_TYPE(valueType)                                                                  \
+		}                                                                                                              \
+	}
+
+#define G_UD_WRITEONLY_PROP(classType, propertyName, valueType)                                                        \
+	{                                                                                                                  \
+		#propertyName, {                                                                                               \
+			nullptr,                                                                                                   \
+				[](lua_State *L, auto *inst) -> int {                                                                  \
+					return G_UD_WRITEONLY_PROP_IMPL(classType, propertyName, valueType)(L, inst);                      \
+				},                                                                                                     \
+				G_UD_REFLECT_TYPE(valueType)                                                                           \
+		}                                                                                                              \
+	}
+
+#define G_UD_READWRITE_PROP(classType, propertyName, valueType)                                                        \
+	{                                                                                                                  \
+		#propertyName, {                                                                                               \
+			[](lua_State *L, auto *inst) -> int {                                                                      \
+				return G_UD_READONLY_PROP_IMPL(classType, propertyName, valueType)(L, inst);                           \
+			},                                                                                                         \
+				[](lua_State *L, auto *inst) -> int {                                                                  \
+					return G_UD_WRITEONLY_PROP_IMPL(classType, propertyName, valueType)(L, inst);                      \
+				},                                                                                                     \
+				G_UD_REFLECT_TYPE(valueType), true,                                                                    \
+				[](auto *inst) -> std::any { return std::any(static_cast<classType *>(inst)->propertyName); },         \
+				[](auto *inst, const std::any &value) {                                                                \
+					static_cast<classType *>(inst)->propertyName = std::any_cast<valueType>(value);                    \
+				}                                                                                                      \
+		}                                                                                                              \
+	}
+
 #define G_MEMBER_PROPERTY(classType, propertyName, enableRead, enableWrite)                                            \
-	{#propertyName, Property::fromMember<&classType::propertyName>(enableRead, enableWrite)}
+	{#propertyName, Property::fromSimple<&classType::propertyName>(enableRead, enableWrite)}
 
 #define G_UD_STACKVALUE_WITH_STORED(classType, storedType)                                                             \
 	template <> struct StackValue<storedType> {                                                                        \
@@ -409,4 +507,4 @@ namespace gargantuan {
 		return METHODS;                                                                                                \
 	};
 
-} // namespace gargantuan
+}

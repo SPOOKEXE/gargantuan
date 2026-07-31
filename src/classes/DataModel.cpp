@@ -1,6 +1,8 @@
 #include "gargantuan/classes/DataModel.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
+#include "gargantuan/services/AssetService.hpp"
 #include "gargantuan/services/Lighting.hpp"
+#include "gargantuan/services/RenderSettings.hpp"
 #include "gargantuan/services/RunService.hpp"
 #include "gargantuan/services/TweenService.hpp"
 #include "gargantuan/services/UserInputService.hpp"
@@ -14,11 +16,13 @@ namespace gargantuan {
 
 	const DataModel::ServiceConstructors &DataModel::GetServiceConstructors() const {
 		static const DataModel::ServiceConstructors CONSTRUCTORS = {
+			{"AssetService", AssetService::DEFINITION.Constructor},
 			{"Workspace", Workspace::DEFINITION.Constructor},
 			{"Lighting", Lighting::DEFINITION.Constructor},
 			{"UserInputService", UserInputService::DEFINITION.Constructor},
 			{"RunService", RunService::DEFINITION.Constructor},
 			{"TweenService", TweenService::DEFINITION.Constructor},
+			{"RenderSettings", RenderSettings::DEFINITION.Constructor},
 		};
 		return CONSTRUCTORS;
 	};

@@ -1,0 +1,30 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform readonly image2D SourceTexture;
+layout(set = 1, binding = 0, rgba8) uniform writeonly image2D OutputTexture;
+
+layout(set = 2, binding = 0) uniform Builtin { vec4 Resolution; vec4 Time; } builtin;
+layout(set = 2, binding = 1) uniform Params { vec4 BlockSize; } params;
+
+void main() {
+    ivec2 coordinate = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(builtin.Resolution.xy);
+    if (coordinate.x >= size.x || coordinate.y >= size.y) return;
+
+    int block = max(int(params.BlockSize.x), 1);
+
+    ivec2 origin = (coordinate / block) * block;
+    vec4 total = vec4(0.0);
+    float count = 0.0;
+    for (int y = 0; y < block; y++) {
+        for (int x = 0; x < block; x++) {
+            ivec2 at = min(origin + ivec2(x, y), size - 1);
+            total += imageLoad(SourceTexture, at);
+            count += 1.0;
+        }
+    }
+
+    imageStore(OutputTexture, coordinate, total / count);
+}

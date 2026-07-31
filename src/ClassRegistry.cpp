@@ -8,6 +8,14 @@
 #include "gargantuan/classes/ServiceProvider.hpp"
 #include "gargantuan/classes/Tween.hpp"
 #include "gargantuan/classes/WorldRoot.hpp"
+#include "gargantuan/classes/ComputeShader.hpp"
+#include "gargantuan/classes/EditableImage.hpp"
+#include "gargantuan/classes/PostProcessShader.hpp"
+#include "gargantuan/classes/ShaderProperties.hpp"
+#include "gargantuan/classes/ShaderScript.hpp"
+#include "gargantuan/classes/SurfaceShader.hpp"
+#include "gargantuan/services/AssetService.hpp"
+#include "gargantuan/services/RenderSettings.hpp"
 #include "gargantuan/datatypes/Instance.hpp"
 #include "gargantuan/services/Lighting.hpp"
 #include "gargantuan/services/RunService.hpp"
@@ -31,9 +39,7 @@ namespace gargantuan::ClassRegistry {
 			std::unordered_map<std::string_view, Instance::ClassDefinition *> ByName;
 		};
 
-		// Depth and the ancestor chain are derived from Superclass, so a class
-		// has to be resolved after its parent. Recurse rather than making the
-		// declaration order in Definitions load-bearing.
+		// Resolve parents first; declaration order is not authoritative.
 		void ResolveChain(Registry &registry, Instance::ClassDefinition &definition) {
 			if (definition.Flattened) return;
 			definition.Flattened = true;
@@ -68,7 +74,7 @@ namespace gargantuan::ClassRegistry {
 
 			definition.Ancestors[definition.Depth] = definition.ClassId;
 
-			// Own members last so a subclass overrides rather than loses.
+			// Subclass members override inherited members.
 			for (const auto &[name, property] : definition.Properties) {
 				definition.AllProperties[name] = &property;
 			}
@@ -96,6 +102,14 @@ namespace gargantuan::ClassRegistry {
 							USE_INSTANCE_DEFINITION(TweenService),
 							USE_INSTANCE_DEFINITION(UserInputService),
 							USE_INSTANCE_DEFINITION(Workspace),
+							USE_INSTANCE_DEFINITION(AssetService),
+							USE_INSTANCE_DEFINITION(ComputeShader),
+							USE_INSTANCE_DEFINITION(EditableImage),
+							USE_INSTANCE_DEFINITION(PostProcessShader),
+							USE_INSTANCE_DEFINITION(RenderSettings),
+							USE_INSTANCE_DEFINITION(ShaderProperties),
+							USE_INSTANCE_DEFINITION(ShaderScript),
+							USE_INSTANCE_DEFINITION(SurfaceShader),
 							USE_INSTANCE_DEFINITION(WorldRoot),
 						},
 				};
@@ -114,7 +128,7 @@ namespace gargantuan::ClassRegistry {
 			}();
 			return *registry;
 		}
-	} // namespace
+	}
 
 	std::unordered_map<std::type_index, Instance::ClassDefinition> &GetDefinitionsMap() {
 		return Get().Definitions;
@@ -146,4 +160,4 @@ namespace gargantuan::ClassRegistry {
 		}
 		return result;
 	}
-} // namespace gargantuan::ClassRegistry
+}

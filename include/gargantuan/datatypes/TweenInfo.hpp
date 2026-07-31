@@ -13,7 +13,6 @@ namespace gargantuan {
 
 		using Pointer = std::shared_ptr<TweenInfo>;
 
-		// using roblox's defaults
 		float Time = 1.0f;
 		bool Reverses = false;
 		int32_t RepeatCount = 0;

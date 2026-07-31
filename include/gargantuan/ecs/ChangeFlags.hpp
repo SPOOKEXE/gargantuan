@@ -3,8 +3,6 @@
 #include <cstdint>
 
 namespace gargantuan::ecs {
-	// What a write invalidates, so systems can subscribe to only the changes
-	// they care about. A Color write must not wake the broadphase.
 	enum class ChangeFlags : uint8_t {
 		None = 0,
 		Transform = 1 << 0,
@@ -27,4 +25,4 @@ namespace gargantuan::ecs {
 	constexpr bool Overlaps(ChangeFlags a, ChangeFlags b) {
 		return ((uint8_t)a & (uint8_t)b) != 0;
 	}
-} // namespace gargantuan::ecs
+}

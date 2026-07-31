@@ -5,6 +5,7 @@
 
 namespace gargantuan {
 	int LibRandom_new(lua_State *L) {
+		// Omitting the seed picks one from the clock, matching Roblox
 		if (lua_isnoneornil(L, 1)) {
 			StackValue<Random>::Push(L, Random());
 			return 1;
@@ -23,4 +24,4 @@ namespace gargantuan {
 		luaL_register(L, "Random", LibRandom);
 		return 0;
 	}
-}
+} // namespace gargantuan

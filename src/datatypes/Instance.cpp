@@ -169,20 +169,16 @@ namespace gargantuan {
 		MarkChanged(ecs::ChangeFlags::Hierarchy);
 	}
 
-	std::optional<Instance::Userdata::Property> Instance::FindProperty(std::string_view name) {
+	const Instance::Userdata::Property *Instance::FindProperty(std::string_view name) const {
 		const ClassDefinition &definition = GetClassDefinition();
-		if (auto it = definition.AllProperties.find(name); it != definition.AllProperties.end()) {
-			return *it->second;
-		}
-		return {};
+		auto it = definition.AllProperties.find(name);
+		return it != definition.AllProperties.end() ? it->second : nullptr;
 	}
 
-	std::optional<Instance::Userdata::Method> Instance::FindMethod(std::string_view name) {
+	const Instance::Userdata::Method *Instance::FindMethod(std::string_view name) const {
 		const ClassDefinition &definition = GetClassDefinition();
-		if (auto it = definition.AllMethods.find(name); it != definition.AllMethods.end()) {
-			return *it->second;
-		}
-		return {};
+		auto it = definition.AllMethods.find(name);
+		return it != definition.AllMethods.end() ? it->second : nullptr;
 	}
 
 	int Instance::UserdataIndex(lua_State *L) {
@@ -190,12 +186,12 @@ namespace gargantuan {
 		const char *key = luaL_checkstring(L, 2);
 
 		if (key && instance) {
-			auto property = instance->FindProperty(key);
-			if (property.has_value()) {
+			const auto *property = instance->FindProperty(key);
+			if (property) {
 				if (property->Read) {
 					lua_remove(L, 1);
 					lua_remove(L, 1);
-					return property->PushStack(L, property->Read(instance.get()));
+					return property->Read(L, instance.get());
 				} else {
 					luaL_error(L, "Property %s is write-only", key);
 				}
@@ -214,12 +210,12 @@ namespace gargantuan {
 		const char *key = luaL_checkstring(L, 2);
 
 		if (key && instance) {
-			auto property = instance->FindProperty(key);
-			if (property.has_value()) {
+			const auto *property = instance->FindProperty(key);
+			if (property) {
 				if (property->Write) {
-					auto value = property->CheckStack(L, 3);
-					property->Write(instance.get(), value);
-					return 0;
+					// The assigned value is the top of the stack, which is
+					// where the stack-based writers expect to find it.
+					return property->Write(L, instance.get());
 				} else {
 					luaL_error(L, "Property %s is read-only", key);
 				}
@@ -236,8 +232,8 @@ namespace gargantuan {
 		const char *key = lua_namecallatom(L, nullptr);
 
 		if (key && instance) {
-			auto method = instance->FindMethod(key);
-			if (method.has_value()) {
+			const auto *method = instance->FindMethod(key);
+			if (method) {
 				return method->Call(L, instance.get());
 			}
 		}

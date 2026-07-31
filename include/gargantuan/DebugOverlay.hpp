@@ -6,15 +6,10 @@
 #include <vector>
 
 namespace gargantuan {
-	// Somewhere to put pixels, uploaded once a frame. Deliberately not
-	// EditableImage: the overlay wants a buffer, not a Luau-facing image class,
-	// and nothing here should be reachable from a script.
 	class OverlayImage {
 	  public:
 		void Resize(int width, int height);
 
-		// Source-over. The panel background goes down first and the text has to
-		// land on top of it rather than replace it.
 		void Blend(int x, int y, int width, int height, uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha);
 
 		int GetWidth() const {
@@ -33,28 +28,18 @@ namespace gargantuan {
 	  private:
 		int Width = 0;
 		int Height = 0;
-		// RGBA8, row major, no padding between rows -- what the GPU transfer
-		// buffer wants, so the upload is one memcpy.
 		std::vector<uint8_t> Pixels;
 	};
 
-	// How the frame rate has behaved lately, which is a different question from
-	// what it is right now: "143" says nothing about the frame that took a
-	// fifth of a second, and that is the one worth knowing about.
 	class FrameStatistics {
 	  public:
 		static constexpr double WINDOW_SECONDS = 20.0;
 
-		// `now` is real elapsed seconds, not game time
 		void Record(double now, float deltaTime);
 
 		bool HasSamples() const;
 		float Current() const;
-		// From the longest single frame, not an average of the slow ones: one
-		// frame is all it takes to be seen
 		float Minimum() const;
-		// Frames divided by the time they took. The mean of the rates would
-		// weight a fast frame the same as a slow one.
 		float Average() const;
 		float Maximum() const;
 
@@ -69,9 +54,6 @@ namespace gargantuan {
 		std::deque<Sample> Samples;
 	};
 
-	// A 3x5 pixel font. Not the DrawText the engine still owes -- no kerning,
-	// no lowercase -- but a number on screen needs a word saying which number
-	// it is.
 	namespace DebugText {
 		static constexpr int GLYPH_WIDTH = 3;
 		static constexpr int GLYPH_HEIGHT = 5;
@@ -79,8 +61,6 @@ namespace gargantuan {
 
 		int Measure(std::string_view text, int scale);
 
-		// Anything the font lacks is skipped, so a missing glyph is a gap
-		// rather than a wrong letter
 		void Draw(
 			OverlayImage &image,
 			int x,
@@ -91,23 +71,81 @@ namespace gargantuan {
 			uint8_t blue,
 			int scale
 		);
-	} // namespace DebugText
+	}
 
-	// One row of the F5 panel. Phase is printed only when it changes, so the
-	// systems under it read as a group.
-	struct SystemTiming {
-		std::string_view Phase;
-		std::string_view Name;
-		float Milliseconds = 0.0f;
+	enum class ProfilerTab : uint8_t {
+		Main,
+		Render,
+		Physics,
+		Luau,
+		Full,
+		Counters,
+
+		Count,
 	};
 
-	// Sizes `image` to whatever is turned on and draws the panels stacked.
-	// Either pointer may be null; both null leaves the image empty and the
-	// overlay pass draws nothing.
+	std::string_view GetProfilerTabName(ProfilerTab tab);
+
+	enum class ProfilerCategory : uint8_t {
+		Engine,
+		Render,
+		Physics,
+		Luau,
+
+		Count,
+	};
+
+	struct ProfilerRow {
+		std::string_view Name;
+		uint32_t Depth = 0;
+		float StartMilliseconds = 0.0f;
+		float Milliseconds = 0.0f;
+		float RecentMaxMilliseconds = 0.0f;
+		ProfilerCategory Category = ProfilerCategory::Engine;
+		bool Collapsed = false;
+	};
+
+	struct ProfilerCounter {
+		std::string_view Name;
+		double Value = 0.0;
+		uint32_t Samples = 1;
+		bool IsTime = false;
+		ProfilerCategory Category = ProfilerCategory::Engine;
+		float Share = 0.0f;
+	};
+
+	struct ProfilerView {
+		ProfilerTab Tab = ProfilerTab::Render;
+
+		std::vector<ProfilerRow> Rows;
+
+		std::vector<ProfilerCounter> Counters;
+		uint64_t TotalObjects = 0;
+		uint64_t TotalTriangles = 0;
+
+		float FrameMilliseconds = 0.0f;
+		// Mean frame-to-frame change over the recent window, shown beside FPS.
+		float FrameJitter = 0.0f;
+
+		float CategoryMilliseconds[(size_t)ProfilerCategory::Count] = {};
+
+		size_t Dropped = 0;
+
+		int Scroll = 0;
+
+		static constexpr uint32_t DEFAULT_DEPTH_LIMIT = 2;
+		static constexpr uint32_t MAXIMUM_DEPTH_LIMIT = 12;
+		uint32_t DepthLimit = DEFAULT_DEPTH_LIMIT;
+
+		static constexpr int SCROLL_STEP = 10;
+
+		int MaximumHeight = 512;
+	};
+
 	void DrawDebugPanels(
 		OverlayImage &image,
 		const FrameStatistics *statistics,
-		const std::vector<SystemTiming> *systems,
+		ProfilerView *profiler,
 		bool tracyConnected
 	);
-} // namespace gargantuan
+}

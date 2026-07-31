@@ -7,7 +7,7 @@ layout(location = 2) in vec2 VertexUV;
 layout(set = 1, binding = 0) uniform WorldUniforms {
     mat4 ViewMatrix;
     mat4 ProjectionMatrix;
-    mat4 ShadowBiasMatrix;
+    mat4 ShadowClipToUvMatrix;
     vec4 LightDirection;
 } world;
 
@@ -20,14 +20,15 @@ layout(location = 0) out vec3 FragmentNormal;
 layout(location = 1) out vec4 FragmentColor;
 layout(location = 2) out vec4 WorldPosition;
 layout(location = 3) out vec4 ShadowPosition;
+layout(location = 4) out vec2 FragmentUV;
 
 void main() {
-    // NOTE: if u define ANY of the output variables before gl_Position, it
-    // renders black. This shit tookw ay too long to debug
+    // Writing stage outputs before gl_Position renders black on affected drivers.
     gl_Position = world.ProjectionMatrix * world.ViewMatrix * part.ModelMatrix * vec4(VertexPosition, 1.0f);
 
     FragmentNormal = normalize(mat3(part.ModelMatrix) * VertexNormal);
     FragmentColor = part.Color;
     WorldPosition = (part.ModelMatrix * vec4(VertexPosition, 1.0f)).xyzw;
-    ShadowPosition = world.ShadowBiasMatrix * WorldPosition;
+    ShadowPosition = world.ShadowClipToUvMatrix * WorldPosition;
+    FragmentUV = VertexUV;
 }

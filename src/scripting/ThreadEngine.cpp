@@ -1,12 +1,18 @@
 #include "gargantuan/scripting/ThreadEngine.hpp"
 
+#include "gargantuan/Profiler.hpp"
+
 #include <SDL3/SDL_log.h>
-#include <chrono>
+#include <SDL3/SDL_timer.h>
 #include <lua.h>
+#include <stdexcept>
 
 namespace gargantuan {
+	// The same clock the frame is timed on. It used to be steady_clock, which
+	// meant task.wait and the engine's own delta were measured against two
+	// different clocks that need not agree with each other.
 	double GetCurrentTime() {
-		return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+		return (double)SDL_GetTicksNS() / 1000000000.0;
 	};
 
 	ThreadEngine::ThreadEngine(lua_State *mainState) : L(mainState) {
@@ -47,31 +53,42 @@ namespace gargantuan {
 	}
 
 	void ThreadEngine::Step() {
-		auto currentTime = GetCurrentTime();
-		while (!ScheduledQueue.empty() && ScheduledQueue.top().WakeTime <= currentTime) {
-			auto task = ScheduledQueue.top();
-			ScheduledQueue.pop();
+		// The two queues separately: a frame spent resuming task.wait sleepers
+		// and one spent draining task.defer are different problems, and one
+		// number covering both says which frame but not which queue.
+		G_PROFILE("luau.threads");
 
-			switch (task.type) {
-			case ThreadEngine::ScheduledTask::Type::Delay: {
-				ResumeThread(task.Thread, task.ThreadReference, task.ArgumentCount);
-				break;
-			}
-			case ThreadEngine::ScheduledTask::Type::Wait: {
-				double actualWait = currentTime - task.ScheduledTime;
-				lua_pushnumber(task.Thread, actualWait);
-				ResumeThread(task.Thread, task.ThreadReference, 1);
-				break;
-			}
+		auto currentTime = GetCurrentTime();
+		{
+			G_PROFILE("luau.scheduled");
+			while (!ScheduledQueue.empty() && ScheduledQueue.top().WakeTime <= currentTime) {
+				auto task = ScheduledQueue.top();
+				ScheduledQueue.pop();
+
+				switch (task.type) {
+				case ThreadEngine::ScheduledTask::Type::Delay: {
+					ResumeThread(task.Thread, task.ThreadReference, task.ArgumentCount);
+					break;
+				}
+				case ThreadEngine::ScheduledTask::Type::Wait: {
+					double actualWait = currentTime - task.ScheduledTime;
+					lua_pushnumber(task.Thread, actualWait);
+					ResumeThread(task.Thread, task.ThreadReference, 1);
+					break;
+				}
+				}
 			}
 		}
 
-		while (!DeferredQueue.empty()) {
-			std::vector<DeferredTask> currentBatch;
-			currentBatch.swap(DeferredQueue);
+		{
+			G_PROFILE("luau.deferred");
+			while (!DeferredQueue.empty()) {
+				std::vector<DeferredTask> currentBatch;
+				currentBatch.swap(DeferredQueue);
 
-			for (auto &task : currentBatch) {
-				ResumeThread(task.Thread, task.ThreadReference, task.ArgumentCount);
+				for (auto &task : currentBatch) {
+					ResumeThread(task.Thread, task.ThreadReference, task.ArgumentCount);
+				}
 			}
 		}
 	}

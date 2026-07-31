@@ -24,16 +24,10 @@ namespace gargantuan {
 	G_ENUM(
 		UserInputType,
 
-		// The left mouse button.
 		MouseButton1 = 0,
-		// The right mouse button.
 		MouseButton2 = 1,
-		// The middle mouse button.
 		MouseButton3 = 2,
-		// The mouse wheel.
 		MouseWheel = 3,
-		// Fires changed events each time the player's cursor position changes
-		// and when the mouse enters/leaves the game window.
 		MouseMovement = 4,
 
 		Touch = 7,
@@ -267,9 +261,6 @@ namespace gargantuan {
 		bool IsModifierKeyDown(Enums::ModifierKey modifierKey);
 
 		void Reset();
-
-		// Fills an object that already exists, so a pooled instance can be
-		// reused rather than one allocated per event.
 		static bool FillFromEvent(InputObject &object, SDL_Event &event);
 		static std::shared_ptr<InputObject> fromEvent(SDL_Event &event);
 	};

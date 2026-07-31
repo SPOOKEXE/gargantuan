@@ -9,6 +9,6 @@ namespace gargantuan {
 			Pipeline = nullptr;
 		}
 
-		Shader.Destroy(gpu);
+		PassShader.Destroy(gpu);
 	}
 } // namespace gargantuan

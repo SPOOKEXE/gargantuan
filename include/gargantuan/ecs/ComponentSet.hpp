@@ -8,10 +8,6 @@
 namespace gargantuan::ecs {
 	inline constexpr uint32_t InvalidIndex = UINT32_MAX;
 
-	// Every component store keyed by an entity's row index implements this, so
-	// the registry can keep them in step when it swap-removes a row.
-	//
-	// The registry only ever appends or swap-removes, so two hooks cover it.
 	class ComponentSetBase {
 	  public:
 		virtual ~ComponentSetBase() = default;
@@ -20,9 +16,6 @@ namespace gargantuan::ecs {
 		virtual void OnSwapRemove(uint32_t removed, uint32_t last) = 0;
 	};
 
-	// Dense storage: one T per entity, addressed by row index. Use when nearly
-	// every entity in the family has the component and a system walks all of
-	// them.
 	template <typename T> class Column final : public ComponentSetBase {
 	  public:
 		void OnAdd(uint32_t index) override {
@@ -68,11 +61,6 @@ namespace gargantuan::ecs {
 		std::vector<T> Data;
 	};
 
-	// Sparse storage: only the entities that actually have the component, held
-	// contiguously so a system iterating them touches nothing else.
-	//
-	// Membership is meaningful on its own -- Anchored is the absence of a
-	// RigidBody, not a bool on every part.
 	template <typename T> class SparseSet final : public ComponentSetBase {
 	  public:
 		void OnAdd(uint32_t index) override {
@@ -85,8 +73,6 @@ namespace gargantuan::ecs {
 		void OnSwapRemove(uint32_t removed, uint32_t last) override {
 			Remove(removed);
 			if (removed != last) {
-				// The entity that was at `last` now lives at `removed`; rekey
-				// its component rather than dropping it.
 				if (uint32_t slot = Sparse[last]; slot != InvalidIndex) {
 					Keys[slot] = removed;
 					Sparse[removed] = slot;
@@ -143,7 +129,6 @@ namespace gargantuan::ecs {
 			return Data.size();
 		}
 
-		// Parallel arrays: Keys()[i] is the entity row index owning Values()[i].
 		std::span<const uint32_t> EntityKeys() const {
 			return Keys;
 		}
@@ -155,8 +140,8 @@ namespace gargantuan::ecs {
 		}
 
 	  private:
-		std::vector<uint32_t> Sparse; // row index -> slot in Data, or InvalidIndex
-		std::vector<uint32_t> Keys;   // slot -> row index
+		std::vector<uint32_t> Sparse;
+		std::vector<uint32_t> Keys;
 		std::vector<T> Data;
 	};
-} // namespace gargantuan::ecs
+}

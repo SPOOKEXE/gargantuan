@@ -25,16 +25,11 @@ namespace gargantuan {
 	typedef std::string_view Content;
 	typedef std::string_view ContentId;
 
-	// Mouse buttons carry a screen position; keys do not, so the key table is a
-	// byte apiece and this is only used for the three buttons.
 	struct InputState {
 		glm::vec3 Position{0.0f};
 		Enums::UserInputState State = Enums::UserInputState::None;
 	};
 
-	// Recycles the instances that carry an event into Luau. An object is only
-	// reused once nothing else holds it, so a script that kept a reference
-	// keeps a stable object rather than one that mutates under it.
 	class InputObjectPool {
 	  public:
 		std::shared_ptr<InputObject> Acquire();
@@ -46,18 +41,12 @@ namespace gargantuan {
 
 	class UserInputService : public Instance {
 	  protected:
-		// KeyCode runs to 2048 (None), so the table is that wide: one byte a
-		// key, ~2 KB allocated once. IsKeyDown becomes an array index instead
-		// of a hash probe, and a key held down allocates nothing at all -- the
-		// old map kept a whole InputObject alive for every pressed key.
 		static constexpr size_t KeyCodeCount = 2049;
 		static constexpr size_t MouseButtonCount = 3;
 
 		std::array<uint8_t, KeyCodeCount> KeysDown{};
 		std::array<InputState, MouseButtonCount> MouseButtons{};
 
-		// Dense lists of what is currently down, so GetKeysPressed walks the
-		// pressed keys rather than the whole table.
 		std::vector<Enums::KeyCode> PressedKeys;
 		std::vector<Enums::UserInputType> PressedMouseButtons;
 
@@ -101,13 +90,11 @@ namespace gargantuan {
 		bool GamepadEnabled = false;
 		bool GyroscopeEnabled = false;
 
-		// std::shared_ptr<VirtualInput> CreateVirtualInput();
 		bool GamepadSupports(Enums::UserInputType gamepadType, Enums::KeyCode keyCode);
 		std::vector<Enums::UserInputType> GetConnectedGamepads();
 		std::shared_ptr<InputObject> GetDeviceAcceleration();
 		std::shared_ptr<InputObject> GetDeviceGravity();
 		std::tuple<std::shared_ptr<InputObject>, CFrame> GetDeviceRotation();
-		// std::shared_ptr<TextBox> GetFocusedTextBox();
 		bool GetGamepadConnected(Enums::UserInputType gamepadType);
 		std::vector<std::shared_ptr<InputObject>> GetGamepadState(Enums::UserInputType num);
 		ContentId GetImageForKeyCode(Enums::KeyCode keyCode);
@@ -140,8 +127,6 @@ namespace gargantuan {
 
 		G_SIGNAL(LastInputTypeChanged, Enums::UserInputType);
 		G_SIGNAL(PointerAction, PointerActionSignalType);
-		// G_SIGNAL(TextBoxFocused, std::shared_ptr<TextBox>);
-		// G_SIGNAL(TextBoxReleased, std::shared_ptr<TextBox>);
 
 		G_SIGNAL(TouchStarted, InputSignalType);
 		G_SIGNAL(TouchEnded, InputSignalType);

@@ -25,3 +25,6 @@
 [submodule "vendor/flecs"]
 	path = vendor/flecs
 	url = https://github.com/SanderMertens/flecs.git
+[submodule "vendor/stb"]
+	path = vendor/stb
+	url = https://github.com/nothings/stb.git

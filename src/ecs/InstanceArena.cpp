@@ -6,9 +6,7 @@ namespace gargantuan::ecs {
 	void InstanceArena::Configure(size_t size, size_t alignment) {
 		Configured = true;
 
-		// new[] only guarantees the default new alignment. A class that wants
-		// more than that is rare enough to not be worth a hand-aligned chunk,
-		// so the arena bows out and everything falls through to ::operator new.
+		// Over-aligned classes must bypass chunks; new[] guarantees only default alignment.
 		if (alignment > alignof(std::max_align_t)) {
 			Enabled = false;
 			return;
@@ -16,7 +14,7 @@ namespace gargantuan::ecs {
 
 		Enabled = true;
 		BlockSize = size < sizeof(FreeBlock) ? sizeof(FreeBlock) : size;
-		// Round up so every block in a chunk starts aligned.
+		// Preserve alignment for every block.
 		BlockSize = (BlockSize + alignment - 1) / alignment * alignment;
 	}
 
@@ -51,11 +49,9 @@ namespace gargantuan::ecs {
 			return;
 		}
 
-		// Chunks are kept, not returned: a place churning instances reuses the
-		// blocks, and handing pages back only to ask for them again is churn
-		// for its own sake.
+		// Retain chunks so instance churn reuses their blocks.
 		auto *block = (FreeBlock *)pointer;
 		block->Next = FreeList;
 		FreeList = block;
 	}
-} // namespace gargantuan::ecs
+}

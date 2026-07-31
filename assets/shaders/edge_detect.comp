@@ -1,0 +1,40 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform readonly image2D SourceTexture;
+layout(set = 1, binding = 0, rgba8) uniform writeonly image2D OutputTexture;
+
+layout(set = 2, binding = 0) uniform Builtin { vec4 Resolution; vec4 Time; } builtin;
+layout(set = 2, binding = 1) uniform Params {
+    vec4 Strength;
+    vec4 Background;
+} params;
+
+float LumaAt(ivec2 at, ivec2 size) {
+    ivec2 clamped = clamp(at, ivec2(0), size - 1);
+    return dot(imageLoad(SourceTexture, clamped).rgb, vec3(0.2126, 0.7152, 0.0722));
+}
+
+void main() {
+    ivec2 c = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(builtin.Resolution.xy);
+    if (c.x >= size.x || c.y >= size.y) return;
+
+    float tl = LumaAt(c + ivec2(-1, -1), size);
+    float t = LumaAt(c + ivec2(0, -1), size);
+    float tr = LumaAt(c + ivec2(1, -1), size);
+    float l = LumaAt(c + ivec2(-1, 0), size);
+    float r = LumaAt(c + ivec2(1, 0), size);
+    float bl = LumaAt(c + ivec2(-1, 1), size);
+    float b = LumaAt(c + ivec2(0, 1), size);
+    float br = LumaAt(c + ivec2(1, 1), size);
+
+    float gx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);
+    float gy = (bl + 2.0 * b + br) - (tl + 2.0 * t + tr);
+    float edge = clamp(length(vec2(gx, gy)) * params.Strength.x, 0.0, 1.0);
+
+    vec4 source = imageLoad(SourceTexture, c);
+    vec3 colour = source.rgb * params.Background.x + vec3(edge);
+    imageStore(OutputTexture, c, vec4(clamp(colour, 0.0, 1.0), source.a));
+}

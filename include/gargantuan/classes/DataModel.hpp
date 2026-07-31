@@ -8,4 +8,4 @@ namespace gargantuan {
 		static const ClassDefinition DEFINITION;
 		const ServiceConstructors &GetServiceConstructors() const override;
 	};
-} // namespace gargantuan
+}

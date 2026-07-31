@@ -1,5 +1,4 @@
--- Smoke test for the ECS layer. Not a scene: it asserts what the layout change
--- is supposed to guarantee and prints a line per check.
+-- ECS smoke test; prints one result per invariant.
 local Workspace = game:GetService("Workspace")
 
 local failures = 0
@@ -12,14 +11,10 @@ local function check(name, condition)
 	end
 end
 
--- Registry membership --------------------------------------------------------
-
 local direct = Instance.new("Part")
 direct.Name = "Direct"
 direct.Parent = Workspace
 
--- The old WorldRoot hooked ChildAdded, so this one would never have been
--- registered and would never have rendered.
 local holder = Instance.new("Part")
 holder.Name = "Holder"
 holder.Parent = Workspace
@@ -31,8 +26,6 @@ nested.Parent = holder
 check("direct child is in the tree", Workspace:FindFirstChild("Direct") ~= nil)
 check("nested part is in the tree", holder:FindFirstChild("Nested") ~= nil)
 
--- O(1) IsA -------------------------------------------------------------------
-
 check("part IsA Part", direct:IsA("Part"))
 check("part IsA BasePart", direct:IsA("BasePart"))
 check("part IsA Instance", direct:IsA("Instance"))
@@ -42,8 +35,6 @@ check("workspace IsA Instance", Workspace:IsA("Instance"))
 check("game IsA ServiceProvider", game:IsA("ServiceProvider"))
 check("game IsA Instance", game:IsA("Instance"))
 check("unknown class name is false", not direct:IsA("NoSuchClass"))
-
--- Anchored as the absence of a RigidBody --------------------------------------
 
 check("anchored defaults false", direct.Anchored == false)
 direct.Anchored = true
@@ -56,8 +47,6 @@ direct.Parent = nil
 check("anchored survives detach", direct.Anchored == true)
 direct.Parent = Workspace
 check("anchored survives reparent", direct.Anchored == true)
-
--- Lazy signals ---------------------------------------------------------------
 
 local added = 0
 local descendants = 0
@@ -74,8 +63,6 @@ local deep = Instance.new("Part")
 deep.Parent = watched
 check("DescendantAdded reaches nested parts", descendants == 2)
 
--- Properties still write through ----------------------------------------------
-
 direct.Position = Vector3.new(3, 4, 5)
 check("position round-trips", direct.Position.X == 3 and direct.Position.Y == 4 and direct.Position.Z == 5)
 
@@ -90,19 +77,14 @@ check("color round-trips", direct.Color.R == 1 and direct.Color.G == 0)
 
 check("classname", direct.ClassName == "Part")
 
--- Shape is the mesh handle, so a write has to rebuild the render row.
 check("shape defaults to Block", direct.Shape == Enum.PartType.Block)
 direct.Shape = Enum.PartType.Wedge
 check("shape round-trips", direct.Shape == Enum.PartType.Wedge)
-
--- Destroy pulls the row --------------------------------------------------------
 
 local doomed = Instance.new("Part")
 doomed.Parent = Workspace
 doomed:Destroy()
 check("destroyed part has no parent", doomed.Parent == nil)
-
--- Swap-remove keeps the surviving rows addressable -----------------------------
 
 local survivors = {}
 for index = 1, 8 do
@@ -123,8 +105,6 @@ for index, part in survivors do
 end
 check("swap-remove leaves other rows intact", intact)
 
-
--- Input: dense state, no allocation for held keys ----------------------------
 -- Nothing here may assume the keyboard is idle: whatever the user is actually
 -- holding when the window opens is legitimately reported. Assert the invariants
 -- instead.
@@ -154,11 +134,6 @@ for _, input in buttons do
 end
 check("mouse button list agrees with IsMouseButtonPressed", buttonsAgree)
 
--- Second registry user: Lighting over PointLight ------------------------------
--- The point of extracting InstanceRegistry was that a new class declares its
--- data and joins, with no storage code of its own. This is the check that it
--- actually worked for a class it was not written against.
-
 local Lighting = game:GetService("Lighting")
 check("lighting service exists", Lighting ~= nil)
 check("lighting IsA Instance", Lighting:IsA("Instance"))
@@ -184,7 +159,6 @@ check("light colour round-trips", bulb.Color.G == 1)
 bulb.Enabled = false
 check("enabled round-trips", bulb.Enabled == false)
 
--- A light nested below a part still reaches the world's registry.
 local nestedLamp = Instance.new("Part")
 nestedLamp.Name = "NestedLamp"
 nestedLamp.Position = Vector3.new(11, 22, 33)
@@ -196,20 +170,16 @@ check("nested light is in the tree", nestedLamp:FindFirstChild("PointLight") ~= 
 bulb:Destroy()
 check("destroyed light has no parent", bulb.Parent == nil)
 
--- Collision groups: a small integer in a sparse set ---------------------------
-
 check("collision group defaults to Default", direct.CollisionGroup == "Default")
 direct.CollisionGroup = "Players"
 check("collision group round-trips", direct.CollisionGroup == "Players")
 direct.CollisionGroup = "Default"
 check("collision group returns to Default", direct.CollisionGroup == "Default")
 
--- Names are interned, so two parts in the same group share the id.
 holder.CollisionGroup = "Players"
 nested.CollisionGroup = "Players"
 check("group shared across parts", holder.CollisionGroup == nested.CollisionGroup)
 
--- Survives leaving and rejoining the world, like Anchored.
 holder.CollisionGroup = "Scenery"
 holder.Parent = nil
 check("group survives detach", holder.CollisionGroup == "Scenery")
@@ -223,7 +193,6 @@ check("cantouch defaults true", direct.CanTouch == true)
 direct.CanTouch = false
 check("cantouch round-trips", direct.CanTouch == false)
 
--- Solver: box3d bodies exist, and are inert by default ------------------------
 -- Frame counts are useless as a clock here: the engine runs far faster than
 -- SDL's millisecond tick, so most frames carry a zero delta and the solver does
 -- not step on them at all. Wait on elapsed time instead.
@@ -261,23 +230,19 @@ RunService.PreRender:Connect(function()
 		end
 	end
 
-	-- Gravity is zero by default, so a mover must not drift.
 	solverCheck("mover holds position under zero gravity", math.abs(mover.Position.Y - 50) < 0.001)
 	solverCheck("anchored part holds position", math.abs(anchoredPart.Position.Y - 50) < 0.001)
 
-	-- A written CFrame has to beat whatever the solver had.
 	mover.Position = Vector3.new(7, 8, 9)
 	solverCheck("written position wins over the solver", mover.Position.X == 7 and mover.Position.Y == 8)
 	solverCheck("mover is still unanchored", mover.Anchored == false)
 
-	-- Anchoring retires the body; unanchoring builds a new one.
 	mover.Anchored = true
 	solverCheck("anchoring reads back", mover.Anchored == true)
 	mover.Anchored = false
 	solverCheck("unanchoring reads back", mover.Anchored == false)
 	solverCheck("position survives the body being rebuilt", mover.Position.Y == 8)
 
-	-- Massless is InvMass == 0 on the body, not a bool on the part.
 	solverCheck("massless defaults false", mover.Massless == false)
 	mover.Massless = true
 	solverCheck("massless reads back", mover.Massless == true)

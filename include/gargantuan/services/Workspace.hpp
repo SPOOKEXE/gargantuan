@@ -11,6 +11,10 @@ namespace gargantuan {
 		static const ClassDefinition DEFINITION;
 
 		std::shared_ptr<Camera> CurrentCamera = std::make_shared<Camera>();
+
+		float Gravity = 196.2f;
+		double DistributedGameTime = 0.0;
+		float FallenPartsDestroyHeight = -500.0f;
 	};
 
-} // namespace gargantuan
+}
